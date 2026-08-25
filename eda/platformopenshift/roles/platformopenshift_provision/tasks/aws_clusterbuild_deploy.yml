@@ -98,12 +98,33 @@
   changed_when: false
   when: cb_helm_release_exists | bool
 
+- name: Check if cluster is already installed
+  kubernetes.core.k8s_info:
+    host: "{{ central_api_host }}"
+    api_key: "{{ central_bearer_token }}"
+    validate_certs: false
+    api_version: hive.openshift.io/v1
+    kind: ClusterDeployment
+    name: "{{ cb_cluster_name }}"
+    namespace: "{{ cb_cluster_name }}"
+  register: cb_cd_precheck
+  failed_when: false
+
+- name: Set cluster already installed flag
+  ansible.builtin.set_fact:
+    cb_cluster_already_installed: >-
+      {{ (cb_cd_precheck.resources | default([]) | length > 0)
+         and (cb_cd_precheck.resources[0].spec.installed | default(false) | bool) }}
+
 - name: Set values changed flag
   ansible.builtin.set_fact:
     cb_values_changed: >-
-      {{ not (cb_helm_release_exists | bool) or
-         (cb_helm_release_failed | bool) or
-         (values_diff_result.stdout | default('true') | trim == 'true') }}
+      {{ not (cb_cluster_already_installed | default(false) | bool)
+         and (
+           not (cb_helm_release_exists | bool) or
+           (cb_helm_release_failed | bool) or
+           (values_diff_result.stdout | default('true') | trim == 'true')
+         ) }}
 
 - name: Deploy mce-cluster-build chart
   ansible.builtin.command:
@@ -111,7 +132,7 @@
       - helm
       - upgrade
       - "{{ cb_app_name }}"
-      - "oci://{{ lookup('env', 'OCI_HOST') }}/hybrid-sovereign/mce-cluster-build"
+      - "oci://{{ oci_registry_host }}/hybrid-sovereign/mce-cluster-build"
       - --version
       - "{{ mce_cluster_build_chart_version }}"
       - --install
@@ -124,7 +145,7 @@
       - "2"
       - --wait
       - --timeout
-      - "10m"
+      - "45m"
       - --kubeconfig
       - "/tmp/{{ cb_app_name }}-kubeconfig"
   register: helm_deploy_result

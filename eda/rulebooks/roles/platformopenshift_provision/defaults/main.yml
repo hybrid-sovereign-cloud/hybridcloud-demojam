@@ -24,6 +24,7 @@ default_project_domain: "shc_domain"
 vault_init_secret_name: "vault-init-secrets"
 vault_init_secret_namespace: "central-vault"
 vault_init_addr: "http://vault-active.central-vault.svc:8200"
+oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
 mce_cluster_build_chart_version: "0.2.0"
 
 eda_dashboard_host: "https://sovereign-aap-aap.apps.shc-cental5.lab.signal9.gg"

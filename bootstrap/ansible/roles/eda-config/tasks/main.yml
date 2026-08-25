@@ -359,7 +359,7 @@
     rulebook_name: "{{ item.1.file }}"
     decision_environment_name: "de-{{ item.0.name }}"
     organization_name: "{{ eda_organization }}"
-    restart_policy: "on-failure"
+    restart_policy: "always"
     # Rulebooks use ansible.eda.kafka (not Event Streams). Attach AAP + Kafka SASL creds.
     eda_credentials:
       - sovereign-aap-controller-credential
