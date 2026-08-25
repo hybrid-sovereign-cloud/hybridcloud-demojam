@@ -2,7 +2,7 @@
 
 **Scope**: AMQ Streams, Event Forwarder, AAP EDA  
 **API group**: `hybridsovereign.redhat/v1alpha1` (event `regarding.kind`)  
-**Last updated**: 2026-07-14
+**Last updated**: 2026-08-25
 
 ---
 
@@ -11,10 +11,11 @@
 Operators on the services cluster publish normalized event JSON directly to AMQ Streams on the central cluster. Central EDA rulebooks consume from Kafka and dispatch Ansible playbooks via AAP Controller.
 
 1. **Operators** publish to Kafka topic `hybridsovereign-events` (SASL_SSL via external bootstrap Route).
-2. **AMQ Streams** (Kafka) provides the durable event bus.
-3. **AAP EDA** matches events via `ansible.eda.kafka` rulebook activations.
+2. **AMQ Streams** (Kafka) provides the durable event bus (12 partitions on `hybridsovereign-events`, 6 on audit).
+3. **AAP EDA** matches events via `ansible.eda.kafka` rulebook activations with tuned consumer settings (`KAFKA_MAX_POLL_RECORDS=500`, `KAFKA_FETCH_MAX_WAIT_MS=500`).
+4. **Event Forwarder** (optional, `eventForwarder.enabled: true`) bridges Kubernetes Events to the EDA Event Stream for audit visibility.
 
-The legacy Event Forwarder and HTTP EDA Event Stream are **retired** (`eventForwarder.enabled: false`).
+Primary path remains **operator → Kafka → EDA**. Event Forwarder supplements K8s-native events.
 
 ---
 

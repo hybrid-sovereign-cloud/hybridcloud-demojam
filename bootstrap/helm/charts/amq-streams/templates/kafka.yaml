@@ -99,6 +99,14 @@ spec:
       transaction.state.log.min.isr: {{ max 1 (sub .Values.kafka.replicas 1) }}
       default.replication.factor: {{ .Values.kafka.replicas }}
       min.insync.replicas: {{ max 1 (sub .Values.kafka.replicas 1) }}
+      num.network.threads: 8
+      num.io.threads: 16
+      socket.send.buffer.bytes: 1048576
+      socket.receive.buffer.bytes: 1048576
+      socket.request.max.bytes: 104857600
+      message.max.bytes: 10485760
+      replica.fetch.max.bytes: 10485760
+      group.initial.rebalance.delay.ms: 3000
     {{- if .Values.kafka.authorization.enabled }}
     authorization:
       type: simple

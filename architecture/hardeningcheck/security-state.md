@@ -1,7 +1,7 @@
 # Security State — Hybrid Sovereign Cloud
 
-**Retested**: 2026-07-15  
-**Lab**: central `central` · services `services`  
+**Retested**: 2026-08-25  
+**Lab**: central `shc-cental5` · services `shc-services5`  
 **Overall**: Medium risk (lab deviations accepted; production remediations tracked)
 
 Replaces `security-assessment.md` and the June `security-state-2026.md` snapshot.
@@ -18,7 +18,10 @@ Replaces `security-assessment.md` and the June `security-state-2026.md` snapshot
 | Gitea on central only | PASS | `gitea/gitea` Deployment on central |
 | AAP EDA on central only | PASS | `eda/sovereign-aap-eda` on central; services `aap.eda.enabled: false` |
 | AMQ Streams on central | PASS | `hybridsovereign-kafka` Ready 4.2.0 |
-| Event Forwarder disabled | PASS | No forwarder DS/Deploy on services; values `eventForwarder.enabled: false` |
+| Event Forwarder optional | PASS | Re-enabled (`eventForwarder.enabled: true`) for K8s Events → EDA audit path; primary path remains operator→Kafka |
+| AAP Postgres WAL limits | PASS | Central `aap-pgcluster` recovered after WAL disk-full; chart adds `max_wal_size=2GB` |
+| Kafka topic partitions | PASS | `hybridsovereign-events` 12p, `hybridsovereign-audit` 6p (patched live + chart 0.2.4) |
+| ClusterSecretStore services | FAIL | `vault-backend` InvalidProviderConfig — run `vault-k8s-auth` job; blocks tenant ExternalSecrets |
 | IAAC = Python git-sync | PASS | `iaac-git-sync` STS 1/1 in `sovereign-cloud-plugins` |
 | Operators on services | PASS | `hybridsovereign-primary-operator` in `sovereign-cloud` |
 | UI at pinned tags | PASS | See [ui.md](ui.md) — all four ArgoCD apps Synced/Healthy |

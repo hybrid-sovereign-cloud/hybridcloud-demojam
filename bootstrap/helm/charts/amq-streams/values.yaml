@@ -28,10 +28,10 @@ kafka:
 
 topics:
   - name: hybridsovereign-events
-    partitions: 6
+    partitions: 12
     replicas: 3
   - name: hybridsovereign-audit
-    partitions: 3
+    partitions: 6
     replicas: 3
 
 kafkaUsers:

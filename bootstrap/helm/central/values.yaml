@@ -415,7 +415,7 @@ rhacm:
 # ─── AAP (services cluster) ─────────────────────────────────────────────────
 aap:
   enabled: true
-  chartVersion: "0.5.3"
+  chartVersion: "0.5.4"
   syncWave: "30"
   destinationNamespace: aap
   values:
@@ -433,13 +433,13 @@ aap:
       enabled: true
       name: aap-pgcluster
       instances: 2
-      storage: 10Gi
+      storage: 20Gi
       backupStorage: 10Gi
 
 # ─── AAP (central cluster — EDA controller) ────────────────────────────────
 aapCentral:
   enabled: true
-  chartVersion: "0.3.9"
+  chartVersion: "0.5.4"
   syncWave: "30"
   destinationNamespace: aap
   values:
@@ -457,9 +457,9 @@ aapCentral:
       enabled: true
       name: aap-pgcluster
       instances: 2
-      storage: 10Gi
+      storage: 20Gi
       backupStorage: 10Gi
-      syncRunId: "2026-07-15-external-postgres-v7"
+      syncRunId: "2026-08-25-pg-wal-limits"
 
 # ─── Plugin IaaC Operator (services cluster) — Go direct Gitea sync ─────────
 pluginIaac:
@@ -494,10 +494,10 @@ pluginIaac:
       enabled: true
       name: iaac
 
-# ─── Event Forwarder (services cluster) ─────────────────────────────────────
+# ─── Event Forwarder (central cluster — K8s Events → EDA Event Stream) ───────
 eventForwarder:
-  enabled: false
-  chartVersion: "0.5.4"
+  enabled: true
+  chartVersion: "0.5.5"
   syncWave: "32"
   image:
     repository: quay.signal9.gg/hybrid-sovereign/event-forwarder
@@ -1101,7 +1101,7 @@ vaultSecretStoreServices:
     vault:
       server: "https://vault-central.apps.shc-cental5.lab.signal9.gg"
       path: "central"
-      caBundle: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURERENDQWZTZ0F3SUJBZ0lCQVRBTkJna3Foa2lHOXcwQkFRc0ZBREFtTVNRd0lnWURWUVFEREJ0cGJtZHkKWlhOekxXOXdaWEpoZEc5eVFERTNPRE0zTnpnNE9ETXdIaGNOTWpZd056RXhNVFF3T0RBeVdoY05Namd3TnpFdwpNVFF3T0RBeldqQW1NU1F3SWdZRFZRUUREQnRwYm1keVpYTnpMVzl3WlhKaGRHOXlRREUzT0RNM056ZzRPRE13CmdnRWlNQTBHQ1NxR1NJYjNEUUVCQVFVQUE0SUJEd0F3Z2dFS0FvSUJBUURENXJCVnIyeGlhN21mS0pTSEFIN28KbDFubXJONWIvZnFzSFZVSXRrVEFZdGhBRVloTHUwTExoMUJjWTcyWU9sUUxMVk0vdzVNdGVNOW5uYmhza2htYQo0Y0gyREs1NGU3VlJBdWVrSlFCakRscTdOYU00V0M5NzhsSnEyenY2VXdHZ0F2cERYQzRPTWRqc2U5bVhCaVdwCm1qb0tYWS9INjlSVkswOUhHYWgvU0llR05KalFOVnc3UDVFYXpxS3A0dnFWWmh4WlRqblJaWFBaQUxYaTRYWGoKNU9QeXR3K2tjNDBuTW80S2dGK1pGSFJVUDlpN2wyWG5iU2RHeXluNUtZcE0rRGdoaXl2MmNtM3RKWHQ3UTNUdwpiWnlZdWEwU3ZRVTI3NlJpZWZLSklaR2pnOEt6dDV4dW9ib1U2TXB6TzZWZFVNOC9aZ250NUZ6U3JWS3J4dzROCkFnTUJBQUdqUlRCRE1BNEdBMVVkRHdFQi93UUVBd0lDcERBU0JnTlZIUk1CQWY4RUNEQUdBUUgvQWdFQU1CMEcKQTFVZERnUVdCQlM4ekhGYTlFVEFwWFQ3dnBDUzEwNHlBYXBnVGpBTkJna3Foa2lHOXcwQkFRc0ZBQU9DQVFFQQplb0hidUVmaCtWUFBmQUR6SVU2WTEvS05pSnpMYlc4bWdTbmVacFhKQjJYbmtPK1hFUkxuTTVjcXVIc2Fxa3RrCjFsRU5MVDR0ZkRraDdKU0wxOVBkS1BQc25CV3pJV1hVUjFOZW4wTS9CTzlRYjhTSzVtMkR2ZmdwQmpReThWRXIKVVhUY1FvcmhuK1R3MWVtWmd6b2d4aWRhRWViak5YV3JqLzQ5WVZ1V2ZWaFJZcGRSakpCajlRRWxqMnNGUnVjUAo4K3p1TEh4OUpaV0VBVi9MVVFiSzhSWTZSUCtrcllzVi9JRnlPcU1Tc0xMbEdRQmhBNWExSnF3NlRpY2pNdE8xCjdRMTdVOVc1cDBvMFVzN25kaVBWTXp0RnFrZG1JOWI5cFlydVpYNEgwWFdPdTgwNFZwbU0vZjdFUENyYUsvSGoKdVh4cnZFK2R3NFpFNDFhbFhmLzJaQT09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+      caBundle: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZUekNDQkRlZ0F3SUJBZ0lVQWhkVXN1d3N6VXgva0pJMzdnY1M5WkdVbHJBd0RRWUpLb1pJaHZjTkFRRUwKQlFBd1lqRUxNQWtHQTFVRUJoTUNWVk14RVRBUEJnTlZCQWdUQ0VGeWEyRnVjMkZ6TVE4d0RRWURWUVFIRXdaUwpiMmRsY25NeEZUQVRCZ05WQkFvVERGTnBaMjVoYkRrZ1RHRmljekVZTUJZR0ExVUVBeE1QVTJsbmJtRnNPU0JCClEwMUZJRkl6TUI0WERUSTJNRGd4TXpFNE1UQXhNVm9YRFRJMk1URXhNVEU0TVRBME1Wb3dMakVzTUNvR0ExVUUKQXd3aktpNWhjSEJ6TG5Ob1l5MXpaWEoyYVdObGN6VXViR0ZpTG5OcFoyNWhiRGt1WjJjd2dnSWlNQTBHQ1NxRwpTSWIzRFFFQkFRVUFBNElDRHdBd2dnSUtBb0lDQVFDNit2bmtEQngrWEtMaWlXY013R1ZxTkpuNzZoTzgwYUJOClltSjdoMXVhWmhLdmlNem5tdElWeXNLWmh2bkdwQk40M2dzT3hLYlNGRnl0bk0xeWx0K0NuSkpSMXM2NnpyMjkKTXZXMFNVT0dVSk1wTnpaelJzdnRqRStQK3hmTXFGbUxVZkV1OVBtdmN0S1Z4QVZtR0pCYjFkeDdBQ2NuQzNmcwpFbGVpY2NPLzNaZ0xtYVBZaG1paVI4cU5iR1VsTXplRitwOXFwL1MzN0lTOUxHYUVUemMyMHgwMm43VjZXWkZTCjQ0Y2tHUCtUM3BOWFpjcitSWFczNUUvZXZFUmNqdWZGM3gxVGs5SVQxRlpXS25xUkF0VFJLWkpLdnVWdzJ3ckYKNkhNZERKbXhZbVVSdTBmcHIwZWhGWjByL1BaWDVRQTJYbzRtQTQrYTdRWmEwLzhibGtFWUw5bXVobVRuSmFrVApvbXVGeE1ha1FZek5kaEtXcFhha0lHWmhSbDhYc3FpdGFHb2ZCMzk2SEhVdngwbS9sT3ZxY3NOcjkwQXkxZFNsClloZng5N1laUUN6WkdRYm5POWVJa3pyb05zaFpFZm13b1N5NkYxaWpkdHBmSmIxNVhpeHJRUnVHVEJuMjRRL2EKbncrckYwa0Nhb3I0SnpEaUJMK1RmY2l6ZlVZaFEwN1NMbW5WZjEzM2NGeTh0M3UxbU11eC9NMFZUYmNuc3NKagpZZkM2M2xhUDdOeEJUTE9ZM0hmWWZQM001bk9kSHE1YVBDaW9HQjl2RlQzZWlhQ0t3OEkxVytDZFFpRHp0enpXCnVrbDdENXpPZnFWZWtZdWNKZFdMc0NqT0t0RXhoUUVzeHQzRUpZNm8rN28rSUFPWnNHanNvNy80RGppVVlXRFoKR2lDSUhMYWVlUUlEQVFBQm80SUJMekNDQVNzd0RnWURWUjBQQVFIL0JBUURBZ1dnTUIwR0ExVWRKUVFXTUJRRwpDQ3NHQVFVRkJ3TUJCZ2dyQmdFRkJRY0RBakFkQmdOVkhRNEVGZ1FVQjRtd3hIM0NjWXVoRzd6MXVMMzRyQ20wCmZFOHdId1lEVlIwakJCZ3dGb0FVLzdxbjd0SkpQaXp3eE5vci9SRkp4Mk8wUzFFd1B3WUlLd1lCQlFVSEFRRUUKTXpBeE1DOEdDQ3NHQVFVRkJ6QUNoaU5vZEhSd09pOHZjR3RwTG5OcFoyNWhiRGt1WjJjdmFYTnpkV1Z5TDNJegpMbU5sY2pBdUJnTlZIUkVFSnpBbGdpTXFMbUZ3Y0hNdWMyaGpMWE5sY25acFkyVnpOUzVzWVdJdWMybG5ibUZzCk9TNW5aekFUQmdOVkhTQUVEREFLTUFnR0JtZUJEQUVDQVRBMEJnTlZIUjhFTFRBck1DbWdKNkFsaGlOb2RIUncKT2k4dmNHdHBMbk5wWjI1aGJEa3VaMmN2YVhOemRXVnlMM0l6TG1ObGNqQU5CZ2txaGtpRzl3MEJBUXNGQUFPQwpBUUVBR0N1RW5pT2M5OGM4cFhIUXJQcGJLNzlEamRiVEUzMm5YdUZONXphVXFhTjdlVDF4am9aTDFDVTBoNHhHClArS1hJTmJUaXhvdDdPYjRVY0RIdzZGdkdGcy9RenI4RXM5SEY0R29EdVUxaWVnUnVUdmQ3TTFHeVVmck9JL0YKcThhWmFWalpZc3dST1F2SDdxaHora3dZYXhSdjNJU3hIeXg2dkZZL2xVcXAveGFBaW1qU3FlSWlYUjJmS01TZApycHB3OEFMcHpSaW1IWW8xaWlkSStnQVI0alc2d1RYOWlQOE0veU5FM1o0STJKbENqNEpEV1Nudk1od25OSTU5CjRMVkZIY1lwWEJYVGFKMVlvME05M1RHMWpzTVZ2enpPTWxJZThUWHc4M0NtdUdCWmxQMXdOaXJlUnhGNFhOWW8KK0wzQVVEdW53VnR2VXVFMTRIeUFCU2pFa2c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLQpNSUlGbWpDQ0E0S2dBd0lCQWdJVWF5ZjRUcDh2YmlmRURFbFU0aXZYckdQcDY1c3dEUVlKS29aSWh2Y05BUUVMCkJRQXdaakVMTUFrR0ExVUVCaE1DVlZNeEVUQVBCZ05WQkFnTUNFRnlhMkZ1YzJGek1ROHdEUVlEVlFRSERBWlMKYjJkbGNuTXhGVEFUQmdOVkJBb01ERk5wWjI1aGJEa2dUR0ZpY3pFY01Cb0dBMVVFQXd3VFUybG5ibUZzT1NCUwpVMEVnVW05dmRDQllNVEFlRncweU5UQXhNVEl3TmpFME5UQmFGdzB6TlRBeE1UQXdOakUwTlRCYU1HSXhDekFKCkJnTlZCQVlUQWxWVE1SRXdEd1lEVlFRSUV3aEJjbXRoYm5OaGN6RVBNQTBHQTFVRUJ4TUdVbTluWlhKek1SVXcKRXdZRFZRUUtFd3hUYVdkdVlXdzVJRXhoWW5NeEdEQVdCZ05WQkFNVEQxTnBaMjVoYkRrZ1FVTk5SU0JTTXpDQwpBU0l3RFFZSktvWklodmNOQVFFQkJRQURnZ0VQQURDQ0FRb0NnZ0VCQUtGWitMNkZ3a3F4T0djTkNSTDJIVjhqCkdnNksvUHp2K3ZKWEJZc0hTZ0pkSnRuL0dtYUc0dlA1U3FYQnVLSGxHdW5kRVVWMmp2SEl2TUtrTVF4VjhsNTgKc3V4cEIwWjVhc0hOR3ZPVW9qRTdBMVAwWHlTa005OEIrYW5OL1RhWE1RNDhHVFBSTmZjcGNLdFAxSG5IRWxrMQpBQ1duMVRUSWhrclBnTHlHaGhkTlBlaitpM3lSbEUwQm11eFpEQ1Ara3hSYVIxZ1VHbWFLUlZ2V3JwdXRzRUFRCjFueUZRQTA2bzNNVlJpZ1FUTmc1cmtZelRzdkN3cS9Fc3VuL0hYTXAyYTl4Z0RKRERwZGJIOEVxWVRKWmNwVTgKYUpLeW1aRXB3ampJYWtCZnZ2RXg3TG05OVJHWjlqcDBOUDNYTG9RU2hvd3NZNHl5bjg3RWdibzZHSXhoZ05VQwpBd0VBQWFPQ0FVSXdnZ0UrTUIwR0ExVWREZ1FXQkJUL3VxZnUwa2srTFBERTJpdjlFVW5IWTdSTFVUQWZCZ05WCkhTTUVHREFXZ0JSaENMTnFVbml0N0F0SXAyRllOL3YrWHNTZ1VUQVNCZ05WSFJNQkFmOEVDREFHQVFIL0FnRUEKTUE0R0ExVWREd0VCL3dRRUF3SUJoakFkQmdOVkhTVUVGakFVQmdnckJnRUZCUWNEQVFZSUt3WUJCUVVIQXdJdwpQd1lJS3dZQkJRVUhBUUVFTXpBeE1DOEdDQ3NHQVFVRkJ6QUNoaU5vZEhSd09pOHZjR3RwTG5OcFoyNWhiRGt1CloyY3ZhWE56ZFdWeUwzZ3hMbU5sY2pCRkJnTlZIU0FFUGpBOE1Eb0dCbWVCREFFQ0FUQXdNQzRHQ0NzR0FRVUYKQndJQkZpSm9kSFJ3T2k4dmNHdHBMbk5wWjI1aGJEa3VaMmN2Wkc4dGJtOTBMWFJ5ZFhOME1ERUdBMVVkSHdRcQpNQ2d3SnFBa29DS0dJR2gwZEhBNkx5OXdhMmt1YzJsbmJtRnNPUzVuWnk5amNtd3ZlREV1WTNKc01BMEdDU3FHClNJYjNEUUVCQ3dVQUE0SUNBUUEvVVBuaUM2WnRwWU5jVC9CSTBQNjVjbUI3ZmRZaVptRDNnQWg5QkpNVll4NncKWit3bHBNV3NZWE1hc1JoSTlteGxOdVJFNzFoUkh5bm9yaDN0K0xId1hSN0xZRXNZMTZyOFdRMjF4dWFrNm5TNApsNk04UThsNWxFMDhLOXQvNEViSDZpWkFYTjdGRi9DNkZNeGxDNGRoQ0ZVeUF4WmR2aUVxM2ZoazRFTGFzd1Z4CldDUnc5M2FGeDNvR3h0L3ZQbWEzQTJWMmxBNGlIM3BpZVN2b3FPN2ZGT3U4anlGdEJXbWFzK3ZjcWN3Y2RCa3oKSElJVFUyeFA5SGREVWgrZGIrVzJLY3k4R0tXRENneUt5U1E5b0dJVG0rWDRNL1gzL3gvTFc3WVFWcEgraGVLNwo2cEdsTDJ0ZDhIMktwaWNENU1hTHI5N0NrWG1GV0FoQWZycVY1UXl1UW52VHBqM25ub1ZCVGRaNHhqRUNTQ2RCCnZ6RUZHQ3cvdENWbCt0UXFNRjNHRXNQSjNuZlZHVmZUSmNJeFEvT2hlUVY3TXl4U3ZXVjBnSkpMRVpLcFE2WjQKZkZkNGZ6M2l1dEl3SlBtUGFUQ0hNY0ZHVVQ2S0JnVFdZU3RMbEFoY0JpSDVWSDVmWUtuMGMxTUVvVU44UndsagpIRkt0ZUtBRDQ0M1U0aGNxWnhhV3llQkFHWW1kR1NnclZKOXV0V3h4Ym84M3NVMjJrMVRxM2ZlcFI2YjZZdjg2ClI0UVpnc1pXeG1wem1oUkY5dU01VTNZZm16d2cyajVNWVBKZnEraHZ3QjNWMlA0SkRsbzZQRDViZHVjc3hFdzkKMkgrVG96NTcxcGdYTS9WR1ZJb21kSjR4NVdic0VDTXFqbnlaMzF2VzZSYXlCYm41MGZEcEVDaWM2ZndDc2c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=="
     auth:
       type: kubernetes
       mountPath: "kubernetes-services"
@@ -1908,6 +1908,12 @@ sovereignJobs:
           value: "hybridsovereign-events"
         - name: KAFKA_CONSUMER_GROUP
           value: "eda-sovereign-operators"
+        - name: KAFKA_MAX_POLL_RECORDS
+          value: "500"
+        - name: KAFKA_FETCH_MAX_WAIT_MS
+          value: "500"
+        - name: KAFKA_SESSION_TIMEOUT_MS
+          value: "45000"
         - name: KAFKA_SECURITY_PROTOCOL
           value: "SASL_SSL"
         - name: KAFKA_SASL_MECHANISM
@@ -2545,14 +2551,14 @@ tenancyDashboard:
 # ─── Sovereign Admin Console Plugin (services cluster) ───────────────────────
 sovereignAdminPlugin:
   enabled: true
-  chartVersion: "0.1.25"
+  chartVersion: "0.1.28"
   syncWave: "42"
   destinationNamespace: sovereign-cloud
   values:
     namespace: sovereign-cloud
     image:
       repository: quay.signal9.gg/hybrid-sovereign/sovereign-admin-plugin
-      tag: "1.2.15"
+      tag: "1.2.20"
       pullPolicy: Always
     imagePullSecrets:
       - name: quay-pull-secret
@@ -2561,6 +2567,11 @@ sovereignAdminPlugin:
       displayName: "Sovereign Cloud"
     service:
       port: 9001
+    proxy:
+      - alias: uihealth
+        service:
+          name: sovereign-cloud-dashboard
+          port: 8443
 
 # ─── Sovereign Tenant Console Plugin (services cluster) ──────────────────────
 sovereignTenantPlugin:
@@ -2572,7 +2583,7 @@ sovereignTenantPlugin:
     namespace: sovereign-cloud
     image:
       repository: quay.signal9.gg/hybrid-sovereign/sovereign-tenant-plugin
-      tag: "1.3.13"
+      tag: "1.3.15"
       pullPolicy: Always
     imagePullSecrets:
       - name: quay-pull-secret
@@ -2638,7 +2649,7 @@ acmBasechart:
 # ─── AMQ Streams (central cluster) ───────────────────────────────────────────
 amqStreams:
   enabled: true
-  chartVersion: "0.2.3"
+  chartVersion: "0.2.4"
   syncWave: "13"
   destinationNamespace: amq-streams
   values:
