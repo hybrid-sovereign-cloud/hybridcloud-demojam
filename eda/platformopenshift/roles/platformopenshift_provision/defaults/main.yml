@@ -6,9 +6,11 @@ oso_central_sa_secret_name: osohelper-creator-sa
 central_sa_secret_namespace: sovereign-cloud
 eda_central_work_namespace: sovereign-cloud-jobs
 keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.services-rhbk.svc:8080', true) }}"
-keycloak_external_url: "{{ lookup('env', 'KEYCLOAK_EXTERNAL_URL') }}"
+keycloak_external_url: "{{ lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default(lookup('env', 'RHBK_SERVICES_URL') | default('', true), true) }}"
+keycloak_api_url: "{{ keycloak_external_url if (keycloak_external_url | length > 0) else keycloak_internal_url }}"
 keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sovereign-tenants', true) }}"
-keycloak_admin_secret_name: "rhbk-admin-credentials"
+keycloak_admin_secret_name: "rhbk-services-initial-admin"
+keycloak_admin_secret_namespace: "services-rhbk"
 
 default_pull_secret_vault_path: "aws/ocp-pull-secret"
 default_ssh_key_vault_path: "aws/ocp-ssh-key"
@@ -23,7 +25,8 @@ default_project_domain: "shc_domain"
 
 vault_init_secret_name: "vault-init-secrets"
 vault_init_secret_namespace: "central-vault"
-vault_init_addr: "http://vault-active.central-vault.svc:8200"
+vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault-active.central-vault.svc:8200', true) }}"
+oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
 mce_cluster_build_chart_version: "0.2.0"
 
 eda_dashboard_host: "https://sovereign-aap-aap.apps.shc-cental5.lab.signal9.gg"
