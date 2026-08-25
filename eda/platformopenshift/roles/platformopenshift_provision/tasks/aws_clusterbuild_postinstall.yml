@@ -103,15 +103,15 @@
     - name: Identify duplicate subdomain zones sorted by record count
       ansible.builtin.set_fact:
         cb_duplicate_zones: >-
-          {{ (r53_zones_post_install.HostedZones
-              | selectattr('Name', 'equalto', cb_subdomain_zone_name)
-              | sort(attribute='ResourceRecordSetCount')
+          {{ (r53_zones_post_install.hosted_zones
+              | selectattr('name', 'equalto', cb_subdomain_zone_name)
+              | sort(attribute='resource_record_set_count')
               | list) }}
 
     - name: Delete duplicate subdomain zones with fewer records
       amazon.aws.route53_zone:
         zone: "{{ cb_cluster_domain }}"
-        hosted_zone_id: "{{ item.Id | regex_replace('^/hostedzone/', '') }}"
+        hosted_zone_id: "{{ item.id | regex_replace('^/hostedzone/', '') }}"
         state: absent
       loop: "{{ cb_duplicate_zones[:-1] }}"
       environment:
