@@ -15,7 +15,7 @@ spec:
     replicas: 1
     {{- if .Values.postgres.enabled }}
     database:
-      host: {{ .Values.postgres.name | default "aap-pgcluster" }}-primary.{{ .Values.namespace }}.svc
+      host: {{ .Values.postgres.name | default "aap-pgcluster" }}-ha.{{ .Values.namespace }}.svc
       port: 5432
       name: aap
       sslmode: prefer

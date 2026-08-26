@@ -8,6 +8,9 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "4"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    {{- if .Values.postgres.syncRunId }}
+    postgres-operator.crunchydata.com/reconcile: {{ .Values.postgres.syncRunId | quote }}
+    {{- end }}
 spec:
   postgresVersion: 16
   patroni:

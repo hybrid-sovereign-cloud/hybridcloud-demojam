@@ -415,7 +415,7 @@ rhacm:
 # ─── AAP (services cluster) ─────────────────────────────────────────────────
 aap:
   enabled: true
-  chartVersion: "0.5.4"
+  chartVersion: "0.5.5"
   syncWave: "30"
   destinationNamespace: aap
   values:
@@ -439,7 +439,7 @@ aap:
 # ─── AAP (central cluster — EDA controller) ────────────────────────────────
 aapCentral:
   enabled: true
-  chartVersion: "0.5.4"
+  chartVersion: "0.5.5"
   syncWave: "30"
   destinationNamespace: aap
   values:
@@ -456,10 +456,10 @@ aapCentral:
     postgres:
       enabled: true
       name: aap-pgcluster
-      instances: 2
+      instances: 1
       storage: 20Gi
       backupStorage: 10Gi
-      syncRunId: "2026-08-25-pg-wal-limits"
+      syncRunId: "2026-08-26-pg-primary-endpoint-fix"
 
 # ─── Plugin IaaC Operator (services cluster) — Go direct Gitea sync ─────────
 pluginIaac:
@@ -2680,7 +2680,7 @@ hybridsovereignPrimaryOperator:
     namespaceOperator:
       image:
         repository: quay.signal9.gg/hybrid-sovereign/hybridsovereign-namespace-operator
-        tag: "0.1.9"
+        tag: "0.1.10"
     amqKafka:
       enabled: true
       vaultPath: amq-producer

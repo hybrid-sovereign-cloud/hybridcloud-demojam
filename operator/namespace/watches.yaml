@@ -15,6 +15,7 @@
   kind: Assignment
   role: assignment
   maxConcurrentReconciles: 10
+  reconcileInterval: 300s
   watchAnnotationsChanges: true
   finalizer:
     name: hybridsovereign.redhat/assignment-cleanup
@@ -28,6 +29,7 @@
     name: projects.hybridsovereign.redhat/finalizer
     role: project_finalizer
   maxConcurrentReconciles: 10
+  reconcileInterval: 300s
   watchAnnotationsChanges: true
 
 - version: v1alpha1
@@ -38,6 +40,7 @@
     name: personas.hybridsovereign.redhat/finalizer
     role: persona_finalizer
   maxConcurrentReconciles: 10
+  reconcileInterval: 300s
   watchAnnotationsChanges: true
 
 - version: v1alpha1
@@ -90,6 +93,7 @@
   group: hybridsovereign.redhat
   kind: Rbac
   role: rbac
+  reconcileInterval: 300s
   watchAnnotationsChanges: true
   finalizer:
     name: rbacs.hybridsovereign.redhat/finalizer
