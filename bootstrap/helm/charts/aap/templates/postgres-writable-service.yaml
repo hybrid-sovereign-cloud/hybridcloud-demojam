@@ -1,0 +1,23 @@
+{{- if .Values.postgres.enabled }}
+---
+# Workaround: Crunchy -primary/-ha services can advertise a stale ClusterIP in
+# Endpoints after failover. This service selects the current Patroni master pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.postgres.name | default "aap-pgcluster" }}-writable
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: postgres-writable
+    app.kubernetes.io/part-of: {{ .Values.name | default "sovereign-aap" }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  selector:
+    postgres-operator.crunchydata.com/cluster: {{ .Values.postgres.name | default "aap-pgcluster" }}
+    postgres-operator.crunchydata.com/data: postgres
+    postgres-operator.crunchydata.com/role: master
+{{- end }}

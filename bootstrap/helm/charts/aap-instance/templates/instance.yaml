@@ -18,7 +18,7 @@ spec:
     replicas: {{ .Values.controller.replicas | default 1 }}
     {{- if .Values.postgres.enabled }}
     database:
-      host: {{ printf "%s-primary.%s.svc" (.Values.postgres.name | default "aap-pgcluster") .Values.namespace }}
+      host: {{ printf "%s-writable.%s.svc" (.Values.postgres.name | default "aap-pgcluster") .Values.namespace }}
       port: 5432
       name: controller
       sslmode: prefer

@@ -457,9 +457,9 @@ aapCentral:
       enabled: true
       name: aap-pgcluster
       instances: 1
-      storage: 20Gi
+      storage: 40Gi
       backupStorage: 10Gi
-      syncRunId: "2026-08-26-pg-primary-endpoint-fix"
+      syncRunId: "2026-08-26-pg-wal-disk-fix"
 
 # ─── Plugin IaaC Operator (services cluster) — Go direct Gitea sync ─────────
 pluginIaac:
