@@ -24,3 +24,9 @@ service:
 plugin:
   name: sovereign-admin-plugin
   displayName: "Sovereign Cloud"
+
+proxy:
+  - alias: uihealth
+    service:
+      name: sovereign-cloud-dashboard
+      port: 8443

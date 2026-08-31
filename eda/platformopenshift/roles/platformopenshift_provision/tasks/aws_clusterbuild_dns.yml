@@ -117,19 +117,17 @@
          | selectattr('Name', 'search', cb_cluster_name + '\.')
          | list }}
 
-- name: Delete stale A records from child subdomain zone
+- name: Delete stale alias A records from child subdomain zone
   amazon.aws.route53:
     state: absent
     zone: "{{ cb_cluster_domain }}"
     hosted_zone_id: "{{ cb_subdomain_zone_id }}"
     record: "{{ item.Name | regex_replace('\\.$', '') }}"
     type: A
-    alias: "{{ item.AliasTarget is defined }}"
-    alias_hosted_zone_id: "{{ item.AliasTarget.HostedZoneId | default(omit) }}"
-    alias_dns_name: "{{ item.AliasTarget.DNSName | default(omit) }}"
-    value: "{{ item.ResourceRecords | map(attribute='Value') | list | default(omit) }}"
-    ttl: "{{ item.TTL | default(omit) }}"
-  loop: "{{ cb_stale_a_records_child }}"
+    alias: true
+    alias_hosted_zone_id: "{{ item.AliasTarget.HostedZoneId }}"
+    alias_dns_name: "{{ item.AliasTarget.DNSName }}"
+  loop: "{{ cb_stale_a_records_child | selectattr('AliasTarget', 'defined') | list }}"
   environment:
     AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
     AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
@@ -137,19 +135,51 @@
   when: cb_stale_a_records_child | length > 0
   ignore_errors: true
 
-- name: Delete stale A records from install zone
+- name: Delete stale non-alias A records from child subdomain zone
+  amazon.aws.route53:
+    state: absent
+    zone: "{{ cb_cluster_domain }}"
+    hosted_zone_id: "{{ cb_subdomain_zone_id }}"
+    record: "{{ item.Name | regex_replace('\\.$', '') }}"
+    type: A
+    value: "{{ item.ResourceRecords | map(attribute='Value') | list }}"
+    ttl: "{{ item.TTL }}"
+  loop: "{{ cb_stale_a_records_child | rejectattr('AliasTarget', 'defined') | list }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+    AWS_DEFAULT_REGION: "{{ cb_region }}"
+  when: cb_stale_a_records_child | length > 0
+  ignore_errors: true
+
+- name: Delete stale alias A records from install zone
   amazon.aws.route53:
     state: absent
     zone: "{{ cb_install_base_domain }}"
     hosted_zone_id: "{{ cb_install_zone_id }}"
     record: "{{ item.Name | regex_replace('\\.$', '') }}"
     type: A
-    alias: "{{ item.AliasTarget is defined }}"
-    alias_hosted_zone_id: "{{ item.AliasTarget.HostedZoneId | default(omit) }}"
-    alias_dns_name: "{{ item.AliasTarget.DNSName | default(omit) }}"
-    value: "{{ item.ResourceRecords | map(attribute='Value') | list | default(omit) }}"
-    ttl: "{{ item.TTL | default(omit) }}"
-  loop: "{{ cb_stale_a_records_parent }}"
+    alias: true
+    alias_hosted_zone_id: "{{ item.AliasTarget.HostedZoneId }}"
+    alias_dns_name: "{{ item.AliasTarget.DNSName }}"
+  loop: "{{ cb_stale_a_records_parent | selectattr('AliasTarget', 'defined') | list }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+    AWS_DEFAULT_REGION: "{{ cb_region }}"
+  when: cb_stale_a_records_parent | length > 0 and cb_install_zone_id != ''
+  ignore_errors: true
+
+- name: Delete stale non-alias A records from install zone
+  amazon.aws.route53:
+    state: absent
+    zone: "{{ cb_install_base_domain }}"
+    hosted_zone_id: "{{ cb_install_zone_id }}"
+    record: "{{ item.Name | regex_replace('\\.$', '') }}"
+    type: A
+    value: "{{ item.ResourceRecords | map(attribute='Value') | list }}"
+    ttl: "{{ item.TTL }}"
+  loop: "{{ cb_stale_a_records_parent | rejectattr('AliasTarget', 'defined') | list }}"
   environment:
     AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
     AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"

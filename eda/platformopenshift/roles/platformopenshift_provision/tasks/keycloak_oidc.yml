@@ -58,7 +58,7 @@
     api_version: v1
     kind: Secret
     name: "{{ keycloak_admin_secret_name }}"
-    namespace: "{{ platformopenshift_operator_namespace }}"
+    namespace: "{{ keycloak_admin_secret_namespace | default(platformopenshift_operator_namespace) }}"
   register: _kc_admin_secret
   when: not (skip_oidc_setup | bool)
   no_log: true
@@ -79,7 +79,7 @@
 
 - name: Get Keycloak admin token
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/realms/master/protocol/openid-connect/token"
+    url: "{{ keycloak_api_url }}/realms/master/protocol/openid-connect/token"
     method: POST
     body_format: form-urlencoded
     body:
@@ -102,7 +102,7 @@
 
 - name: Check if OIDC client already exists
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ ocp_oidc_client_id }}"
+    url: "{{ keycloak_api_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ ocp_oidc_client_id }}"
     method: GET
     headers:
       Authorization: "Bearer {{ _kc_token.json.access_token }}"
@@ -113,7 +113,7 @@
 
 - name: Create OIDC client in Keycloak for OpenShift cluster
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/admin/realms/{{ keycloak_realm }}/clients"
+    url: "{{ keycloak_api_url }}/admin/realms/{{ keycloak_realm }}/clients"
     method: POST
     headers:
       Authorization: "Bearer {{ _kc_token.json.access_token }}"
@@ -144,7 +144,7 @@
 
 - name: Get OIDC client UUID
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ ocp_oidc_client_id }}"
+    url: "{{ keycloak_api_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ ocp_oidc_client_id }}"
     method: GET
     headers:
       Authorization: "Bearer {{ _kc_token.json.access_token }}"
@@ -155,7 +155,7 @@
 
 - name: Get OIDC client secret
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ _kc_client_info.json[0].id }}/client-secret"
+    url: "{{ keycloak_api_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ _kc_client_info.json[0].id }}/client-secret"
     method: GET
     headers:
       Authorization: "Bearer {{ _kc_token.json.access_token }}"
@@ -167,7 +167,7 @@
 
 - name: Add groups mapper to OIDC client (if not present)
   ansible.builtin.uri:
-    url: "{{ keycloak_internal_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ _kc_client_info.json[0].id }}/protocol-mappers/models"
+    url: "{{ keycloak_api_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ _kc_client_info.json[0].id }}/protocol-mappers/models"
     method: POST
     headers:
       Authorization: "Bearer {{ _kc_token.json.access_token }}"
@@ -328,9 +328,8 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies/{{ cluster_name }}-keycloak-oidc"
     method: GET
     headers:
-      Authorization: "Bearer {{ central_token }}"
-    validate_certs: true
-    ca_path: /tmp/central-ca.crt
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
+    validate_certs: false
     status_code: [200, 404]
   when: not (skip_oidc_setup | bool)
   register: _acm_policy_exists
@@ -340,12 +339,11 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body: "{{ acm_oidc_policy }}"
-    validate_certs: true
-    ca_path: /tmp/central-ca.crt
+    validate_certs: false
     status_code: [200, 201]
   when:
     - not (skip_oidc_setup | bool)
@@ -357,13 +355,12 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies/{{ cluster_name }}-keycloak-oidc"
     method: PATCH
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/merge-patch+json
     body_format: json
     body:
       spec: "{{ acm_oidc_policy.spec }}"
-    validate_certs: true
-    ca_path: /tmp/central-ca.crt
+    validate_certs: false
     status_code: [200]
   when:
     - not (skip_oidc_setup | bool)
@@ -374,12 +371,11 @@
     url: "{{ central_api_server }}/apis/cluster.open-cluster-management.io/v1beta1/namespaces/openshift-gitops/placements"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body: "{{ acm_oidc_placement }}"
-    validate_certs: true
-    ca_path: /tmp/central-ca.crt
+    validate_certs: false
     status_code: [200, 201, 409]
   when: not (skip_oidc_setup | bool)
 
@@ -388,12 +384,11 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/placementbindings"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body: "{{ acm_oidc_binding }}"
-    validate_certs: true
-    ca_path: /tmp/central-ca.crt
+    validate_certs: false
     status_code: [200, 201, 409]
   when: not (skip_oidc_setup | bool)
 

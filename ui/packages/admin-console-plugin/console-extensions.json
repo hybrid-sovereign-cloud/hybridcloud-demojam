@@ -74,113 +74,61 @@
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/section",
     "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/overview",
-      "component": {
-        "$codeRef": "AdminOverviewPage"
-      }
+      "id": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Tenancy"
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/href",
     "properties": {
-      "exact": true,
-      "path": "/hybridsovereign",
-      "component": {
-        "$codeRef": "AdminOverviewPage"
-      }
+      "id": "hybridsovereign-teams",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Teams",
+      "href": "/hybridsovereign/teams"
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/href",
     "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/entities",
-      "component": {
-        "$codeRef": "AdminEntitiesPage"
-      }
+      "id": "hybridsovereign-projects",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Projects",
+      "href": "/hybridsovereign/projects"
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/href",
     "properties": {
-      "exact": false,
-      "path": "/hybridsovereign/entities/:name",
-      "component": {
-        "$codeRef": "AdminEntityDetailPage"
-      }
+      "id": "hybridsovereign-platforms",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Platform Openshift",
+      "href": "/hybridsovereign/platforms"
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/href",
     "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/create/:kind",
-      "component": {
-        "$codeRef": "AdminCreatePage"
-      }
+      "id": "hybridsovereign-clouds",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Cloud Environments",
+      "href": "/hybridsovereign/clouds"
     }
   },
   {
-    "type": "console.page/route",
+    "type": "console.navigation/href",
     "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/personas",
-      "component": {
-        "$codeRef": "AdminPersonasPage"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "exact": false,
-      "path": "/hybridsovereign/personas/:namespace/:name",
-      "component": {
-        "$codeRef": "AdminPersonaDetailPage"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/services",
-      "component": {
-        "$codeRef": "AdminServicesPage"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "exact": false,
-      "path": "/hybridsovereign/services/:namespace/:name",
-      "component": {
-        "$codeRef": "AdminServiceDetailPage"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "exact": true,
-      "path": "/hybridsovereign/operators",
-      "component": {
-        "$codeRef": "AdminOperatorsPage"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "exact": false,
-      "path": "/hybridsovereign/operators/:namespace/:name",
-      "component": {
-        "$codeRef": "AdminOperatorDetailPage"
-      }
+      "id": "hybridsovereign-assignments",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Assignments",
+      "href": "/hybridsovereign/assignments"
     }
   },
   {
@@ -229,6 +177,366 @@
       "perspective": "hybridsovereign",
       "name": "UI Health",
       "href": "/hybridsovereign/networking/uihealth"
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/overview",
+      "component": {
+        "$codeRef": "AdminOverviewPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign",
+      "component": {
+        "$codeRef": "AdminOverviewPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/entities",
+      "component": {
+        "$codeRef": "AdminEntitiesPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/entities/:name",
+      "component": {
+        "$codeRef": "AdminEntityDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/create/:kind",
+      "component": {
+        "$codeRef": "AdminCreatePage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/personas",
+      "component": {
+        "$codeRef": "AdminPersonasPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/personas/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminPersonaDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services",
+      "component": {
+        "$codeRef": "AdminServicesPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/aaporgs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminAAPOrgDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/aapconfigs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminAAPConfigDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/quayorgs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminQuayOrgDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/quayconfigs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminQuayConfigDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/vaults/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminVaultDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/services/vaultkvs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminVaultKVDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/operators",
+      "component": {
+        "$codeRef": "AdminOperatorsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/operators/rbacs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminRbacDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/operators/rbacconfigs/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminRbacConfigDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/teams",
+      "component": {
+        "$codeRef": "AdminTeamsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/teams/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminTeamDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/projects",
+      "component": {
+        "$codeRef": "AdminProjectsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/projects/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminProjectDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/platforms",
+      "component": {
+        "$codeRef": "AdminPlatformsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/platforms/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminPlatformDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/clouds",
+      "component": {
+        "$codeRef": "AdminCloudsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/clouds/cloudoso/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminCloudOSODetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/clouds/cloudaws/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminCloudAWSDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/assignments",
+      "component": {
+        "$codeRef": "AdminAssignmentsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/assignments/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminAssignmentDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/fabrics",
+      "component": {
+        "$codeRef": "AdminHybridFabricsPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/fabrics/:name",
+      "component": {
+        "$codeRef": "AdminHybridFabricDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/gateways",
+      "component": {
+        "$codeRef": "AdminCloudGatewaysPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/gateways/:name",
+      "component": {
+        "$codeRef": "AdminCloudGatewayDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/transport",
+      "component": {
+        "$codeRef": "AdminTransportLinksPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/transport/:name",
+      "component": {
+        "$codeRef": "AdminTransportLinkDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/uihealth",
+      "component": {
+        "$codeRef": "AdminUIHealthPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/networking/uihealth/:name",
+      "component": {
+        "$codeRef": "AdminUIHealthCheckerDetailPage"
+      },
+      "exact": false
     }
   }
 ]

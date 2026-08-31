@@ -43,34 +43,38 @@ const TenantOverviewPage: React.FC = () => {
         <PageHeader
           title="Entity Overview"
           subtitle="Tenant-scoped health and live topology"
-          breadcrumbs={[{ label: t('nav.sovereignCloud') }, { label: 'Tenancy' }, { label: t('pages.overviewTitle') }]}
+          breadcrumbs={[
+            { label: t('nav.sovereignCloud') },
+            { label: t('nav.tenancy') },
+            { label: t('pages.overviewTitle') },
+          ]}
         />
         <div className="sc-inventory-grid sc-mb">
           <InventoryCard
             title={t('nav.teams')}
             count={teams.items.length}
-            hint={`${ready(teams.items)} ready`}
+            hint={`${ready(teams.items)} ${t('status.ready')}`}
             kind="Team"
             href="/hybridsovereign/tenant/teams"
           />
           <InventoryCard
             title={t('nav.projects')}
             count={projects.items.length}
-            hint={`${ready(projects.items)} ready`}
+            hint={`${ready(projects.items)} ${t('status.ready')}`}
             kind="Project"
             href="/hybridsovereign/tenant/projects"
           />
           <InventoryCard
-            title="Platforms"
+            title={t('nav.platformOpenshift')}
             count={platforms.items.length}
-            hint={`${ready(platforms.items)} ready`}
+            hint={`${ready(platforms.items)} ${t('status.ready')}`}
             kind="PlatformOpenshift"
             href="/hybridsovereign/tenant/platforms"
           />
           <InventoryCard
             title={t('nav.assignments')}
             count={assignments.items.length}
-            hint={`${ready(assignments.items)} ready`}
+            hint={`${ready(assignments.items)} ${t('status.ready')}`}
             kind="Assignment"
             href="/hybridsovereign/tenant/assignments"
           />

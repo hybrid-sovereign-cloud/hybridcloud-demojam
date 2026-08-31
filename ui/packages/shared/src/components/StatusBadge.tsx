@@ -14,7 +14,7 @@ import {
   SyncAltIcon,
   OutlinedQuestionCircleIcon,
 } from '@patternfly/react-icons';
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from '../i18n';
 
 export type ResourceHealth = 'ready' | 'pending' | 'failed' | 'reconciling' | 'unknown';
 

@@ -8,7 +8,7 @@ import {
 } from '@patternfly/react-core';
 import { ExternalLinkAltIcon } from '@patternfly/react-icons';
 import { Table, Thead, Tr, Th, Tbody, Td, ExpandableRowContent } from '@patternfly/react-table';
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from '../i18n';
 import type { HybridSovereignKind, K8sResource } from '../types/crds';
 import { KindIcon } from '../icons/kindIcons';
 import { StatusBadge } from './StatusBadge';

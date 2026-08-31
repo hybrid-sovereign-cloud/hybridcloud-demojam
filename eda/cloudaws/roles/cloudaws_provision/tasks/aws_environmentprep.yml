@@ -39,6 +39,18 @@
     ep_domain: "{{ ep_slug }}.{{ ep_base_domain }}"
     ep_region: "{{ ep_spec.region | default(default_aws_region) }}"
 
+- name: Check for pre-existing AWS credentials secret
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Secret
+    name: "eda-cloudaws-{{ cloudaws_cr_name }}-aws-creds"
+    namespace: "{{ cloudaws_operator_namespace }}"
+  register: aws_creds_preflight
+  failed_when: false
+
 - name: Create temporary ExternalSecret for AWS credentials
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
@@ -75,6 +87,10 @@
             remoteRef:
               key: "{{ ep_vault_path }}"
               property: ACCOUNT_ID
+  when: >-
+    aws_creds_preflight.resources | default([]) | length == 0 or
+    aws_creds_preflight.resources[0].data is not defined or
+    'ACCOUNT_ID' not in aws_creds_preflight.resources[0].data
 
 - name: Wait for AWS credentials secret to sync
   kubernetes.core.k8s_info:
@@ -88,7 +104,8 @@
   register: aws_creds_secret
   until: >-
     aws_creds_secret.resources | length > 0 and
-    aws_creds_secret.resources[0].data is defined
+    aws_creds_secret.resources[0].data is defined and
+    'ACCOUNT_ID' in aws_creds_secret.resources[0].data
   retries: 30
   delay: 10
 

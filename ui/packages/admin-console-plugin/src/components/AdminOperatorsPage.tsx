@@ -1,5 +1,26 @@
-import { makeKindListPage } from './AdminEntitiesPage';
+import * as React from 'react';
+import { PageSection } from '@patternfly/react-core';
+import { useTranslation } from '@hybridsovereign/shared';
+import { AdminResourceListPage } from './AdminResourceListPage';
+import '@hybridsovereign/shared/styles/openshift.css';
 
-export default makeKindListPage('RbacConfig', 'Operators', {
-  listPath: '/hybridsovereign/operators',
-});
+const AdminOperatorsPage: React.FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <PageSection className="sc-console-page">
+      <div className="sc-page">
+        <AdminResourceListPage
+          kind="Rbac"
+          title={t('nav.operators')}
+          subtitle={t('pages.operatorsSubtitle')}
+          secondaryKind="RbacConfig"
+          listPath="/hybridsovereign/operators/rbacs"
+          secondaryListPath="/hybridsovereign/operators/rbacconfigs"
+        />
+      </div>
+    </PageSection>
+  );
+};
+
+export default AdminOperatorsPage;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToggleGroup, ToggleGroupItem } from '@patternfly/react-core';
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from './index';
 import { AppLocale, setStoredLocale } from './index';
 
 export interface LanguageToggleProps {

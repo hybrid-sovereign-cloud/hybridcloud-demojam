@@ -12,7 +12,7 @@ import {
 } from '@patternfly/react-core';
 import { updateDashboardResource } from '../hooks/k8s';
 import { HybridSovereignKind, K8sResource } from '../types';
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from '../i18n';
 import { getAtPath, KIND_SPEC_META, setAtPath, SpecFieldMeta } from './specFieldMeta';
 
 export interface GenericSpecEditorProps {

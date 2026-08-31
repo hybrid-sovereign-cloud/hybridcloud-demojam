@@ -221,7 +221,7 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies/{{ cluster_name }}-cluster-rbac"
     method: GET
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
     validate_certs: true
     ca_path: /tmp/central-ca.crt
     status_code: [200, 404]
@@ -234,7 +234,7 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body:
@@ -272,7 +272,7 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/policies/{{ cluster_name }}-cluster-rbac"
     method: PATCH
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/merge-patch+json
     body_format: json
     body:
@@ -302,7 +302,7 @@
     url: "{{ central_api_server }}/apis/cluster.open-cluster-management.io/v1beta1/namespaces/openshift-gitops/placements/{{ cluster_name }}-cluster-rbac-placement"
     method: GET
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
     validate_certs: true
     ca_path: /tmp/central-ca.crt
     status_code: [200, 404]
@@ -315,7 +315,7 @@
     url: "{{ central_api_server }}/apis/cluster.open-cluster-management.io/v1beta1/namespaces/openshift-gitops/placements"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body:
@@ -343,7 +343,7 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/placementbindings/{{ cluster_name }}-cluster-rbac-binding"
     method: GET
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
     validate_certs: true
     ca_path: /tmp/central-ca.crt
     status_code: [200, 404]
@@ -356,7 +356,7 @@
     url: "{{ central_api_server }}/apis/policy.open-cluster-management.io/v1/namespaces/openshift-gitops/placementbindings"
     method: POST
     headers:
-      Authorization: "Bearer {{ central_token }}"
+      Authorization: "Bearer {{ central_token | default(central_bearer_token) }}"
       Content-Type: application/json
     body_format: json
     body:

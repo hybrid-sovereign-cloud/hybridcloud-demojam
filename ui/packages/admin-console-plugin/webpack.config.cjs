@@ -15,6 +15,8 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
     alias: {
       '@hybridsovereign/shared': path.resolve(__dirname, '../shared/src'),
+      i18next: path.resolve(__dirname, '../../node_modules/i18next'),
+      'react-i18next': path.resolve(__dirname, '../../node_modules/react-i18next'),
     },
   },
   module: {

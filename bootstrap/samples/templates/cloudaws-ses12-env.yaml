@@ -7,8 +7,8 @@ metadata:
   name: ses12-env
   namespace: entity-acme-corp
 spec:
-  account: "545009858220"
+  account: "490004618031"
   vaultPath: "aws/accounts/shc_admin"
-  baseDomain: "sandbox3512.opentlc.com"
+  baseDomain: "sandbox5322.opentlc.com"
   landingzone: "default"
 {{- end }}

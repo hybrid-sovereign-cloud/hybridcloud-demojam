@@ -20,9 +20,10 @@ export {
   LOCALE_STORAGE_KEY,
   SovereignI18nProvider,
   LanguageToggle,
+  useTranslation,
+  isEmbeddedConsolePlugin,
 } from './i18n';
 export type { AppLocale, SovereignI18nProviderProps, LanguageToggleProps } from './i18n';
-export { useTranslation } from 'react-i18next';
 export {
   createAccessFlagHook,
   type AccessCheck,

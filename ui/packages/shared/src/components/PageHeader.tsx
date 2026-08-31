@@ -1,6 +1,6 @@
 import React from 'react';
 import { Title, Breadcrumb, BreadcrumbItem } from '@patternfly/react-core';
-import { LanguageToggle } from '../i18n/LanguageToggle';
+import { LanguageToggle, isEmbeddedConsolePlugin } from '../i18n';
 
 export interface PageHeaderCrumb {
   label: string;
@@ -12,7 +12,7 @@ export interface PageHeaderProps {
   subtitle?: string;
   breadcrumbs?: PageHeaderCrumb[];
   actions?: React.ReactNode;
-  /** Show EN/FR toggle in the header actions (default true). */
+  /** Show EN/FR toggle in the header actions (default: hidden in OCP console plugin). */
   showLanguageToggle?: boolean;
 }
 
@@ -22,8 +22,10 @@ export function PageHeader({
   subtitle,
   breadcrumbs,
   actions,
-  showLanguageToggle = true,
+  showLanguageToggle,
 }: PageHeaderProps): React.ReactElement {
+  const showLang = showLanguageToggle ?? !isEmbeddedConsolePlugin();
+
   return (
     <div className="sc-page-header">
       <div className="sc-page-header__titles">
@@ -45,10 +47,10 @@ export function PageHeader({
         </Title>
         {subtitle && <div className="sc-page-header__subtitle">{subtitle}</div>}
       </div>
-      {(actions || showLanguageToggle) && (
+      {(actions || showLang) && (
         <div className="sc-page-header__actions">
           {actions}
-          {showLanguageToggle ? <LanguageToggle isCompact /> : null}
+          {showLang ? <LanguageToggle isCompact /> : null}
         </div>
       )}
     </div>

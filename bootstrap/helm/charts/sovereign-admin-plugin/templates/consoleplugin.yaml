@@ -14,3 +14,16 @@ spec:
       namespace: {{ .Values.namespace }}
       port: {{ .Values.service.port }}
     type: Service
+  {{- with .Values.proxy }}
+  proxy:
+    {{- range . }}
+    - alias: {{ .alias }}
+      authorization: UserToken
+      endpoint:
+        type: Service
+        service:
+          name: {{ .service.name }}
+          namespace: {{ .service.namespace | default $.Values.namespace }}
+          port: {{ .service.port }}
+    {{- end }}
+  {{- end }}

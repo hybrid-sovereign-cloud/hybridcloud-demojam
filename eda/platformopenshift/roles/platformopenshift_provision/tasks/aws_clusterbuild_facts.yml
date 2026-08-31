@@ -16,3 +16,5 @@
     cb_install_config_vault: "aws/accounts/{{ aws_account }}/{{ aws_slug }}/{{ ansible_operator_meta.name }}/install-config"
     cb_provider_creds_vault: "{{ aws_vault_path }}"
     cb_type: "{{ aws_cluster_type }}"
+    cb_api_vip: ""
+    cb_ingress_vip: ""
