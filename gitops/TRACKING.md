@@ -107,3 +107,12 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | Status | in-progress |
 | Next action | Sync; vault init; UI builds Complete; Entity reconcile; ACM Running; Phase 8–9 |
 
+
+### 2026-09-20T04:05:00Z — Checkpoint
+
+| Field | Value |
+|-------|-------|
+| Green | Gitea, Vault init/unsealed, Quay Available, 8 operators, Entity sample (pending JT), UI dashboards Running, plugins built, ESO operand Ready |
+| Blockers | AAP JobTemplates not seeded; ClusterSecretStore blocked by ESO deny-all until netpol lands; ACM still Installing; Phase 9 wipe deferred |
+| Next | ESO→Vault netpol; seed AAP JTs; console plugins deploy; ACM; Phase 9 |
+
