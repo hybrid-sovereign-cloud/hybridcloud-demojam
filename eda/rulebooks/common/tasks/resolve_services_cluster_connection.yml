@@ -20,7 +20,7 @@
   no_log: true
 
 - name: Obtain services cluster API bearer token via kubeadmin OAuth
-  ansible.builtin.include_tasks: obtain_openshift_access_token.yml
+  ansible.builtin.include_tasks: "{{ query('first_found', {'files': ['obtain_openshift_access_token.yml'], 'paths': [playbook_dir ~ '/common/tasks', playbook_dir ~ '/../common/tasks', playbook_dir ~ '/../../common/tasks', playbook_dir ~ '/../../../rulebooks/common/tasks']})[0] }}"
   vars:
     ocp_api_host: "{{ vault_kv_data.api_host }}"
     ocp_username: "{{ vault_kv_data.username }}"

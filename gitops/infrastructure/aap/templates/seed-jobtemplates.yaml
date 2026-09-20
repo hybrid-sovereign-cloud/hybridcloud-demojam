@@ -123,14 +123,19 @@ spec:
               if oc get secret vault-init -n vault >/dev/null 2>&1; then
                 VROOT=$(oc get secret vault-init -n vault -o jsonpath='{.data.rootToken}' | base64 -d)
                 VADDR=https://vault-vault.apps.cluster-qvhzm.dyn.redhatworkshops.io
-                CRED_COUNT=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credentials/?name=sovereign-vault-admin" | sed -n 's/.*"count":\([0-9]*\).*/\1/p' | head -1)
-                if [ "${CRED_COUNT:-0}" = "0" ]; then
+                CRED_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credentials/?name=sovereign-vault-admin" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+                if [ -z "${CRED_ID}" ]; then
                   curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/credentials/" \
                     -H 'Content-Type: application/json' \
                     -d "{\"name\":\"sovereign-vault-admin\",\"organization\":$ORG,\"credential_type\":$CT_ID,\"inputs\":{\"token\":\"$VROOT\",\"addr\":\"$VADDR\"}}" >/dev/null
+                  CRED_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credentials/?name=sovereign-vault-admin" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+                else
+                  # Always refresh token after vault re-init (ZTP wipe)
+                  curl -sk "${auth[@]}" -X PATCH "$HOST/api/controller/v2/credentials/$CRED_ID/" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"inputs\":{\"token\":\"$VROOT\",\"addr\":\"$VADDR\"}}" >/dev/null
                 fi
-                CRED_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credentials/?name=sovereign-vault-admin" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-                echo "Vault credential id=$CRED_ID"
+                echo "Vault credential id=$CRED_ID (token refreshed)"
               else
                 echo "vault-init not ready — skipping Vault AAP credential (JobTemplates still seeded)"
               fi
