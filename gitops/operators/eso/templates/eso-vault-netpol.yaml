@@ -1,4 +1,4 @@
-# OpenShift ESO installs deny-all in external-secrets; allow egress to Vault.
+# OpenShift ESO installs deny-all; allow egress to Vault (any dest :8200, same pattern as API allow).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,10 +15,6 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.openshift.io/metadata.name: vault
-      ports:
+    - ports:
         - protocol: TCP
           port: 8200
