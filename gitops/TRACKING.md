@@ -159,3 +159,9 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 - Entity status flip to `provisioned` on next reconcile
 - Phase 9 zero-touch wipe deferred until ACM Running
 
+
+### 2026-09-20T04:25:00Z — Entity provisioned
+
+Entity `acme-corp` phase=provisioned ready=true after AAP `entity-provision` job succeeded.
+Anti-loop fix pushed (no relaunch when job already successful). ACM still Installing — Phase 9 wipe deferred.
+
