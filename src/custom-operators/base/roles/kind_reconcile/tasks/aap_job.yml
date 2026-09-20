@@ -69,8 +69,7 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'provisioned', 'ready': true, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
-          message: "AAP job successful"
+        status: "{{ {'phase': 'provisioned', 'ready': true, 'message': 'AAP job successful', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
     - name: End after ready
       ansible.builtin.meta: end_play
 
