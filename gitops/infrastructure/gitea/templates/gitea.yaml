@@ -1,4 +1,14 @@
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitea
+  namespace: gitea
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: gitea-data
@@ -6,22 +16,14 @@ metadata:
   labels:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 20Gi
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gitea
-  namespace: gitea
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
----
-# Admin credentials generated once by Job into sovereign-secrets (never in git).
-# Until then Deployment references a bootstrap secret created by init Job.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -31,9 +33,9 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "1"
 spec:
+  backoffLimit: 6
   template:
     metadata:
       labels:
@@ -57,8 +59,6 @@ spec:
               oc create secret generic gitea-admin-secret -n gitea \
                 --from-literal=username=giteaadmin \
                 --from-literal=password="$PASS"
-              # Mirror into sovereign-secrets for PushSecret backup (best-effort)
-              oc create namespace sovereign-secrets --dry-run=client -o yaml | oc apply -f - || true
               oc create secret generic gitea-admin -n sovereign-secrets \
                 --from-literal=username=giteaadmin \
                 --from-literal=password="$PASS" \
@@ -74,6 +74,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     app.kubernetes.io/name: gitea
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   replicas: 1
   selector:
@@ -88,7 +90,6 @@ spec:
       serviceAccountName: gitea
       containers:
         - name: gitea
-          # Prefer local ImageStream when built; fallback to RH-compatible codeberg mirror via IS
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/gitea-local:latest
           imagePullPolicy: Always
           ports:
@@ -97,10 +98,6 @@ spec:
           env:
             - name: GITEA__security__INSTALL_LOCK
               value: "true"
-            - name: GITEA__server__DOMAIN
-              value: gitea
-            - name: GITEA__server__ROOT_URL
-              value: https://gitea-gitea.apps.cluster-qvhzm.dyn.redhatworkshops.io/
             - name: GITEA__database__DB_TYPE
               value: sqlite3
             - name: GITEA__admin__USERNAME
@@ -135,6 +132,8 @@ metadata:
   namespace: gitea
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   ports:
     - port: 3000
@@ -150,6 +149,8 @@ metadata:
   namespace: gitea
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   to:
     kind: Service

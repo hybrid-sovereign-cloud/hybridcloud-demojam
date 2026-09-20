@@ -8,6 +8,22 @@ metadata:
     app.kubernetes.io/name: vault
     hybridsovereign.redhat/gitops-owned: "true"
 ---
+# Allow Vault container UID on OpenShift
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-anyuid
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -46,13 +62,10 @@ spec:
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: vault
-      securityContext:
-        fsGroup: 1000
       containers:
         - name: vault
           image: docker.io/hashicorp/vault:1.17.6
           imagePullPolicy: IfNotPresent
-          # Use image entrypoint so VAULT_LOCAL_CONFIG is written to local.json
           args:
             - server
           env:
@@ -88,9 +101,6 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              add: ["IPC_LOCK"]
-            runAsNonRoot: true
-            runAsUser: 100
           volumeMounts:
             - name: data
               mountPath: /vault/data
