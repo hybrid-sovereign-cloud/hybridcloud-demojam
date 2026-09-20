@@ -165,3 +165,12 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 Entity `acme-corp` phase=provisioned ready=true after AAP `entity-provision` job succeeded.
 Anti-loop fix pushed (no relaunch when job already successful). ACM still Installing — Phase 9 wipe deferred.
 
+
+### 2026-09-20T04:35:00Z — Resume: ACM OG + Overview 404 + tenant samples
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix MCE OperatorGroup OwnNamespace (ACM stuck UnsupportedOperatorGroup); Overview CR fetch via raw K8s lists (no /api/overview/crs); add entity-acme-corp tenant + Hybrid VPC sample CRs |
+| Status | in-progress |
+| Next | Push; recreate MCE OG; rebuild admin plugin; verify MCH Running + Overview + samples |
+

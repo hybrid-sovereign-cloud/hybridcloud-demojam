@@ -1,0 +1,249 @@
+# Non-parked ACME tenant + Hybrid VPC sample CRs (GitOps-owned).
+# Parked (intentionally omitted): CloudAWS, CloudOSO, PlatformOpenshift, OpenStackMigration
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-platform-admins
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Platform administrators with full entity-level access
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-entity-admins
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Full entity administrators for ACME Corp
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-auditors
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Auditors and compliance observers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-viewers
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Read-only observers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-infra-team
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Infrastructure engineers managing cloud environments
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: acme-devs
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  config: keycloak-sovereign-tenants-services
+  description: Application developers with deploy access
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Team
+metadata:
+  name: platform-engineering
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec: {}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Team
+metadata:
+  name: platform-ops
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec: {}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Project
+metadata:
+  name: website-redesign
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  description: ACME marketing site redesign
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Project
+metadata:
+  name: api-services
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  description: ACME public APIs
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Persona
+metadata:
+  name: test-entity-admin
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  rbac: acme-entity-admins
+  type: entityAdmin
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Persona
+metadata:
+  name: test-auditor
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  rbac: acme-viewers
+  type: auditor
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Assignment
+metadata:
+  name: platform-eng-website
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  team: platform-engineering
+  projects:
+    - website-redesign
+    - api-services
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridFabric
+metadata:
+  name: lab-fabric
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  enabled: true
+  domainAsn: 65000
+  routeReflectors:
+    - name: rr1
+      address: 10.0.0.1
+  vniPool:
+    start: 50000
+    end: 50511
+  transportDefaults:
+    mtu: 9000
+    defaultTunnelType: wireguard
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: aws-us-east-1
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  enabled: true
+  cloud: aws
+  region: us-east-1
+  domainAsn: 65001
+  fabricRef: lab-fabric
+  transport:
+    type: wireguard
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: onprem-to-aws
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  enabled: true
+  fabricRef: lab-fabric
+  cloudGatewayRef: aws-us-east-1
+  tunnelType: wireguard

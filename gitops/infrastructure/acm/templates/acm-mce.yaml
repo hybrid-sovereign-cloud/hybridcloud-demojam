@@ -58,7 +58,10 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "1"
-spec: {}
+spec:
+  # MCE CSV does not support AllNamespaces (empty targetNamespaces)
+  targetNamespaces:
+    - multicluster-engine
 ---
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
