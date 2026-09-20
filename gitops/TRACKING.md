@@ -192,3 +192,12 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Status | in-progress |
 | Next | Sync Argo; force-reconcile configs; monitor all CRs to provisioned |
 
+
+### 2026-09-20T05:20:00Z — Fix operator AAP reconcile loop
+
+| Field | Value |
+|-------|-------|
+| Change summary | Stop relaunching successful AAP jobs; mark provisioned/ready; set observedGeneration on launch; end_play after launch/ready |
+| Status | in-progress |
+| Next | Rebuild ansible-operator image; restart operators; CRs → provisioned |
+
