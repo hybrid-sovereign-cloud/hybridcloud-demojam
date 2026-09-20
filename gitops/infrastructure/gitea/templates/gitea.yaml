@@ -35,7 +35,8 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: ocs-external-storagecluster-ceph-rbd-immediate
+  # Match already-bound PVC; storageClassName is immutable after bind
+  storageClassName: ocs-external-storagecluster-ceph-rbd
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -100,13 +101,14 @@ spec:
             httpGet:
               path: /api/healthz
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
+            failureThreshold: 12
           livenessProbe:
             httpGet:
               path: /api/healthz
               port: http
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20
       volumes:
         - name: data
