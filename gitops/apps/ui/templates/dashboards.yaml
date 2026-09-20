@@ -268,7 +268,7 @@ spec:
             - /bin/bash
             - -ec
             - |
-              openssl rand -hex 16 > /etc/proxy/secrets/session_secret
+              printf '%s' "$(openssl rand -hex 16)" > /etc/proxy/secrets/session_secret
               chmod 0444 /etc/proxy/secrets/session_secret
           volumeMounts:
             - name: proxy-secret
