@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Button, PageSection } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
@@ -47,7 +47,7 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
   enabled = true,
   hideHeader = false,
 }) => {
-  const history = useHistory();
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
@@ -95,7 +95,7 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
                 <Button
                   variant="primary"
                   icon={<PlusCircleIcon />}
-                  onClick={() => history.push(createPath)}
+                  onClick={() => navigate(createPath)}
                 >
                   {t('common.create')}
                 </Button>

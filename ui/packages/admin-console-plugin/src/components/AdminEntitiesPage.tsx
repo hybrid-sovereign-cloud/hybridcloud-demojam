@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { PageSection, Button } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
@@ -34,7 +34,7 @@ const ENTITY_NS = 'sovereign-cloud';
 
 const AdminEntitiesPage: React.FC = () => {
   const { t } = useTranslation();
-  const history = useHistory();
+  const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const { items, loading, error, refresh } = useK8sResourceList<SovereignResource>('Entity', {
@@ -59,7 +59,7 @@ const AdminEntitiesPage: React.FC = () => {
             <Button
               variant="primary"
               icon={<PlusCircleIcon />}
-              onClick={() => history.push('/hybridsovereign/create/entity')}
+              onClick={() => navigate('/hybridsovereign/create/entity')}
             >
               {t('common.create')}
             </Button>
@@ -100,7 +100,7 @@ export const makeKindListPage = (
   const listPath = opts?.listPath ?? `/hybridsovereign/${KIND_PLURALS[kind] ?? kind.toLowerCase()}`;
   const Page: React.FC = () => {
     const { t } = useTranslation();
-    const history = useHistory();
+    const navigate = useNavigate();
     const [search, setSearch] = React.useState('');
     const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
     const { items, loading, error, refresh } = useK8sResourceList<SovereignResource>(kind, {
@@ -143,7 +143,7 @@ export const makeKindListPage = (
                 <Button
                   variant="primary"
                   icon={<PlusCircleIcon />}
-                  onClick={() => history.push(`/hybridsovereign/create/${opts.createKind}`)}
+                  onClick={() => navigate(`/hybridsovereign/create/${opts.createKind}`)}
                 >
                   {t('common.create')}
                 </Button>

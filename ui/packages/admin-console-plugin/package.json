@@ -1,6 +1,6 @@
 {
   "name": "@hybridsovereign/admin-console-plugin",
-  "version": "1.2.21",
+  "version": "1.2.22",
   "private": true,
   "description": "OpenShift Console dynamic plugin for Hybrid Sovereign admin views",
   "main": "dist/plugin-entry.js",
@@ -11,7 +11,7 @@
   },
   "consolePlugin": {
     "name": "sovereign-admin-plugin",
-    "version": "1.2.21",
+    "version": "1.2.22",
     "displayName": "Sovereign Cloud",
     "description": "Sovereign Cloud admin perspective \u2014 Entities, Personas, Services, Operators",
     "exposedModules": {
@@ -62,7 +62,7 @@
     "@patternfly/react-table": "^5.4.1",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
-    "react-router-dom": "^5.3.4"
+    "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
     "@openshift-console/dynamic-plugin-sdk-webpack": "^1.2.0",

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { PageSection, Button } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
@@ -53,7 +53,7 @@ export function makeTenantKindPage(kind: HybridSovereignKind, title: string): Re
 
   const Page: React.FC = () => {
     const { t } = useTranslation();
-    const history = useHistory();
+    const navigate = useNavigate();
     const { namespace, entities, selectEntity, entity } = useEntityNamespace();
     const [search, setSearch] = React.useState('');
     const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
@@ -91,7 +91,7 @@ export function makeTenantKindPage(kind: HybridSovereignKind, title: string): Re
                   variant="primary"
                   size="sm"
                   icon={<PlusCircleIcon />}
-                  onClick={() => history.push(`/hybridsovereign/tenant/create/${meta.form}`)}
+                  onClick={() => navigate(`/hybridsovereign/tenant/create/${meta.form}`)}
                 >
                   {t('common.create')}
                 </Button>

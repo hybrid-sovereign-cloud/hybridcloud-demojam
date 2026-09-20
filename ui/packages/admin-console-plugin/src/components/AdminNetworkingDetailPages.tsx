@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { PageSection } from '@patternfly/react-core';
 import { HybridSovereignKind, ResourceDetail } from '@hybridsovereign/shared';
 import '@hybridsovereign/shared/styles/openshift.css';
@@ -12,7 +12,7 @@ function makeClusterDetailPage(
   listPath: string,
 ): React.FC {
   const Page: React.FC = () => {
-    const history = useHistory();
+    const navigate = useNavigate();
     const { name } = useParams<{ name: string }>();
     const resourceName = name ? decodeURIComponent(name) : '';
 
@@ -25,8 +25,8 @@ function makeClusterDetailPage(
             namespace={ENTITY_NS}
             parentTitle={title}
             parentPath={listPath}
-            onBack={() => history.push(listPath)}
-            onDeleted={() => history.push(listPath)}
+            onBack={() => navigate(listPath)}
+            onDeleted={() => navigate(listPath)}
           />
         </div>
       </PageSection>

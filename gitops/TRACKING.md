@@ -243,3 +243,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Status | in-progress |
 | Note | Temporarily removed `sovereign-tenant-plugin` from console.operator plugins until image rebuild |
 
+
+---
+### 2026-09-20T13:40:00Z — Console useHistory → useNavigate (RR v6)
+
+| Field | Value |
+|-------|-------|
+| Change summary | OpenShift 4.22 console shares react-router-dom v6; plugins called useHistory (v5) → crash on Entities |
+| Paths | admin/tenant console-plugin components + package.json react-router-dom ^6 |
+| Status | in-progress |
+

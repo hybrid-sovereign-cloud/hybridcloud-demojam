@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, PageSection } from '@patternfly/react-core';
 import { CreateResourceForm, SelfServiceFormType,
   useTranslation,
@@ -26,7 +26,7 @@ const SUPPORTED_FORMS = new Set<string>([
 
 const AdminCreatePage: React.FC = () => {
   const { t } = useTranslation();
-  const history = useHistory();
+  const navigate = useNavigate();
   const { kind } = useParams<{ kind: string }>();
   const formType = (kind ?? 'entity') as SelfServiceFormType;
   const listPath = LIST_PATH[formType] ?? '/hybridsovereign/overview';
@@ -56,8 +56,8 @@ const AdminCreatePage: React.FC = () => {
               : ''
           }
           listPath={listPath}
-          onSuccess={(path) => history.push(path)}
-          onCancel={() => history.push(listPath)}
+          onSuccess={(path) => navigate(path)}
+          onCancel={() => navigate(listPath)}
         />
       </div>
     </PageSection>
