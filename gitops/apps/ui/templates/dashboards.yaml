@@ -150,6 +150,7 @@ spec:
             - -cookie-samesite=strict
             - -scope=user:full
             - -skip-auth-regex=^/healthz
+            - -skip-provider-button=true
           ports:
             - containerPort: 8443
               name: https
@@ -302,6 +303,7 @@ spec:
             - -cookie-samesite=strict
             - -scope=user:full
             - -skip-auth-regex=^/healthz
+            - -skip-provider-button=true
           ports:
             - containerPort: 8443
               name: https
