@@ -1,0 +1,73 @@
+# ClusterSecretStore + PushSecrets once Vault is initialized (token in sovereign-secrets/vault-root).
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: vault-backend
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+spec:
+  provider:
+    vault:
+      server: http://vault.vault.svc:8200
+      path: hybridsovereign
+      version: v2
+      auth:
+        tokenSecretRef:
+          name: vault-root
+          key: token
+          namespace: sovereign-secrets
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-aap-admin
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  selector:
+    secret:
+      name: aap-admin
+  data:
+    - match:
+        secretKey: password
+        remoteRef:
+          remoteKey: aap-admin
+          property: password
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-vault-root
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  selector:
+    secret:
+      name: vault-root
+  data:
+    - match:
+        secretKey: token
+        remoteRef:
+          remoteKey: vault-root
+          property: token
+    - match:
+        secretKey: unsealKey
+        remoteRef:
+          remoteKey: vault-root
+          property: unsealKey
