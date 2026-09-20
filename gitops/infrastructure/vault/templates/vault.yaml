@@ -66,8 +66,12 @@ spec:
         - name: vault
           image: docker.io/hashicorp/vault:1.17.6
           imagePullPolicy: IfNotPresent
-          args:
-            - server
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              printf '%s\n' "$VAULT_LOCAL_CONFIG" > /vault/config/local.json
+              exec vault server -config=/vault/config/local.json
           env:
             - name: VAULT_ADDR
               value: http://127.0.0.1:8200
