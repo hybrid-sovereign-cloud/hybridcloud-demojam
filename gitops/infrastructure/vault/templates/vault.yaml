@@ -104,6 +104,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /vault/data
+            - name: config
+              mountPath: /vault/config
           readinessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
@@ -114,6 +116,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: vault-data
+        - name: config
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
