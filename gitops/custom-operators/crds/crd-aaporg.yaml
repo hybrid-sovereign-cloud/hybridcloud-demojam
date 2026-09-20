@@ -3,7 +3,6 @@ kind: CustomResourceDefinition
 metadata:
   name: aaporgs.hybridsovereign.redhat
   labels:
-    {{- include "plugin-aap.labels" . | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:

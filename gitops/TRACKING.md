@@ -54,3 +54,14 @@
 | Next action | Push; monitor builds, ESO CSV, Vault pod, Quay, ACM; seed samples when CRDs Ready |
 
 ---
+### 2026-09-20T03:15:00Z — Remediation Beta/Epsilon/Gamma
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix CRDs (strip helm leftovers); drop ansible.controller from operator image; Vault VAULT_LOCAL_CONFIG |
+| Paths touched | `gitops/custom-operators/crds`, `src/custom-operators/base/requirements.yml`, `gitops/infrastructure/vault` |
+| Rollback | git revert |
+| Status | in-progress |
+| Next action | Push; rebuild operator; vault Ready; hs-operators sync |
+
+---

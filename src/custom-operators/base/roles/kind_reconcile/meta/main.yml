@@ -1,0 +1,4 @@
+galaxy_info:
+  role_name: kind_reconcile
+  description: Shared hybridsovereign kind reconcile with AAP job launch
+dependencies: []
