@@ -20,6 +20,17 @@
 
 ## Change Log
 
+### 2026-09-20T19:00:00Z — ZTP durable Vault KV seed (pre wipe-2)
+
+| Field | Value |
+|-------|-------|
+| Change summary | Extend hs-plugin-cred-sync PostSync to seed hybridsovereign KV (openshift/aap/quay/rhbk) so wipe→rollout needs no mid-process hand-seeding |
+| Paths touched | `gitops/infrastructure/security/templates/plugin-cred-sync.yaml`, Chart 0.1.5, `gitops/ZTP.md` |
+| Rollback | Revert chart to 0.1.4 / prior plugin-cred-sync |
+| Next action | Push; full wipe; single field-content sync; monitor-only |
+
+
+
 ### 2026-09-20T03:05:00Z — Phase 0/1 — Agent Alpha+Eta
 
 | Field | Value |

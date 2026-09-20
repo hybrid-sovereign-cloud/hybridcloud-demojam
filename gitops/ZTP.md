@@ -47,7 +47,7 @@ Parent sync **waits for prior-wave Application health** before creating the next
 | Argo controller OOM / slow sync | 1 shard, heavy SSA | `hs-argocd-capacity` → 2 controller shards, 2 repo replicas, 8Gi limit |
 | Parallel child re-sync races | After first install, apps selfHeal independently | Retries + `ApplyOutOfSyncOnly` + resource waves inside charts |
 | Baseline missing (AAP/RHBK/ODF) | Adopt-not-install | Documented; Jobs fail closed with clear logs |
-| Parked kinds in samples | CloudAWS/OSO/PlatformOpenshift | `values.samples.parkedKinds` — not deployed |
+| Vault empty after wipe | vault-init rotates root; KV empty | `hs-plugin-cred-sync` PostSync seeds hybridsovereign KV from cluster Secrets / SA token / field-content values |
 | Wave inversion | Manual sync of samples before operators | Parent wave annotations 5→60; do not reorder |
 
 ## Cross-dependencies (must not invert)
