@@ -5,10 +5,10 @@
 | Field | Value |
 |-------|-------|
 | Current phase | ZTP hardening |
-| Status | in-progress |
-| Last green checkpoint | Argo apps mostly Synced; UI PF6 + OAuthClients live |
-| Blockers | Cleared for ZTP: NS conflict, Argo capacity, image gate, wave order |
-| Next action | Push ZTP commit; hard-refresh `field-content`; verify waves 5→60 |
+| Status | green |
+| Last green checkpoint | Waves 5→60 Synced/Healthy; Argo 2 shards/8Gi; sovereign-ui Prune=false |
+| Blockers | none |
+| Next action | Cold-cluster soak: point new Argo root at `gitops/` and watch waves |
 
 **Cluster-1 baseline (do not uninstall):** AAP Controller (`aap/aap`), RHBK (`keycloak/keycloak`), ODF/NooBaa, OpenShift GitOps, CNV, cert-manager.
 
@@ -369,4 +369,15 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Fix | Remove null `metadata.labels` from AAP/Quay CRDs; align PushSecret API defaults; ignoreDifferences for CRD conversion/status + PushSecret status |
 | Chart | 0.1.4 |
 | Status | pushed |
+
+
+---
+### 2026-09-20T15:20:00Z — Fix hs-aap-config Helm ComparisonError
+
+| Field | Value |
+|-------|-------|
+| Root cause | `seed-jobtemplates.yaml` used AAP injector `{{ token }}` / `{{ addr }}` — Helm treated as template functions |
+| Fix | Escape as raw strings for AAP Credential Type injectors |
+| Chart | 0.1.5 |
+| Status | green pending refresh |
 

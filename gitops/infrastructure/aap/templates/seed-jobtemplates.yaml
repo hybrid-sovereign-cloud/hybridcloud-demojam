@@ -98,7 +98,7 @@ spec:
               if [ "${CT:-0}" = "0" ]; then
                 curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/credential_types/" \
                   -H 'Content-Type: application/json' \
-                  -d '{"name":"Sovereign Vault Token","kind":"cloud","inputs":{"fields":[{"id":"token","label":"Token","type":"string","secret":true},{"id":"addr","label":"Addr","type":"string"}],"required":["token","addr"]},"injectors":{"env":{"VAULT_TOKEN":"{{ token }}","VAULT_ADDR":"{{ addr }}"}}}' >/dev/null
+                  -d '{"name":"Sovereign Vault Token","kind":"cloud","inputs":{"fields":[{"id":"token","label":"Token","type":"string","secret":true},{"id":"addr","label":"Addr","type":"string"}],"required":["token","addr"]},"injectors":{"env":{"VAULT_TOKEN":"{{`{{ token }}`}}","VAULT_ADDR":"{{`{{ addr }}`}}"}}}' >/dev/null
               fi
               CT_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credential_types/?name=Sovereign%20Vault%20Token" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
               VROOT=$(oc get secret vault-init -n vault -o jsonpath='{.data.rootToken}' | base64 -d)

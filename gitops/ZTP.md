@@ -38,6 +38,8 @@ Parent sync **waits for prior-wave Application health** before creating the next
 | `scope denied: user:full` on dashboards | SA OAuth client cannot request `user:full` | Real `OAuthClient` + bootstrap Job |
 | Sample CRs OutOfSync forever | Operator/ephemeral annotations + status | `ignoreDifferences` on `hs-samples` |
 | SSA ComparisonError on samples | Desired fields absent from CRD OpenAPI (e.g. `AAPOrg.spec.description`) | Manifests must match live CRD schema exactly |
+| CRD forever OutOfSync | Empty `metadata.labels:` in YAML / API default `spec.conversion` | Drop null labels; `ignoreDifferences` on CRD status/conversion |
+| PushSecret forever OutOfSync | ESO injects defaults + status | Align defaults in manifest; ignore `.status` |
 | Quay/Gitea thrash | Operand mutates spec/status | `ignoreDifferences` + `RespectIgnoreDifferences` |
 | Argo controller OOM / slow sync | 1 shard, heavy SSA | `hs-argocd-capacity` → 2 controller shards, 2 repo replicas, 8Gi limit |
 | Parallel child re-sync races | After first install, apps selfHeal independently | Retries + `ApplyOutOfSyncOnly` + resource waves inside charts |
