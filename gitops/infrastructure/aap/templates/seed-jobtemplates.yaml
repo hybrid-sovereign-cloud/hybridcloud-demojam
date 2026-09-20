@@ -67,48 +67,54 @@ spec:
               fi
               echo "ORG=$ORG INV=$INV DEMO_PROJ=$DEMO_PROJ HS_PROJ=$HS_PROJ"
 
-              # kind -> playbook path under HybridSovereign EDA
+              # kind -> playbook under eda/rulebooks/ (adjacent roles/ so AAP EE finds them)
               declare -A REAL_PB=(
                 [entity]=eda/rulebooks/entity-provision-playbook.yml
-                [rbacconfig]=eda/plugin-rbac/rulebooks/rbacconfig-provision-playbook.yml
-                [rbac]=eda/plugin-rbac/rulebooks/rbac-provision-playbook.yml
-                [persona]=eda/persona/playbooks/persona-provision-playbook.yml
-                [aapconfig]=eda/plugin-aap/rulebooks/aapconfig-provision-playbook.yml
-                [aaporg]=eda/plugin-aap/rulebooks/aaporg-provision-playbook.yml
-                [quayconfig]=eda/plugin-quay/rulebooks/quayconfig-provision-playbook.yml
-                [quayorg]=eda/plugin-quay/rulebooks/quayorg-provision-playbook.yml
-                [vault]=eda/plugin-vault/rulebooks/vault-provision-playbook.yml
-                [vaultkv]=eda/plugin-vault/rulebooks/vaultkv-provision-playbook.yml
-                [team]=eda/team/rulebooks/team-provision-playbook.yml
-                [project]=eda/project/rulebooks/project-provision-playbook.yml
-                [assignment]=eda/assignment/rulebooks/assignment-provision-playbook.yml
-                [hybridfabric]=eda/hybridvpc/rulebooks/hybridfabric-provision-playbook.yml
-                [cloudgateway]=eda/hybridvpc/rulebooks/cloudgateway-provision-playbook.yml
-                [transportlink]=eda/hybridvpc/rulebooks/transportlink-provision-playbook.yml
-                [hybridnetwork]=eda/hybridvpc/rulebooks/hybridnetwork-provision-playbook.yml
-                [networkplacement]=eda/hybridvpc/rulebooks/networkplacement-provision-playbook.yml
-                [uihealthchecker]=eda/hybridvpc/rulebooks/uihealthchecker-provision-playbook.yml
+                [rbacconfig]=eda/rulebooks/rbacconfig-provision-playbook.yml
+                [rbac]=eda/rulebooks/rbac-provision-playbook.yml
+                [persona]=eda/rulebooks/persona-provision-playbook.yml
+                [aapconfig]=eda/rulebooks/aapconfig-provision-playbook.yml
+                [aaporg]=eda/rulebooks/aaporg-provision-playbook.yml
+                [quayconfig]=eda/rulebooks/quayconfig-provision-playbook.yml
+                [quayorg]=eda/rulebooks/quayorg-provision-playbook.yml
+                [vault]=eda/rulebooks/vault-provision-playbook.yml
+                [vaultkv]=eda/rulebooks/vaultkv-provision-playbook.yml
+                [team]=eda/rulebooks/team-provision-playbook.yml
+                [project]=eda/rulebooks/project-provision-playbook.yml
+                [assignment]=eda/rulebooks/assignment-provision-playbook.yml
+                [hybridfabric]=eda/rulebooks/hybridfabric-provision-playbook.yml
+                [cloudgateway]=eda/rulebooks/cloudgateway-provision-playbook.yml
+                [transportlink]=eda/rulebooks/transportlink-provision-playbook.yml
+                [hybridnetwork]=eda/rulebooks/hybridnetwork-provision-playbook.yml
+                [networkplacement]=eda/rulebooks/networkplacement-provision-playbook.yml
+                [uihealthchecker]=eda/rulebooks/uihealthchecker-provision-playbook.yml
+                [platformopenshift]=eda/rulebooks/platformopenshift-provision-playbook.yml
+                [cloudoso]=eda/rulebooks/cloudoso-provision-playbook.yml
+                [cloudaws]=eda/rulebooks/cloudaws-provision-playbook.yml
               )
               declare -A REAL_TD=(
                 [entity]=eda/rulebooks/entity-teardown-playbook.yml
-                [rbacconfig]=eda/plugin-rbac/rulebooks/rbacconfig-teardown-playbook.yml
-                [rbac]=eda/plugin-rbac/rulebooks/rbac-teardown-playbook.yml
-                [persona]=eda/persona/playbooks/persona-teardown-playbook.yml
-                [aapconfig]=eda/plugin-aap/rulebooks/aapconfig-teardown-playbook.yml
-                [aaporg]=eda/plugin-aap/rulebooks/aaporg-teardown-playbook.yml
-                [quayconfig]=eda/plugin-quay/rulebooks/quayconfig-teardown-playbook.yml
-                [quayorg]=eda/plugin-quay/rulebooks/quayorg-teardown-playbook.yml
-                [vault]=eda/plugin-vault/rulebooks/vault-teardown-playbook.yml
-                [vaultkv]=eda/plugin-vault/rulebooks/vaultkv-teardown-playbook.yml
-                [team]=eda/team/rulebooks/team-teardown-playbook.yml
-                [project]=eda/project/rulebooks/project-teardown-playbook.yml
-                [assignment]=eda/assignment/rulebooks/assignment-teardown-playbook.yml
-                [hybridfabric]=eda/hybridvpc/rulebooks/hybridfabric-teardown-playbook.yml
-                [cloudgateway]=eda/hybridvpc/rulebooks/cloudgateway-teardown-playbook.yml
-                [transportlink]=eda/hybridvpc/rulebooks/transportlink-teardown-playbook.yml
-                [hybridnetwork]=eda/hybridvpc/rulebooks/hybridnetwork-teardown-playbook.yml
-                [networkplacement]=eda/hybridvpc/rulebooks/networkplacement-teardown-playbook.yml
-                [uihealthchecker]=eda/hybridvpc/rulebooks/uihealthchecker-teardown-playbook.yml
+                [rbacconfig]=eda/rulebooks/rbacconfig-teardown-playbook.yml
+                [rbac]=eda/rulebooks/rbac-teardown-playbook.yml
+                [persona]=eda/rulebooks/persona-teardown-playbook.yml
+                [aapconfig]=eda/rulebooks/aapconfig-teardown-playbook.yml
+                [aaporg]=eda/rulebooks/aaporg-teardown-playbook.yml
+                [quayconfig]=eda/rulebooks/quayconfig-teardown-playbook.yml
+                [quayorg]=eda/rulebooks/quayorg-teardown-playbook.yml
+                [vault]=eda/rulebooks/vault-teardown-playbook.yml
+                [vaultkv]=eda/rulebooks/vaultkv-teardown-playbook.yml
+                [team]=eda/rulebooks/team-teardown-playbook.yml
+                [project]=eda/rulebooks/project-teardown-playbook.yml
+                [assignment]=eda/rulebooks/assignment-teardown-playbook.yml
+                [hybridfabric]=eda/rulebooks/hybridfabric-teardown-playbook.yml
+                [cloudgateway]=eda/rulebooks/cloudgateway-teardown-playbook.yml
+                [transportlink]=eda/rulebooks/transportlink-teardown-playbook.yml
+                [hybridnetwork]=eda/rulebooks/hybridnetwork-teardown-playbook.yml
+                [networkplacement]=eda/rulebooks/networkplacement-teardown-playbook.yml
+                [uihealthchecker]=eda/rulebooks/uihealthchecker-teardown-playbook.yml
+                [platformopenshift]=eda/rulebooks/platformopenshift-teardown-playbook.yml
+                [cloudoso]=eda/rulebooks/cloudoso-teardown-playbook.yml
+                [cloudaws]=eda/rulebooks/cloudaws-teardown-playbook.yml
               )
 
               # Ensure Vault credential type + credential for VAULT_TOKEN/VAULT_ADDR
