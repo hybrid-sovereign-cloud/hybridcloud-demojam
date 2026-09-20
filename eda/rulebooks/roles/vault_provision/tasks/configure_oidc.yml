@@ -23,7 +23,7 @@
         (keycloak_admin_url | default('', true))
         or (('https://' + kc_route.resources[0].spec.host) if (kc_route.resources | default([]) | length > 0) else '')
         or (lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true))
-        or 'https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io'
+        
       }}
 
 - name: Obtain Keycloak admin access token

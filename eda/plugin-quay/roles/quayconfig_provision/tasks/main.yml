@@ -88,15 +88,20 @@
         validate_certs: false
         api_version: route.openshift.io/v1
         kind: Route
+        name: keycloak
         namespace: keycloak
-        label_selectors:
-          - "app=keycloak"
       register: kc_route
+      failed_when: false
 
-    - name: Override keycloak_internal_url with discovered Route
+    - name: Set Keycloak URL from Route, Vault credentials, or defaults
       ansible.builtin.set_fact:
-        keycloak_internal_url: "https://{{ kc_route.resources[0].spec.host }}"
-      when: kc_route.resources | length > 0
+        keycloak_internal_url: >-
+          {{
+            (('https://' + kc_route.resources[0].spec.host) if (kc_route.resources | default([]) | length > 0) else '')
+            or (keycloak_admin_url | default('', true))
+            or (lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true))
+            
+          }}
 
     - name: Get Keycloak admin token
       ansible.builtin.uri:

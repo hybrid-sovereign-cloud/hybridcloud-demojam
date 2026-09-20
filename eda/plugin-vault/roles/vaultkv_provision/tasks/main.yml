@@ -45,12 +45,12 @@
       register: parent_vault
       retries: 12
       delay: 5
-      until: parent_vault.resources | length > 0
+      until: (parent_vault.resources | length > 0) and ((parent_vault.resources[0].status.vaultInternalUrl | default('')) | length > 0)
 
     - name: Cache Vault status
       ansible.builtin.set_fact:
         vault_status: "{{ parent_vault.resources[0].status }}"
-        vault_internal_url: "{{ parent_vault.resources[0].status.vaultInternalUrl }}"
+        vault_internal_url: "{{ parent_vault.resources[0].status.vaultInternalUrl | default(parent_vault.resources[0].status.vaultUrl) }}"
         vault_external_url: "{{ parent_vault.resources[0].status.vaultUrl }}"
         vault_url: "{{ parent_vault.resources[0].status.vaultUrl }}"
         vaultkv_generation: "{{ vaultkv_cr.resources[0].metadata.generation | default(0) | int }}"
