@@ -223,3 +223,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Caveat | AAP JobTemplates still hello_world stubs — RHBK group creation is stub-success until real eda playbooks are wired |
 | Phase 9 | Still deferred |
 
+---
+### 2026-09-20T13:05:00Z — Dashboard OAuth proxy (fix Entities 401)
+
+| Field | Value |
+|-------|-------|
+| Change summary | Add ose-oauth-proxy sidecars + SA OAuth redirect + cookie-secret bootstrap Job; reencrypt Routes on :8443 so Express gets X-Forwarded-Access-Token |
+| Paths touched | `gitops/apps/ui/templates/dashboards.yaml`, `oauth-bootstrap.yaml`, `Chart.yaml`, `TRACKING.md` |
+| Status | in-progress |
+| Next | Push; Argo sync hs-ui; login via OpenShift OAuth; verify Entities list loads |
+

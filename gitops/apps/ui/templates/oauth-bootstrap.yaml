@@ -1,0 +1,79 @@
+# Generate oauth-proxy cookie secrets in-cluster (never committed to git).
+# Idempotent: creates Secret only if missing.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-oauth-bootstrap
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dashboard-oauth-bootstrap
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dashboard-oauth-bootstrap
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dashboard-oauth-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: dashboard-oauth-bootstrap
+    namespace: sovereign-ui
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dashboard-oauth-bootstrap
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: dashboard-oauth-bootstrap
+      containers:
+        - name: bootstrap
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              NS=sovereign-ui
+              for NAME in sovereign-cloud-dashboard-proxy tenancy-dashboard-proxy; do
+                if oc get secret "$NAME" -n "$NS" >/dev/null 2>&1; then
+                  echo "secret/$NAME already exists — skip"
+                  continue
+                fi
+                # 32-byte session cookie secret (oauth-proxy requirement: 16/24/32 bytes)
+                SECRET=$(openssl rand -base64 32 | tr -d '\n')
+                oc create secret generic "$NAME" -n "$NS" \
+                  --from-literal=session_secret="$SECRET" \
+                  --dry-run=client -o yaml | oc apply -f -
+                echo "created secret/$NAME"
+              done

@@ -1,4 +1,5 @@
 # Admin + tenant dashboards from local ImageStreams (built by hs-builds).
+# Auth: ose-oauth-proxy sidecar (OpenShift SA OAuth) → X-Forwarded-User / Access-Token.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -42,6 +43,8 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"sovereign-cloud-dashboard"}}'
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -50,6 +53,38 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"tenancy-dashboard"}}'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sovereign-cloud-dashboard-auth-delegator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: sovereign-cloud-dashboard
+    namespace: sovereign-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tenancy-dashboard-auth-delegator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: tenancy-dashboard
+    namespace: sovereign-ui
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,6 +109,51 @@ spec:
     spec:
       serviceAccountName: sovereign-cloud-dashboard
       containers:
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9@sha256:649e898b993644eb7253fa36468d5417f124bdeedeebaa503660e4bc9f23fc8e
+          imagePullPolicy: IfNotPresent
+          args:
+            - -provider=openshift
+            - -https-address=:8443
+            - -http-address=
+            - -email-domain=*
+            - -upstream=http://127.0.0.1:8080
+            - -tls-cert=/etc/tls/private/tls.crt
+            - -tls-key=/etc/tls/private/tls.key
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=sovereign-cloud-dashboard
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -pass-access-token=true
+            - -pass-user-headers=true
+            - -cookie-secure=true
+            - -cookie-httponly=true
+            - -cookie-samesite=strict
+            - -scope=user:full
+            - -skip-auth-regex=^/healthz
+          ports:
+            - containerPort: 8443
+              name: https
+          volumeMounts:
+            - name: proxy-tls
+              mountPath: /etc/tls/private
+              readOnly: true
+            - name: proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
         - name: dashboard
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-cloud-dashboard:latest
           imagePullPolicy: Always
@@ -83,9 +163,11 @@ spec:
           env:
             - name: PORT
               value: "8080"
+            - name: ENTITY_NAMESPACE
+              value: sovereign-cloud
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -96,6 +178,13 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: proxy-tls
+          secret:
+            secretName: sovereign-cloud-dashboard-tls
+        - name: proxy-secret
+          secret:
+            secretName: sovereign-cloud-dashboard-proxy
 ---
 apiVersion: v1
 kind: Service
@@ -104,11 +193,13 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: sovereign-cloud-dashboard-tls
 spec:
   ports:
-    - port: 8080
-      targetPort: 8080
-      name: http
+    - port: 8443
+      targetPort: https
+      name: https
   selector:
     app.kubernetes.io/name: sovereign-cloud-dashboard
 ---
@@ -124,9 +215,9 @@ spec:
     kind: Service
     name: sovereign-cloud-dashboard
   port:
-    targetPort: http
+    targetPort: https
   tls:
-    termination: edge
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect
 ---
 apiVersion: apps/v1
@@ -152,6 +243,51 @@ spec:
     spec:
       serviceAccountName: tenancy-dashboard
       containers:
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9@sha256:649e898b993644eb7253fa36468d5417f124bdeedeebaa503660e4bc9f23fc8e
+          imagePullPolicy: IfNotPresent
+          args:
+            - -provider=openshift
+            - -https-address=:8443
+            - -http-address=
+            - -email-domain=*
+            - -upstream=http://127.0.0.1:8080
+            - -tls-cert=/etc/tls/private/tls.crt
+            - -tls-key=/etc/tls/private/tls.key
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=tenancy-dashboard
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -pass-access-token=true
+            - -pass-user-headers=true
+            - -cookie-secure=true
+            - -cookie-httponly=true
+            - -cookie-samesite=strict
+            - -scope=user:full
+            - -skip-auth-regex=^/healthz
+          ports:
+            - containerPort: 8443
+              name: https
+          volumeMounts:
+            - name: proxy-tls
+              mountPath: /etc/tls/private
+              readOnly: true
+            - name: proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
         - name: dashboard
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/tenancy-dashboard:latest
           imagePullPolicy: Always
@@ -163,7 +299,7 @@ spec:
               value: "8080"
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -174,6 +310,13 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: proxy-tls
+          secret:
+            secretName: tenancy-dashboard-tls
+        - name: proxy-secret
+          secret:
+            secretName: tenancy-dashboard-proxy
 ---
 apiVersion: v1
 kind: Service
@@ -182,11 +325,13 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: tenancy-dashboard-tls
 spec:
   ports:
-    - port: 8080
-      targetPort: 8080
-      name: http
+    - port: 8443
+      targetPort: https
+      name: https
   selector:
     app.kubernetes.io/name: tenancy-dashboard
 ---
@@ -202,7 +347,7 @@ spec:
     kind: Service
     name: tenancy-dashboard
   port:
-    targetPort: http
+    targetPort: https
   tls:
-    termination: edge
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect
