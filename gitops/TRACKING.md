@@ -142,3 +142,20 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | Status | in-progress |
 | Next | Enable plugins in Console CR; verify Entity launches JT; ACM Running; Phase 9 |
 
+
+### 2026-09-20T04:20:00Z — Execution checkpoint (Phases 0–8 largely green)
+
+**Healthy / Synced:** hs-gitea, hs-vault, hs-quay, hs-eso, hs-builds, hs-operators, hs-samples, hs-security (PushSecrets), hs-ui (dashboards+plugins), hs-aap-config
+
+**Live:**
+- Vault initialized/unsealed; ClusterSecretStore Ready; PushSecrets Synced
+- Entity `acme-corp` launched AAP job `entity-provision` → AAP job successful
+- UI: sovereign-cloud-dashboard + tenancy-dashboard Running; console plugins Running + enabled
+- 39 AAP JobTemplates seeded (stub hello_world)
+
+**Still open:**
+- ACM MulticlusterHub Installing
+- field-content OutOfSync (cosmetic Application drift)
+- Entity status flip to `provisioned` on next reconcile
+- Phase 9 zero-touch wipe deferred until ACM Running
+
