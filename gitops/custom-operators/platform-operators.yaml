@@ -68,6 +68,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: RbacConfig
             - name: WATCH_NAMESPACE
@@ -100,7 +102,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -176,6 +178,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: AAPConfig
             - name: WATCH_NAMESPACE
@@ -208,7 +212,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -284,6 +288,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: QuayConfig
             - name: WATCH_NAMESPACE
@@ -316,7 +322,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -392,6 +398,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: HybridFabric
             - name: WATCH_NAMESPACE
@@ -424,7 +432,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -500,6 +508,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: CloudGateway
             - name: WATCH_NAMESPACE
@@ -532,7 +542,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -608,6 +618,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: TransportLink
             - name: WATCH_NAMESPACE
@@ -640,7 +652,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -716,6 +728,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: UIHealthChecker
             - name: WATCH_NAMESPACE
@@ -748,7 +762,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:

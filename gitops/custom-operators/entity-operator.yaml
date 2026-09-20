@@ -96,6 +96,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Entity
             - name: WATCH_NAMESPACE
@@ -130,7 +132,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:

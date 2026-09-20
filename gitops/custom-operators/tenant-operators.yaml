@@ -69,6 +69,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Rbac
             - name: WATCH_NAMESPACE
@@ -101,7 +103,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -176,6 +178,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Team
             - name: WATCH_NAMESPACE
@@ -208,7 +212,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -283,6 +287,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Project
             - name: WATCH_NAMESPACE
@@ -315,7 +321,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -390,6 +396,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Persona
             - name: WATCH_NAMESPACE
@@ -422,7 +430,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -497,6 +505,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Assignment
             - name: WATCH_NAMESPACE
@@ -529,7 +539,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -604,6 +614,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: Vault
             - name: WATCH_NAMESPACE
@@ -636,7 +648,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -711,6 +723,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: VaultKV
             - name: WATCH_NAMESPACE
@@ -743,7 +757,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -818,6 +832,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: AAPOrg
             - name: WATCH_NAMESPACE
@@ -850,7 +866,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -925,6 +941,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: QuayOrg
             - name: WATCH_NAMESPACE
@@ -957,7 +975,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -1032,6 +1050,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: HybridNetwork
             - name: WATCH_NAMESPACE
@@ -1064,7 +1084,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
@@ -1139,6 +1159,8 @@ spec:
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
             - name: OPERATOR_KIND
               value: NetworkPlacement
             - name: WATCH_NAMESPACE
@@ -1171,7 +1193,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: watches
           configMap:
