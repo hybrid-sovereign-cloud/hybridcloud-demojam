@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: Vault
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: vault.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

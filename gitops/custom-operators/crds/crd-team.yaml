@@ -1,0 +1,163 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: teams.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Team
+    listKind: TeamList
+    plural: teams
+    singular: team
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: Team defines a team with feature flags within a sovereign cloud entity.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired state of the Team
+              type: object
+              properties:
+                features:
+                  description: Feature flags for this team
+                  type: object
+                  properties:
+                    istio:
+                      description: Enable Istio service mesh for this team
+                      type: boolean
+                      default: false
+                    argo:
+                      description: Enable Argo Workflows for this team
+                      type: boolean
+                      default: false
+                rbacConfig:
+                  description: "Deprecated — do not set. RBAC is managed via Assignment CR toolRbac."
+                  type: string
+                teamAdmin:
+                  description: "Deprecated — do not set. RBAC is managed via Assignment CR toolRbac."
+                  type: array
+                  items:
+                    type: string
+                teamMemberRbac:
+                  description: "Deprecated — do not set. RBAC is managed via Assignment CR toolRbac."
+                  type: array
+                  items:
+                    type: string
+                teamViewerRbac:
+                  description: "Deprecated — do not set. RBAC is managed via Assignment CR toolRbac."
+                  type: array
+                  items:
+                    type: string
+            status:
+              description: Observed state populated by team-operator reconciliation
+              type: object
+              properties:
+                name:
+                  type: string
+                namespace:
+                  type: string
+                entity:
+                  type: string
+                billingId:
+                  type: string
+                description:
+                  type: string
+                features:
+                  type: object
+                  properties:
+                    istio:
+                      type: boolean
+                    argo:
+                      type: boolean
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Istio
+          type: boolean
+          jsonPath: .status.features.istio
+        - name: Argo
+          type: boolean
+          jsonPath: .status.features.argo
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

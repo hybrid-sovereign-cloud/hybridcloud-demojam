@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-cluster-management
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: open-cluster-management
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  targetNamespaces:
+    - open-cluster-management
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: acm-operator-subscription
+  namespace: open-cluster-management
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  channel: release-2.17
+  installPlanApproval: Automatic
+  name: advanced-cluster-management
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+# MulticlusterEngine is often installed by ACM; explicit MCE subscription in multicluster-engine NS
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: multicluster-engine
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: multicluster-engine
+  namespace: multicluster-engine
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec: {}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: multicluster-engine
+  namespace: multicluster-engine
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  channel: stable-2.17
+  installPlanApproval: Automatic
+  name: multicluster-engine
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+# ACM Hub instance — applied after CSV Ready (SkipDryRun)
+apiVersion: operator.open-cluster-management.io/v1
+kind: MultiClusterHub
+metadata:
+  name: multiclusterhub
+  namespace: open-cluster-management
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec: {}

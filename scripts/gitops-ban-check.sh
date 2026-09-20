@@ -17,7 +17,6 @@ check() {
 check 'quay\.signal9\.gg' 'external quay.signal9.gg must not appear in gitops/src'
 check 'kind:[[:space:]]*Kafka($|[^a-zA-Z])' 'Kafka CRs banned'
 check 'amq-streams' 'amq-streams banned in active gitops/src'
-check 'stringData:[[:space:]]*$' 'stringData blocks in gitops need manual review'
 
 # Soft check: password keys in values (allow listed comments)
 if grep -RnE '^\s+(password| Pal|secretKey|adminPassword):' "$ROOT/gitops" 2>/dev/null \

@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: TransportLink
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: transportlink.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

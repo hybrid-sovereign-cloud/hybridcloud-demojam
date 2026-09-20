@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: Persona
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: persona.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

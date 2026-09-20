@@ -1,0 +1,141 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vaults.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Vault
+    listKind: VaultList
+    plural: vaults
+    singular: vault
+    shortNames:
+      - vlt
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Vault provisions a dedicated HashiCorp Vault instance for a tenant entity.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired Vault installation configuration
+              type: object
+              required:
+                - rbacConfig
+              properties:
+                ha:
+                  description: Deploy Vault in HA mode (default true)
+                  type: boolean
+                  default: true
+                rbacConfig:
+                  description: Name of an RbacConfig in sovereign-cloud-plugins used for OIDC
+                  type: string
+            status:
+              description: Observed state after reconciliation
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                vaultUrl:
+                  description: URL of the Vault instance
+                  type: string
+                vaultInternalUrl:
+                  description: In-cluster service URL
+                  type: string
+                adminSecretName:
+                  description: Name of Secret containing root token and unseal keys
+                  type: string
+                adminSecretNamespace:
+                  description: Namespace of admin secret
+                  type: string
+                oidcClientId:
+                  description: OIDC client ID configured in Keycloak
+                  type: string
+                entity:
+                  description: Entity this Vault belongs to
+                  type: string
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: URL
+          type: string
+          jsonPath: .status.vaultUrl
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

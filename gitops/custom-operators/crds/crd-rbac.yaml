@@ -1,0 +1,141 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rbacs.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Rbac
+    listKind: RbacList
+    plural: rbacs
+    singular: rbac
+    shortNames:
+      - rb
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Rbac provisions Keycloak groups under an Entity namespace for fine-grained access controls.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired Keycloak RBAC group linkage
+              type: object
+              required:
+                - config
+              properties:
+                config:
+                  description: Name of an RbacConfig resource in the sovereign-cloud-plugins namespace
+                  type: string
+                description:
+                  description: Human-readable purpose of this RBAC group
+                  type: string
+            status:
+              description: Observed state after reconciliation completes
+              type: object
+              properties:
+                group:
+                  description: Fully-qualified Keycloak group path (entityName/crName)
+                  type: string
+                groupId:
+                  description: Keycloak internal group UUID
+                  type: string
+                ready:
+                  type: boolean
+                entity:
+                  description: Entity name derived from namespace label
+                  type: string
+                billingId:
+                  description: Billing ID from the entity namespace label
+                  type: string
+                creator:
+                  description: User who created the Rbac CR
+                  type: string
+                description:
+                  description: Description set on the Keycloak group
+                  type: string
+                realm:
+                  description: Keycloak realm the group belongs to
+                  type: string
+                attributes:
+                  description: Key-value attributes set on the Keycloak group
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: Config
+          type: string
+          jsonPath: .spec.config
+        - name: Group
+          type: string
+          jsonPath: .status.group
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

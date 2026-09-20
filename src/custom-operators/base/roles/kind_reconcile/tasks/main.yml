@@ -1,0 +1,53 @@
+---
+# Shared reconcile for all hybridsovereign kinds.
+# - Launch AAP JobTemplate on create / spec generation change
+# - Cancel+relaunch if failed or not completed within 3 hours
+# - Status-only updates must NOT relaunch (observedGeneration + in-window job)
+- name: Resolve kind and job template
+  ansible.builtin.set_fact:
+    hs_kind: "{{ operator_kind | default(lookup('env', 'OPERATOR_KIND') | default(ansible_operator_meta.kind, true), true) }}"
+    hs_name: "{{ ansible_operator_meta.name }}"
+    hs_namespace: "{{ ansible_operator_meta.namespace }}"
+    hs_api_version: "{{ ansible_operator_meta.api_version | default('hybridsovereign.redhat/v1alpha1') }}"
+    hs_generation: "{{ ansible_operator_meta.generation | default(0) | int }}"
+    job_stale_seconds: 10800
+    aap_host: "{{ lookup('env', 'AAP_HOST') | default('https://aap-aap.apps.cluster-qvhzm.dyn.redhatworkshops.io', true) }}"
+
+- name: Map kind to JobTemplate name
+  ansible.builtin.set_fact:
+    job_template_name: "{{ (hs_kind | lower) }}-provision"
+    teardown_template_name: "{{ (hs_kind | lower) }}-teardown"
+
+- name: Read current status safely
+  ansible.builtin.set_fact:
+    cur_observed: "{{ (status.observedGeneration | default(-1)) | int }}"
+    cur_job_id: "{{ status.aapJob.jobId | default('') }}"
+    cur_job_started: "{{ status.aapJob.startedAt | default('') }}"
+    cur_phase: "{{ status.phase | default('') }}"
+    is_delete: "{{ ansible_operator_meta.deletion_timestamp is defined and ansible_operator_meta.deletion_timestamp | length > 0 }}"
+
+- name: Skip when generation already observed and phase ready
+  ansible.builtin.meta: end_play
+  when:
+    - not is_delete | bool
+    - cur_observed | int == hs_generation | int
+    - cur_phase in ['ready', 'provisioned']
+
+- name: Include AAP API tasks
+  ansible.builtin.include_tasks: aap_job.yml
+  when: lookup('env', 'AAP_TOKEN') | length > 0 or lookup('env', 'AAP_PASSWORD') | length > 0
+
+- name: End when AAP credentials missing (status note only once)
+  when: lookup('env', 'AAP_TOKEN') | length == 0 and lookup('env', 'AAP_PASSWORD') | length == 0
+  block:
+    - name: Patch waiting-for-aap status
+      operator_sdk.util.k8s_status:
+        api_version: "{{ hs_api_version }}"
+        kind: "{{ hs_kind }}"
+        name: "{{ hs_name }}"
+        namespace: "{{ hs_namespace }}"
+        status:
+          phase: pending
+          message: "Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)"
+          observedGeneration: "{{ cur_observed | int }}"
+      when: cur_phase != 'pending'

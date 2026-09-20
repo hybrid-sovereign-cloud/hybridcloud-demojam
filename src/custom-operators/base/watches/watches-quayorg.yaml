@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: QuayOrg
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: quayorg.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

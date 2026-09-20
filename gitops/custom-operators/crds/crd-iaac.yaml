@@ -1,0 +1,116 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: iaacs.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Iaac
+    listKind: IaacList
+    plural: iaacs
+    singular: iaac
+    shortNames:
+      - iac
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Iaac watches all hybridsovereign.redhat CRs and syncs their redeployable YAML
+            to a Gitea repository for infrastructure-as-code tracking.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: IaaC configuration (currently empty, reserved for future use)
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              description: Observed sync state
+              type: object
+              properties:
+                ready:
+                  type: boolean
+                lastSyncTime:
+                  type: string
+                totalCRsSynced:
+                  x-kubernetes-int-or-string: true
+                syncErrors:
+                  x-kubernetes-int-or-string: true
+                syncedKinds:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Last Sync
+          type: string
+          jsonPath: .status.lastSyncTime
+        - name: CRs Synced
+          type: integer
+          jsonPath: .status.totalCRsSynced
+        - name: Errors
+          type: integer
+          jsonPath: .status.syncErrors
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

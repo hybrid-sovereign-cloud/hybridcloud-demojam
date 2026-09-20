@@ -1,0 +1,100 @@
+# Adopt existing AnsibleAutomationPlatform — do NOT recreate instance.
+# Seed operator credentials Secret in sovereign-cloud from AAP admin secret (in-cluster Job).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-aap-cred-sync
+  namespace: aap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-aap-cred-sync
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-aap-cred-sync
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-aap-cred-sync
+    namespace: aap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-aap-cred-sync
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-aap-cred-sync
+  namespace: aap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-aap-cred-sync
+      containers:
+        - name: sync
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              # Discover AAP admin password secret (operator-managed)
+              SECRET=$(oc get secret -n aap -o name | grep -E 'admin-password|admin_password' | head -1 | sed 's|secret/||')
+              if [[ -z "${SECRET}" ]]; then
+                echo "No AAP admin password secret found; skip"
+                exit 0
+              fi
+              PASS=$(oc get secret -n aap "$SECRET" -o jsonpath='{.data.password}' | base64 -d)
+              HOST="https://aap-aap.apps.cluster-qvhzm.dyn.redhatworkshops.io"
+              oc create secret generic aap-operator-credentials -n sovereign-cloud \
+                --from-literal=host="$HOST" \
+                --from-literal=username=admin \
+                --from-literal=password="$PASS" \
+                --dry-run=client -o yaml | oc apply -f -
+              oc create secret generic aap-admin -n sovereign-secrets \
+                --from-literal=host="$HOST" \
+                --from-literal=username=admin \
+                --from-literal=password="$PASS" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "synced AAP credentials to sovereign-cloud and sovereign-secrets"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hs-aap-jobtemplates-expected
+  namespace: aap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  note: |
+    JobTemplates (*-provision / *-teardown) are created by a follow-on
+    infra.aap_configuration Job once ansible-runner ImageStream is ready.
+    EDA remains disabled on the adopted AAP instance.
+  eda: "disabled"
+  adopt_instance: "aap/aap"

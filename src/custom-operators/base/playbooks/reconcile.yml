@@ -1,0 +1,10 @@
+---
+- hosts: localhost
+  gather_facts: false
+  collections:
+    - kubernetes.core
+    - operator_sdk.util
+  tasks:
+    - name: Include kind reconcile
+      ansible.builtin.include_role:
+        name: kind_reconcile

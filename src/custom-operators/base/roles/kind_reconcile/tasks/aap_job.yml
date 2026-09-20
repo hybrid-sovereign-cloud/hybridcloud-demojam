@@ -1,0 +1,170 @@
+---
+# AAP job launch / reconcile — anti-loop + 3h stale cancel+relaunch
+- name: Compute now UTC
+  ansible.builtin.set_fact:
+    now_epoch: "{{ now(utc=true, fmt='%s') | int }}"
+
+- name: Query existing AAP job if tracked
+  when: cur_job_id | length > 0
+  block:
+    - name: Get job status from AAP
+      ansible.builtin.uri:
+        url: "{{ aap_host }}/api/controller/v2/jobs/{{ cur_job_id }}/"
+        method: GET
+        user: "{{ lookup('env', 'AAP_USER') | default('admin', true) }}"
+        password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200, 404]
+      register: aap_job_get
+      no_log: true
+
+    - name: Set job facts
+      ansible.builtin.set_fact:
+        aap_job_status: "{{ aap_job_get.json.status | default('missing') if aap_job_get.status == 200 else 'missing' }}"
+        aap_job_finished: "{{ aap_job_get.json.finished | default('') if aap_job_get.status == 200 else '' }}"
+
+- name: Default job status when none
+  ansible.builtin.set_fact:
+    aap_job_status: "{{ aap_job_status | default('none') }}"
+
+- name: Compute job age seconds
+  ansible.builtin.set_fact:
+    job_age_seconds: "{{ (now_epoch | int) - (cur_job_started | default(now_epoch) | to_datetime('%Y-%m-%dT%H:%M:%SZ') | int) if cur_job_started | length > 0 else 0 }}"
+  ignore_errors: true
+
+- name: Fallback job age using startedAt as epoch string
+  when: job_age_seconds is not defined
+  ansible.builtin.set_fact:
+    job_age_seconds: 0
+
+- name: Decide action
+  ansible.builtin.set_fact:
+    need_launch: >-
+      {{
+        (is_delete | bool and True) or
+        (cur_observed | int != hs_generation | int and aap_job_status not in ['pending', 'waiting', 'running']) or
+        (aap_job_status in ['failed', 'error', 'canceled', 'missing', 'none'] and cur_observed | int != hs_generation | int) or
+        (aap_job_status in ['pending', 'waiting', 'running'] and (job_age_seconds | int) > (job_stale_seconds | int)) or
+        (aap_job_status in ['failed', 'error', 'canceled'] and cur_phase not in ['ready', 'provisioned'])
+      }}
+    need_cancel: >-
+      {{
+        aap_job_status in ['pending', 'waiting', 'running'] and
+        ((job_age_seconds | int) > (job_stale_seconds | int) or aap_job_status in ['failed', 'error'])
+      }}
+    mark_ready: "{{ aap_job_status == 'successful' }}"
+    noop_running: "{{ aap_job_status in ['pending', 'waiting', 'running'] and (job_age_seconds | int) <= (job_stale_seconds | int) }}"
+
+- name: No-op while job running within 3h window
+  ansible.builtin.meta: end_play
+  when: noop_running | bool and not (is_delete | bool) and cur_observed | int == hs_generation | int
+
+- name: Mark ready when AAP job successful
+  when: mark_ready | bool and not (is_delete | bool)
+  block:
+    - name: Patch ready status
+      operator_sdk.util.k8s_status:
+        api_version: "{{ hs_api_version }}"
+        kind: "{{ hs_kind }}"
+        name: "{{ hs_name }}"
+        namespace: "{{ hs_namespace }}"
+        status:
+          phase: provisioned
+          ready: true
+          observedGeneration: "{{ hs_generation | int }}"
+          aapJob:
+            jobId: "{{ cur_job_id }}"
+            status: successful
+            startedAt: "{{ cur_job_started }}"
+            url: "{{ aap_host }}/execution/jobs/playbook/{{ cur_job_id }}/details"
+          message: "AAP job successful"
+    - name: End after ready
+      ansible.builtin.meta: end_play
+
+- name: Cancel stale or failed job
+  when:
+    - need_cancel | bool or (need_launch | bool and cur_job_id | length > 0 and aap_job_status in ['pending', 'waiting', 'running', 'failed', 'error'])
+    - cur_job_id | length > 0
+  ansible.builtin.uri:
+    url: "{{ aap_host }}/api/controller/v2/jobs/{{ cur_job_id }}/cancel/"
+    method: POST
+    user: "{{ lookup('env', 'AAP_USER') | default('admin', true) }}"
+    password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 202, 400, 404, 405]
+  failed_when: false
+  no_log: true
+
+- name: Launch AAP JobTemplate
+  when: need_launch | bool or (cur_observed | int != hs_generation | int and not noop_running | bool)
+  block:
+    - name: Find JobTemplate id
+      ansible.builtin.uri:
+        url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) | urlencode }}"
+        method: GET
+        user: "{{ lookup('env', 'AAP_USER') | default('admin', true) }}"
+        password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200]
+      register: jt_lookup
+      no_log: true
+
+    - name: Fail soft if JT missing
+      when: (jt_lookup.json.count | default(0) | int) < 1
+      block:
+        - name: Status missing JT
+          operator_sdk.util.k8s_status:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ hs_kind }}"
+            name: "{{ hs_name }}"
+            namespace: "{{ hs_namespace }}"
+            status:
+              phase: pending
+              message: "JobTemplate {{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) }} not found in AAP"
+              observedGeneration: "{{ cur_observed | int }}"
+        - name: End
+          ansible.builtin.meta: end_play
+
+    - name: Launch job
+      ansible.builtin.uri:
+        url: "{{ aap_host }}/api/controller/v2/job_templates/{{ jt_lookup.json.results[0].id }}/launch/"
+        method: POST
+        user: "{{ lookup('env', 'AAP_USER') | default('admin', true) }}"
+        password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          extra_vars:
+            event_payload:
+              reason: "{{ hs_kind }}{{ (is_delete | bool) | ternary('Delete', 'Create') }}Requested"
+              regarding:
+                apiVersion: "{{ hs_api_version }}"
+                kind: "{{ hs_kind }}"
+                name: "{{ hs_name }}"
+                namespace: "{{ hs_namespace }}"
+              action: "{{ (is_delete | bool) | ternary('Delete', 'Create') }}"
+              cluster: local
+        status_code: [201]
+      register: jt_launch
+      no_log: true
+
+    - name: Patch reconciling status with job id
+      operator_sdk.util.k8s_status:
+        api_version: "{{ hs_api_version }}"
+        kind: "{{ hs_kind }}"
+        name: "{{ hs_name }}"
+        namespace: "{{ hs_namespace }}"
+        status:
+          phase: reconciling
+          ready: false
+          observedGeneration: "{{ hs_generation | int }}"
+          aapJob:
+            jobId: "{{ jt_launch.json.id | string }}"
+            status: "{{ jt_launch.json.status | default('pending') }}"
+            startedAt: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+            url: "{{ aap_host }}/execution/jobs/playbook/{{ jt_launch.json.id }}/details"
+          message: "AAP job launched"

@@ -1,0 +1,117 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rbacconfigs.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: RbacConfig
+    listKind: RbacConfigList
+    plural: rbacconfigs
+    singular: rbacconfig
+    shortNames:
+      - rbc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            RbacConfig connects the operator to a Keycloak deployment and provisions realm clients
+            used by tenant-scoped Rbac resources.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired Keycloak linkage configuration
+              type: object
+              required:
+                - type
+                - secret
+              properties:
+                type:
+                  description: Authentication backend type (must be keycloak)
+                  type: string
+                secret:
+                  description: >-
+                    Name of a Secret (in the same namespace as this CR) containing Keycloak admin credentials
+                  type: string
+            status:
+              description: Observed state after reconciliation
+              type: object
+              properties:
+                clientId:
+                  type: string
+                clientSecretName:
+                  type: string
+                ready:
+                  type: boolean
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

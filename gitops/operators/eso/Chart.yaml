@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-operators-eso
-description: Hybrid Sovereign GitOps component (gitops/operators/eso)
+name: hs-eso
+description: External Secrets Operator (OLM) — provision only if missing; adopt if present
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "1.2"

@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-apps-samples
-description: Hybrid Sovereign GitOps component (gitops/apps/samples)
+name: hs-samples
+description: Non-parked hybridsovereign sample CRs (CloudAWS/OSO/PlatformOpenshift/OpenStackMigration disabled)
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"

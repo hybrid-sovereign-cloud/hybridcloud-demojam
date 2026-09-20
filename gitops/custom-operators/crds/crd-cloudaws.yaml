@@ -1,0 +1,154 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudawss.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: CloudAWS
+    listKind: CloudAWSList
+    plural: cloudawss
+    singular: cloudaws
+    shortNames:
+      - caws
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            CloudAWS provisions an AWS environment (Route53 subdomain, slug)
+            by creating a helper AWSHelper CR on the central cluster.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [account, vaultPath, baseDomain]
+              properties:
+                account:
+                  type: string
+                  description: "AWS account ID"
+                vaultPath:
+                  type: string
+                  description: "Vault KV path for AWS credentials (central cluster)"
+                baseDomain:
+                  type: string
+                  description: "Parent DNS domain (e.g. sandbox5530.opentlc.com)"
+                landingzone:
+                  type: string
+                  description: Landing Zone template name
+                  default: default
+            status:
+              type: object
+              properties:
+                name:
+                  type: string
+                namespace:
+                  type: string
+                entity:
+                  type: string
+                awsHelperName:
+                  type: string
+                  description: "Name of the AWSHelper CR created in central cluster"
+                awsHelperCreated:
+                  type: boolean
+                centralApiServer:
+                  type: string
+                slug:
+                  type: string
+                  description: "5-character subdomain slug from AWSHelper"
+                domain:
+                  type: string
+                  description: "Full domain: <slug>.<baseDomain>"
+                route53ZoneId:
+                  type: string
+                  description: "Route53 hosted zone ID"
+                awsAccountId:
+                  type: string
+                awsRegion:
+                  type: string
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Slug
+          type: string
+          jsonPath: .status.slug
+        - name: Domain
+          type: string
+          jsonPath: .status.domain
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

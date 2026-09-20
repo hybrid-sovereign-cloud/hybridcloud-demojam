@@ -1,0 +1,207 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudosos.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: CloudOSO
+    listKind: CloudOSOList
+    plural: cloudosos
+    singular: cloudoso
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            CloudOSO declares OpenStack/Routed53 environment prerequisites and
+            creates an OSOHelper (type environmentprep) on the central cluster
+            while exposing observed helper outputs and Namespace entity metadata on status.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: >-
+                Desired helper inputs forwarded to OSOHelper spec.environmentprep
+                on the central cluster.
+              type: object
+              properties:
+                project:
+                  type: string
+                  description: OpenStack project name hint (required)
+                vaultPath:
+                  type: string
+                  description: Vault path for OpenStack admin credentials (e.g. oso/accounts/shc_admin)
+                baseDomain:
+                  type: string
+                  description: Base DNS domain (e.g. )
+                projectDomain:
+                  type: string
+                  description: "Keystone domain name (default: shc_domain)"
+                  default: shc_domain
+                externalNetwork:
+                  type: string
+                  description: External Neutron network
+                  default: ext-net
+                route53VaultPath:
+                  type: string
+                  description: Vault path for Route53 credentials (e.g. oso/accounts/route53-openstack)
+                landingzone:
+                  type: string
+                  description: Landing Zone template name
+                  default: default
+                designateZoneId:
+                  type: string
+                  description: Designate zone UUID for shc. environments
+                  default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"
+                designateProjectId:
+                  type: string
+                  description: OpenStack project ID owning the Designate zone
+                  default: "4cdae8e2b49c4f1fa4b4a69be8ea43e7"
+                enableVRF:
+                  type: boolean
+                  description: Enable VRF networking for this environment (passed to provisioning; no effect until implemented)
+                  default: false
+                vrfId:
+                  type: string
+                  description: VRF identifier when enableVRF is true
+            status:
+              description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
+              type: object
+              properties:
+                name:
+                  type: string
+                namespace:
+                  type: string
+                entity:
+                  type: string
+                slug:
+                  type: string
+                domain:
+                  type: string
+                route53ZoneId:
+                  type: string
+                apiVIP:
+                  type: string
+                ingressVIP:
+                  type: string
+                externalNetwork:
+                  type: string
+                billingId:
+                  type: string
+                description:
+                  type: string
+                osoHelperName:
+                  type: string
+                  description: Name of the OSOHelper CR created in central cluster
+                osoHelperCreated:
+                  type: boolean
+                  description: Whether the OSOHelper CR was created successfully
+                centralApiServer:
+                  type: string
+                  description: Central cluster API server URL
+                projectName:
+                  type: string
+                  description: OpenStack project name created by OSOHelper
+                projectId:
+                  type: string
+                  description: OpenStack project ID returned by OSOHelper
+                domainId:
+                  type: string
+                  description: OpenStack domain ID from OSOHelper
+                domainName:
+                  type: string
+                  description: OpenStack domain name from OSOHelper
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Slug
+          type: string
+          jsonPath: .status.slug
+        - name: Domain
+          type: string
+          jsonPath: .status.domain
+        - name: Project
+          type: string
+          jsonPath: .status.projectName
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

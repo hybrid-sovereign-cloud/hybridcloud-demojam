@@ -1,0 +1,755 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-rbacconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: RbacConfig
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-rbacconfig-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-rbacconfig-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-rbacconfig
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: RbacConfig
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: rbacconfig.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-rbacconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: RbacConfig
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: RbacConfig
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: RbacConfig
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-rbacconfig-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: RbacConfig
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-rbacconfig
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-aapconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: AAPConfig
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-aapconfig-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-aapconfig-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-aapconfig
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: AAPConfig
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: aapconfig.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-aapconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: AAPConfig
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: AAPConfig
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: AAPConfig
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-aapconfig-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: AAPConfig
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-aapconfig
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-quayconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: QuayConfig
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-quayconfig-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-quayconfig-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-quayconfig
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: QuayConfig
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: quayconfig.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-quayconfig-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: QuayConfig
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: QuayConfig
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: QuayConfig
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-quayconfig-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: QuayConfig
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-quayconfig
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-hybridfabric-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: HybridFabric
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-hybridfabric-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-hybridfabric-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-hybridfabric
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: HybridFabric
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: hybridfabric.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-hybridfabric-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: HybridFabric
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: HybridFabric
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: HybridFabric
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-hybridfabric-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: HybridFabric
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-hybridfabric
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-cloudgateway-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: CloudGateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-cloudgateway-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-cloudgateway-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-cloudgateway
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: CloudGateway
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: cloudgateway.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-cloudgateway-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: CloudGateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: CloudGateway
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: CloudGateway
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-cloudgateway-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: CloudGateway
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-cloudgateway
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-transportlink-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: TransportLink
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-transportlink-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-transportlink-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-transportlink
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: TransportLink
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: transportlink.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-transportlink-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: TransportLink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: TransportLink
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: TransportLink
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-transportlink-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: TransportLink
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-transportlink
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-uihealthchecker-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: UIHealthChecker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-uihealthchecker-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-uihealthchecker-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-uihealthchecker
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: UIHealthChecker
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: uihealthchecker.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-uihealthchecker-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: UIHealthChecker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: UIHealthChecker
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: UIHealthChecker
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-uihealthchecker-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: UIHealthChecker
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-uihealthchecker

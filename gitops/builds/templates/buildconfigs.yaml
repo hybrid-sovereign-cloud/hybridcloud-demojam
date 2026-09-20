@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-dockerfile
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  Dockerfile: |
+    FROM docker.io/gitea/gitea:1.22.3-rootless
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: gitea-local
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gitea-local:latest
+  source:
+    type: Dockerfile
+    dockerfile: |
+      FROM docker.io/gitea/gitea:1.22.3-rootless
+  strategy:
+    type: Docker
+    dockerStrategy:
+      from:
+        kind: DockerImage
+        name: docker.io/gitea/gitea:1.22.3-rootless
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: hybridsovereign-ansible-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: hybridsovereign-ansible-operator:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      ref: main
+    contextDir: src/custom-operators/base
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial

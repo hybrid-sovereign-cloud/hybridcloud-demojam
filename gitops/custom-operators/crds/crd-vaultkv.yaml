@@ -1,0 +1,175 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vaultkvs.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: VaultKV
+    listKind: VaultKVList
+    plural: vaultkvs
+    singular: vaultkv
+    shortNames:
+      - vkv
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            VaultKV creates a KV v2 secrets engine in a tenant Vault and configures
+            OIDC-based access policies for RBAC groups.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired KV secrets engine configuration
+              type: object
+              required:
+                - vault
+              properties:
+                vault:
+                  description: Name of a Vault CR in the same namespace
+                  type: string
+                vaultAdminRbac:
+                  description: Array of Rbac CR names that get admin access to this KV
+                  type: array
+                  items:
+                    type: string
+                vaultReaderRbac:
+                  description: Array of Rbac CR names that get read-only access to this KV
+                  type: array
+                  items:
+                    type: string
+                vaultOpsRbac:
+                  description: Array of Rbac CR names that get ops access (full CRUD on secrets, no policy management)
+                  type: array
+                  items:
+                    type: string
+                vaultDeveloperRbac:
+                  description: Array of Rbac CR names that get developer access (read + create new secrets, no delete)
+                  type: array
+                  items:
+                    type: string
+            status:
+              description: Observed state after reconciliation
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                kvPath:
+                  description: KV v2 engine mount path in Vault
+                  type: string
+                adminPolicy:
+                  description: Vault policy name for admin access
+                  type: string
+                readerPolicy:
+                  description: Vault policy name for reader access
+                  type: string
+                adminRbacGroups:
+                  description: Keycloak groups mapped to admin policy
+                  type: array
+                  items:
+                    type: string
+                readerRbacGroups:
+                  description: Keycloak groups mapped to reader policy
+                  type: array
+                  items:
+                    type: string
+                opsRbacGroups:
+                  description: Keycloak groups mapped to ops policy
+                  type: array
+                  items:
+                    type: string
+                developerRbacGroups:
+                  description: Keycloak groups mapped to developer policy
+                  type: array
+                  items:
+                    type: string
+                loginUrl:
+                  description: URL for OIDC login to this Vault
+                  type: string
+                vaultUrl:
+                  description: URL of the parent Vault instance
+                  type: string
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: Vault
+          type: string
+          jsonPath: .spec.vault
+        - name: KV Path
+          type: string
+          jsonPath: .status.kvPath
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,0 +1,168 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: quayorgs.hybridsovereign.redhat
+  labels:
+    {{- include "plugin-quay.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: QuayOrg
+    listKind: QuayOrgList
+    plural: quayorgs
+    singular: quayorg
+    shortNames:
+      - qorg
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Quay Config
+          type: string
+          jsonPath: .spec.quayConfig
+        - name: Org Name
+          type: string
+          jsonPath: .status.orgName
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >-
+            QuayOrg creates an organization in Quay and configures OIDC-based
+            team memberships for admin, creator, and member roles.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - quayConfig
+              properties:
+                quayConfig:
+                  type: string
+                  description: >-
+                    Name of the QuayConfig in sovereign-cloud-plugins that provides
+                    Quay connection configuration.
+                quayAdminRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive Quay
+                    organization admin role.
+                quayCreatorRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive Quay
+                    organization creator role.
+                quayMemberRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive Quay
+                    organization member role.
+            status:
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                orgName:
+                  type: string
+                  description: Quay organization name.
+                quayUrl:
+                  type: string
+                  description: External Quay URL.
+                orgUrl:
+                  type: string
+                  description: Direct URL to the Quay organization.
+                loginUrl:
+                  type: string
+                  description: OIDC login URL for this Quay org.
+                adminGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as org admins.
+                creatorGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as org creators.
+                memberGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as org members.
+                teams:
+                  type: string
+                  description: JSON summary of team mappings.
+                entity:
+                  type: string
+                  description: Entity this org belongs to.
+                message:
+                  type: string
+                  description: Human-readable status message.
+              x-kubernetes-preserve-unknown-fields: true

@@ -1,0 +1,137 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudgateways.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: CloudGateway
+    listKind: CloudGatewayList
+    plural: cloudgateways
+    singular: cloudgateway
+    shortNames:
+      - cgw
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: Cloud landing-zone gateway for Hybrid VPC.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  default: false
+                cloud:
+                  type: string
+                  enum: [aws, openstack, openshift]
+                region:
+                  type: string
+                domainAsn:
+                  type: integer
+                landingZoneTemplate:
+                  type: string
+                  default: default
+                fabricRef:
+                  type: string
+                transport:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [wireguard, ipsec, macsec, none]
+                    vaultPeerConfigRef:
+                      type: string
+                awsAccountId:
+                  type: string
+                openstackCloudOSORef:
+                  type: string
+            status:
+              type: object
+              properties:
+                landingZoneReady:
+                  type: boolean
+                gatewayAddress:
+                  type: string
+                transportReady:
+                  type: boolean
+                peerCount:
+                  type: integer
+                status:
+                  type: string
+                message:
+                  type: string
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Cloud
+          type: string
+          jsonPath: .spec.cloud
+        - name: Region
+          type: string
+          jsonPath: .spec.region
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

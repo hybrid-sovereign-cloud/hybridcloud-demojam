@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-infrastructure-quay
-description: Hybrid Sovereign GitOps component (gitops/infrastructure/quay)
+name: hs-quay
+description: Quay operator + registry on ODF/NooBaa S3 for QuayConfig/QuayOrg
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "3.17"

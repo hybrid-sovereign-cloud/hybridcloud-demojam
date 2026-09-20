@@ -1,0 +1,16 @@
+# Placeholder note: ClusterSecretStore + PushSecrets are applied after Vault init Job
+# completes (Argo PostSync in later revision). This ConfigMap documents ownership.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hs-security-readme
+  namespace: sovereign-secrets
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  policy: |
+    All generated credentials MUST be written as Secrets in namespace sovereign-secrets.
+    PushSecret CRs (External Secrets Operator) backup them to Vault KV paths hybridsovereign/*.
+    Never commit secret values to git.
+  status: awaiting-eso-and-vault-init

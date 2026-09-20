@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-infrastructure-security
-description: Hybrid Sovereign GitOps component (gitops/infrastructure/security)
+name: hs-security
+description: PushSecret scaffolding for sovereign-secrets backup to Vault
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"

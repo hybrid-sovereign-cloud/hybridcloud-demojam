@@ -1,0 +1,171 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: aaporgs.hybridsovereign.redhat
+  labels:
+    {{- include "plugin-aap.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: AAPOrg
+    listKind: AAPOrgList
+    plural: aaporgs
+    singular: aaporg
+    shortNames:
+      - aaporg
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: AAP Config
+          type: string
+          jsonPath: .spec.aapConfig
+        - name: Org ID
+          type: string
+          jsonPath: .status.orgId
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >-
+            AAPOrg creates an organization in AAP and configures OIDC group
+            mappings for admin and job-executor roles.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - aapConfig
+              properties:
+                aapConfig:
+                  type: string
+                  description: >-
+                    Name of the AAPConfig in sovereign-cloud-plugins that provides
+                    AAP connection and auth configuration.
+                aapAdminRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive AAP
+                    organization admin role.
+                aapJobExecutorRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive AAP
+                    job executor (execute) role.
+                aapViewerRbac:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Array of Rbac CR names whose Keycloak groups receive AAP
+                    read-only access (view jobs, inventories, templates).
+            status:
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                orgId:
+                  type: string
+                  description: AAP organization ID (controller-side).
+                orgName:
+                  type: string
+                  description: AAP organization name.
+                aapControllerUrl:
+                  type: string
+                  description: External AAP controller URL.
+                loginUrl:
+                  type: string
+                  description: OIDC login URL for accessing this org.
+                adminGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as org admins.
+                executorGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as job executors.
+                viewerGroups:
+                  type: array
+                  items:
+                    type: string
+                  description: Keycloak groups mapped as read-only viewers.
+                authMethodId:
+                  type: string
+                  description: Reference to the AAP authenticator.
+                teamMappings:
+                  type: string
+                  description: JSON summary of team/role mappings.
+                entity:
+                  type: string
+                  description: Entity this org belongs to.
+                message:
+                  type: string
+                  description: Human-readable status message.
+              x-kubernetes-preserve-unknown-fields: true

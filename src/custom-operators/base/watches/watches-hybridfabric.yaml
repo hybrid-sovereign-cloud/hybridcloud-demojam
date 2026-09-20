@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: HybridFabric
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: hybridfabric.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

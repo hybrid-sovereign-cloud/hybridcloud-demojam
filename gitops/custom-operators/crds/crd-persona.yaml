@@ -1,0 +1,131 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: personas.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Persona
+    listKind: PersonaList
+    plural: personas
+    singular: persona
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Persona represents a Keycloak group linked to an Rbac CR in the Hybrid Sovereign Cloud platform.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired state of the Persona
+              type: object
+              required:
+                - rbac
+                - type
+              properties:
+                rbac:
+                  description: Name of the Rbac CR this persona references
+                  type: string
+                type:
+                  description: Persona role type determining Keycloak group mapping
+                  type: string
+                  enum:
+                    - assignmentAdmin
+                    - auditor
+                    - BobsTeam
+                    - cloudOSOAdmin
+                    - cloudOSOView
+                    - cloudAWSAdmin
+                    - cloudAWSView
+                    - entityAdmin
+                    - identityAdmin
+                    - platformOpenshiftAdmin
+                    - platformOpenshiftView
+                    - teamAdmin
+                    - teamView
+                    - projectAdmin
+                    - projectView
+            status:
+              description: Observed state set by the operator after reconciliation
+              type: object
+              properties:
+                status:
+                  type: string
+                ready:
+                  type: boolean
+                message:
+                  type: string
+                keycloakGroup:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  x-kubernetes-int-or-string: true
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: RBAC
+          type: string
+          jsonPath: .spec.rbac
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,0 +1,160 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hybridfabrics.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: HybridFabric
+    listKind: HybridFabricList
+    plural: hybridfabrics
+    singular: hybridfabric
+    shortNames:
+      - hfab
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: Platform EVPN fabric configuration for Hybrid VPC.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  default: false
+                domainAsn:
+                  type: integer
+                  minimum: 1
+                  maximum: 4294967295
+                routeReflectors:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, address]
+                    properties:
+                      name:
+                        type: string
+                      address:
+                        type: string
+                vniPool:
+                  type: object
+                  required: [start, end]
+                  properties:
+                    start:
+                      type: integer
+                    end:
+                      type: integer
+                borderGateway:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    loopback:
+                      type: string
+                    vaultCredentialRef:
+                      type: string
+                transportDefaults:
+                  type: object
+                  properties:
+                    mtu:
+                      type: integer
+                      default: 9000
+                    innerMssClamp:
+                      type: integer
+                      default: 1360
+                    defaultTunnelType:
+                      type: string
+                      enum: [wireguard, ipsec, macsec, none]
+                      default: wireguard
+                numberingAuthority:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                fabricBaseReady:
+                  type: boolean
+                borderBgwReady:
+                  type: boolean
+                allocatedVniCount:
+                  type: integer
+                availableVniCount:
+                  type: integer
+                status:
+                  type: string
+                message:
+                  type: string
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Enabled
+          type: boolean
+          jsonPath: .spec.enabled
+        - name: ASN
+          type: integer
+          jsonPath: .spec.domainAsn
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

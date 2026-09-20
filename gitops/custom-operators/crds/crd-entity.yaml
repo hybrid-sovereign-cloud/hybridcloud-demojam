@@ -1,0 +1,208 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: entities.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Entity
+    listKind: EntityList
+    plural: entities
+    singular: entity
+    shortNames:
+      - ent
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Entity represents a tenant namespace in the Hybrid Sovereign Cloud platform.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired state of the Entity
+              type: object
+              required:
+                - description
+                - billingID
+              properties:
+                description:
+                  description: Multi-line description of the entity
+                  type: string
+                billingID:
+                  description: Billing identifier (also applied as a namespace label)
+                  type: string
+                  pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$"
+                websiteLink:
+                  description: URL to the entity's external website
+                  type: string
+                namespaceRbac:
+                  description: Maps each named RBAC role to a list of Rbac CR names (14-role matrix)
+                  type: object
+                  properties:
+                    entityAdmin:
+                      description: Full admin over all CRs in the entity namespace
+                      type: array
+                      items:
+                        type: string
+                    auditor:
+                      description: Read-all access across all CR types
+                      type: array
+                      items:
+                        type: string
+                    BobsTeam:
+                      description: Read-all access across all CR types (same as auditor)
+                      type: array
+                      items:
+                        type: string
+                    cloudOSOAdmin:
+                      description: Create/edit/delete CloudOSO CRs; view Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    cloudOSOView:
+                      description: View CloudOSO CRs and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    cloudAWSAdmin:
+                      description: Create/edit/delete CloudAWS CRs; view Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    cloudAWSView:
+                      description: View CloudAWS CRs and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    platformOpenshiftAdmin:
+                      description: Create/edit/delete PlatformOpenshift CRs; view Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    platformOpenshiftView:
+                      description: View PlatformOpenshift CRs and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    teamAdmin:
+                      description: Create/edit/delete Team CRs; view Assignment and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    teamView:
+                      description: View Team, Assignment, and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    projectAdmin:
+                      description: Create/edit/delete Project CRs; view Assignment and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    projectView:
+                      description: View Project, Assignment, and Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    assignmentAdmin:
+                      description: Create/edit/delete Assignment CRs; view Rbac CRs
+                      type: array
+                      items:
+                        type: string
+                    identityAdmin:
+                      description: Create and view Rbac CRs
+                      type: array
+                      items:
+                        type: string
+            status:
+              description: Observed state set by the operator after reconciliation
+              type: object
+              properties:
+                entity:
+                  type: string
+                description:
+                  type: string
+                openshiftConsoleURL:
+                  type: string
+                billingID:
+                  type: string
+                websiteLink:
+                  type: string
+                status:
+                  type: string
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Namespace
+          type: string
+          jsonPath: .status.entity
+        - name: BillingID
+          type: string
+          jsonPath: .status.billingID
+        - name: Console
+          type: string
+          jsonPath: .status.openshiftConsoleURL
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

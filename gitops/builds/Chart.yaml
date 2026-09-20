@@ -1,6 +1,9 @@
+# Shared operator base + UI/plugin/gitea ImageStreams and BuildConfigs
+# Bases: registry.redhat.io / registry.access.redhat.com where applicable.
+# Output: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/*
 apiVersion: v2
 name: hs-builds
-description: Hybrid Sovereign GitOps component (gitops/builds)
+description: OpenShift BuildConfigs and ImageStreams for hybridsovereign
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"

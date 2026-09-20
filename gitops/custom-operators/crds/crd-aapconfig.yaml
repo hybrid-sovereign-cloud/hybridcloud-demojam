@@ -1,0 +1,128 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: aapconfigs.hybridsovereign.redhat
+  labels:
+    {{- include "plugin-aap.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: AAPConfig
+    listKind: AAPConfigList
+    plural: aapconfigs
+    singular: aapconfig
+    shortNames:
+      - aapcfg
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: AAP URL
+          type: string
+          jsonPath: .status.aapControllerUrl
+        - name: Auth Method
+          type: string
+          jsonPath: .status.authMethodType
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >-
+            AAPConfig configures a connection to an Ansible Automation Platform
+            controller and installs a dedicated OIDC authentication method.
+            Must only be created in the sovereign-cloud-plugins namespace.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - secret
+                - rbacConfig
+              properties:
+                secret:
+                  type: string
+                  description: >-
+                    Name of a Secret in sovereign-cloud-plugins containing AAP
+                    controller credentials (host, username, password).
+                rbacConfig:
+                  type: string
+                  description: >-
+                    Name of an RbacConfig in sovereign-cloud-plugins to use for
+                    OIDC authentication method configuration.
+            status:
+              type: object
+              properties:
+                ready:
+                  type: boolean
+                aapControllerUrl:
+                  type: string
+                  description: External URL of the AAP controller.
+                authMethodType:
+                  type: string
+                  description: Type of auth method configured (e.g., oidc).
+                authMethodId:
+                  type: string
+                  description: ID of the configured authenticator in AAP.
+                keycloakClientId:
+                  type: string
+                  description: OIDC client registered in Keycloak.
+                realm:
+                  type: string
+                  description: Keycloak realm used for OIDC.
+                entity:
+                  type: string
+                  description: Entity this config belongs to.
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                message:
+                  type: string
+                  description: Human-readable status message.
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true

@@ -1,0 +1,122 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: quayconfigs.hybridsovereign.redhat
+  labels:
+    {{- include "plugin-quay.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: QuayConfig
+    listKind: QuayConfigList
+    plural: quayconfigs
+    singular: quayconfig
+    shortNames:
+      - qcfg
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Quay URL
+          type: string
+          jsonPath: .status.quayUrl
+        - name: OIDC
+          type: string
+          jsonPath: .status.oidcConfigured
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >-
+            QuayConfig configures a connection to a Red Hat Quay registry
+            and installs a dedicated OIDC authentication method.
+            Must only be created in the sovereign-cloud-plugins namespace.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - secret
+                - rbacConfig
+              properties:
+                secret:
+                  type: string
+                  description: >-
+                    Name of a Secret in sovereign-cloud-plugins containing Quay
+                    admin credentials (host, token).
+                rbacConfig:
+                  type: string
+                  description: >-
+                    Name of an RbacConfig in sovereign-cloud-plugins to use for
+                    OIDC authentication configuration.
+            status:
+              type: object
+              properties:
+                ready:
+                  type: boolean
+                quayUrl:
+                  type: string
+                  description: External URL of the Quay registry.
+                oidcConfigured:
+                  type: string
+                  description: Whether OIDC is configured (true/false).
+                keycloakClientId:
+                  type: string
+                  description: OIDC client registered in Keycloak.
+                realm:
+                  type: string
+                  description: Keycloak realm used for OIDC.
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                message:
+                  type: string
+                  description: Human-readable status message.
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true

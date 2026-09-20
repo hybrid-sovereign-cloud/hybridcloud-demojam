@@ -1,0 +1,286 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: platformopenshifts.hybridsovereign.redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: PlatformOpenshift
+    listKind: PlatformOpenshiftList
+    plural: platformopenshifts
+    singular: platformopenshift
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            PlatformOpenshift observes namespace labels and exposes them via status.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired state for PlatformOpenshift
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: "Platform type: openstack or aws"
+                  enum: [openstack, aws]
+                openstack:
+                  type: object
+                  description: "OpenStack-specific configuration"
+                  properties:
+                    environment:
+                      type: string
+                      description: "CloudOSO CR name providing the OpenStack environment"
+                    controlPlaneCount:
+                      type: integer
+                      description: "Control plane node count"
+                      default: 3
+                    workerCount:
+                      type: integer
+                      description: "Worker node count"
+                      default: 3
+                    controlPlaneFlavor:
+                      type: string
+                      description: "OpenStack flavor for control plane"
+                      default: "m1.xlarge"
+                    workerFlavor:
+                      type: string
+                      description: "OpenStack flavor for workers"
+                      default: "m1.large"
+                    externalNetwork:
+                      type: string
+                      description: "Neutron external network name"
+                      default: "ext-net"
+                aws:
+                  type: object
+                  description: "AWS-specific configuration"
+                  required: [environment]
+                  properties:
+                    environment:
+                      type: string
+                      description: "CloudAWS CR name providing the AWS environment"
+                    region:
+                      type: string
+                      description: "AWS region (default: us-east-1)"
+                      default: us-east-1
+                    clusterType:
+                      type: string
+                      description: "Cluster topology type"
+                      default: standalone
+                      enum: [standalone, ha]
+                    controlPlaneCount:
+                      type: integer
+                      description: "Control plane node count"
+                      default: 3
+                    workerCount:
+                      type: integer
+                      description: "Worker node count"
+                      default: 2
+                    controllerFlavor:
+                      type: string
+                      description: "AWS instance type for control plane"
+                      default: m5.xlarge
+                    workerFlavor:
+                      type: string
+                      description: "AWS instance type for workers"
+                      default: m5.large
+                toolRbac:
+                  description: Controls who gets roles on the provisioned OpenShift cluster (Layer 2 RBAC)
+                  type: object
+                  properties:
+                    clusterAdminRbac:
+                      description: Rbac CR names that get cluster-admin on the target cluster
+                      type: array
+                      items:
+                        type: string
+                    clusterOperatorRbac:
+                      description: Rbac CR names that can manage workloads and power state (no RBAC changes)
+                      type: array
+                      items:
+                        type: string
+                    clusterDeveloperRbac:
+                      description: Rbac CR names that can deploy applications in assigned namespaces
+                      type: array
+                      items:
+                        type: string
+                    clusterViewerRbac:
+                      description: Rbac CR names with read-only cluster access
+                      type: array
+                      items:
+                        type: string
+                clusterViewerRbac:
+                  description: >-
+                    Rbac CR names whose Keycloak groups get read-only access to THIS PlatformOpenshift CR
+                    on the services cluster (namespace-scoped Role + RoleBinding).
+                    Distinct from toolRbac.clusterViewerRbac which grants view on the spoke cluster.
+                  type: array
+                  items:
+                    type: string
+            status:
+              description: Observed state
+              type: object
+              properties:
+                name:
+                  type: string
+                namespace:
+                  type: string
+                entity:
+                  type: string
+                billingId:
+                  type: string
+                description:
+                  type: string
+                platformType:
+                  type: string
+                slug:
+                  type: string
+                domain:
+                  type: string
+                apiURL:
+                  type: string
+                appsURL:
+                  type: string
+                consoleURL:
+                  type: string
+                  description: "OpenShift web console URL"
+                adminPasswordVaultPath:
+                  type: string
+                  description: "Vault path for admin password"
+                kubeconfigVaultPath:
+                  type: string
+                  description: "Vault path for admin kubeconfig"
+                secretsVaultPath:
+                  type: string
+                  description: "Vault path prefix for all cluster secrets"
+                clusterVersion:
+                  type: string
+                  description: "OpenShift version"
+                powerState:
+                  type: string
+                  description: "Cluster power state (Running, Hibernating, etc.)"
+                clusterHealth:
+                  type: string
+                  description: "Overall cluster health"
+                provisionStatus:
+                  type: string
+                  description: "Provision status from ACM/Hive"
+                acmAvailable:
+                  type: boolean
+                  description: "ACM ManagedCluster availability"
+                acmJoined:
+                  type: boolean
+                  description: "ACM ManagedCluster joined status"
+                clusterInstalled:
+                  type: boolean
+                  description: "Whether the cluster installation is complete"
+                oidcConfigured:
+                  type: boolean
+                  description: "Whether Keycloak OIDC client has been created and ACM policy pushed"
+                oidcClientId:
+                  type: string
+                  description: "Keycloak OIDC client ID for this cluster"
+                awsHelperName:
+                  type: string
+                awsRegion:
+                  type: string
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      jobId:
+                        type: string
+                      url:
+                        type: string
+                      timestamp:
+                        type: string
+                      status:
+                        type: string
+                        enum: [running, success, failed]
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Slug
+          type: string
+          jsonPath: .status.slug
+        - name: Domain
+          type: string
+          jsonPath: .status.domain
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: string
+          jsonPath: .status.ready
+        - name: Health
+          type: string
+          jsonPath: .status.clusterHealth
+        - name: Power
+          type: string
+          jsonPath: .status.powerState
+        - name: Version
+          type: string
+          jsonPath: .status.clusterVersion
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-infrastructure-aap
-description: Hybrid Sovereign GitOps component (gitops/infrastructure/aap)
+name: hs-aap-config
+description: AAP configuration hooks — adopt existing AAP; JobTemplates via infra.aap_configuration PostSync
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"

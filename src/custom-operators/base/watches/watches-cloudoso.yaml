@@ -1,0 +1,9 @@
+---
+- version: 1
+  group: hybridsovereign.redhat
+  kind: CloudOSO
+  role: kind_reconcile
+  snakeCaseParameters: false
+  finalizer:
+    name: cloudoso.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

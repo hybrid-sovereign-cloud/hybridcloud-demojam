@@ -1,6 +1,6 @@
 apiVersion: v2
-name: hs-infrastructure-gitea
-description: Hybrid Sovereign GitOps component (gitops/infrastructure/gitea)
+name: hs-gitea
+description: Gitea from local ImageStream (BuildConfig) with ODF PVC
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "1.22"

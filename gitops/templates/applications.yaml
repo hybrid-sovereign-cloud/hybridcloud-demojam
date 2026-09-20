@@ -29,7 +29,7 @@ spec:
     path: gitops/operators/eso
   destination:
     server: {{ $server | quote }}
-    namespace: openshift-operators
+    namespace: openshift-external-secrets-operator
   syncPolicy:
     automated:
       prune: true

@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hybridsovereign-entity-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: Entity
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hybridsovereign-entity-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: ["hybridsovereign.redhat"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["hybridsovereign.redhat"]
+    resources: ["*/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["namespaces", "serviceaccounts", "secrets", "configmaps", "pods"]
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["*"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-entity-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-entity-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+# Watches ConfigMap for Entity singleton
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-entity
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: 1
+      group: hybridsovereign.redhat
+      kind: Entity
+      role: kind_reconcile
+      snakeCaseParameters: false
+      finalizer:
+        name: entity.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+# Entity operator — SINGLETON in sovereign-cloud ONLY
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-entity-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: Entity
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: Entity
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/operator-kind: Entity
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-entity-operator
+      containers:
+        - name: operator
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: OPERATOR_KIND
+              value: Entity
+            - name: WATCH_NAMESPACE
+              value: sovereign-cloud
+            - name: ANSIBLE_GATHERING
+              value: explicit
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-entity
+---
