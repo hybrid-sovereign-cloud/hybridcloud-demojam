@@ -18,13 +18,26 @@
     job_template_name: "{{ (hs_kind | lower) }}-provision"
     teardown_template_name: "{{ (hs_kind | lower) }}-teardown"
 
+- name: Read live CR for reliable status (ansible status var can be stale/empty)
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+  register: hs_live
+  failed_when: false
+
 - name: Read current status safely
   ansible.builtin.set_fact:
-    cur_observed: "{{ (status.observedGeneration | default(-1)) | int }}"
-    cur_job_id: "{{ status.aapJob.jobId | default('') }}"
-    cur_job_started: "{{ status.aapJob.startedAt | default('') }}"
-    cur_phase: "{{ status.phase | default('') }}"
+    hs_status: "{{ (hs_live.resources | default([{}]))[0].status | default(status | default({})) }}"
     is_delete: "{{ ansible_operator_meta.deletion_timestamp is defined and ansible_operator_meta.deletion_timestamp | length > 0 }}"
+
+- name: Normalize status fields
+  ansible.builtin.set_fact:
+    cur_observed: "{{ (hs_status.observedGeneration | default(-1)) | int }}"
+    cur_job_id: "{{ hs_status.aapJob.jobId | default('') | string }}"
+    cur_job_started: "{{ hs_status.aapJob.startedAt | default('') | string }}"
+    cur_phase: "{{ hs_status.phase | default('') | string }}"
 
 - name: Skip when generation already observed and phase ready
   ansible.builtin.meta: end_play
