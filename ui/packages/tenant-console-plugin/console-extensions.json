@@ -121,7 +121,7 @@
     "properties": {
       "path": "/hybridsovereign/tenant/networks",
       "component": {
-        "$codeRef": "TenantHybridNetworksPage.default"
+        "$codeRef": "TenantHybridNetworksPage"
       },
       "perspective": "hybridsovereign"
     }
@@ -131,7 +131,7 @@
     "properties": {
       "path": "/hybridsovereign/tenant/placements",
       "component": {
-        "$codeRef": "TenantNetworkPlacementsPage.default"
+        "$codeRef": "TenantNetworkPlacementsPage"
       },
       "perspective": "hybridsovereign"
     }
