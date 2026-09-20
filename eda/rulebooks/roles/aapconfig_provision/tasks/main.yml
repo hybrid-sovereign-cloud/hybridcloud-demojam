@@ -12,6 +12,13 @@
     - name: Load AAP admin credentials from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/obtain_aap_admin_credentials.yml"
 
+    - name: Map AAP admin credentials to gateway auth vars
+      ansible.builtin.set_fact:
+        aap_username: "{{ aap_admin_user }}"
+        aap_password: "{{ aap_admin_password }}"
+        aap_controller_url: "{{ aap_admin_url | default(aap_controller_url | default('', true), true) }}"
+      no_log: true
+
     - name: Announce AAP job started in CR status
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:
