@@ -46,8 +46,5 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status:
-          phase: pending
-          message: "Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)"
-          observedGeneration: "{{ cur_observed | int }}"
+        status: "{{ {'phase': 'pending', 'message': 'Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)', 'observedGeneration': hs_generation | int} }}"
       when: cur_phase != 'pending'

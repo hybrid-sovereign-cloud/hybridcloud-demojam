@@ -69,15 +69,7 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status:
-          phase: provisioned
-          ready: true
-          observedGeneration: "{{ hs_generation | int }}"
-          aapJob:
-            jobId: "{{ cur_job_id }}"
-            status: successful
-            startedAt: "{{ cur_job_started }}"
-            url: "{{ aap_host }}/execution/jobs/playbook/{{ cur_job_id }}/details"
+        status: "{{ {'phase': 'provisioned', 'ready': true, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
           message: "AAP job successful"
     - name: End after ready
       ansible.builtin.meta: end_play
@@ -124,7 +116,6 @@
             status:
               phase: pending
               message: "JobTemplate {{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) }} not found in AAP"
-              observedGeneration: "{{ cur_observed | int }}"
         - name: End
           ansible.builtin.meta: end_play
 
@@ -161,7 +152,6 @@
         status:
           phase: reconciling
           ready: false
-          observedGeneration: "{{ hs_generation | int }}"
           aapJob:
             jobId: "{{ jt_launch.json.id | string }}"
             status: "{{ jt_launch.json.status | default('pending') }}"
