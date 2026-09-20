@@ -212,3 +212,14 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Note | AAP JTs are hello_world stubs — Keycloak group creation is stub-success until real playbooks attached |
 | Next | Confirm remaining rbacs/personas → provisioned; Phase 9 optional |
 
+
+### 2026-09-20T06:01:00Z — All non-parked HS CRs provisioned
+
+| Field | Value |
+|-------|-------|
+| Change summary | 38/38 sample CRs provisioned (incl 14 Rbacs, Vault/VaultKV, AAPOrg/QuayOrg, Personas); standalone dashboards HTTP 200; 19 operators Running |
+| Status | complete |
+| Standalone UI | Admin + Tenancy dashboard routes live |
+| Caveat | AAP JobTemplates still hello_world stubs — RHBK group creation is stub-success until real eda playbooks are wired |
+| Phase 9 | Still deferred |
+
