@@ -18,7 +18,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "create"]
+    verbs: ["get", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -66,14 +66,23 @@ spec:
               set -euo pipefail
               NS=sovereign-ui
               for NAME in sovereign-cloud-dashboard-proxy tenancy-dashboard-proxy; do
+                NEED=1
                 if oc get secret "$NAME" -n "$NS" >/dev/null 2>&1; then
-                  echo "secret/$NAME already exists — skip"
-                  continue
+                  # ose-oauth-proxy requires cookie secret length exactly 16, 24, or 32 bytes
+                  LEN=$(oc get secret "$NAME" -n "$NS" -o jsonpath='{.data.session_secret}' | base64 -d | wc -c | tr -d ' ')
+                  if [ "$LEN" = "16" ] || [ "$LEN" = "24" ] || [ "$LEN" = "32" ]; then
+                    echo "secret/$NAME ok (len=$LEN) — skip"
+                    NEED=0
+                  else
+                    echo "secret/$NAME invalid len=$LEN — recreate"
+                    oc delete secret "$NAME" -n "$NS" --ignore-not-found
+                  fi
                 fi
-                # 32-byte session cookie secret (oauth-proxy requirement: 16/24/32 bytes)
-                SECRET=$(openssl rand -base64 32 | tr -d '\n')
-                oc create secret generic "$NAME" -n "$NS" \
-                  --from-literal=session_secret="$SECRET" \
-                  --dry-run=client -o yaml | oc apply -f -
-                echo "created secret/$NAME"
+                if [ "$NEED" = "1" ]; then
+                  # Exactly 32 ASCII bytes (AES key length for pass_access_token)
+                  SECRET=$(openssl rand -hex 16)
+                  oc create secret generic "$NAME" -n "$NS" \
+                    --from-literal=session_secret="$SECRET"
+                  echo "created secret/$NAME (len=32)"
+                fi
               done
