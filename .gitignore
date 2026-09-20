@@ -50,3 +50,9 @@ values-lab.yaml
 bootstrap/helm/central/values.generated.yaml
 .env.local
 scripts/scrub-patterns.txt
+
+# Allow GitOps CR manifests whose filenames contain "secret" (ESO/Vault CRs, not credential files)
+!gitops/**/eso-operand.yaml
+!gitops/**/vault-backend-and-push.yaml
+!gitops/**/*secretstore*
+!gitops/**/*Secret*
