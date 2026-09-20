@@ -11,5 +11,7 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "0"
+    # Never prune platform namespaces — child-app ownership drift must not delete them.
+    argocd.argoproj.io/sync-options: Prune=false
 {{- end }}
 {{- end }}

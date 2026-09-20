@@ -4,15 +4,17 @@
 
 | Field | Value |
 |-------|-------|
-| Current phase | 0–1 (foundation) |
+| Current phase | ZTP hardening |
 | Status | in-progress |
-| Last green checkpoint | none yet |
-| Blockers | none |
-| Next action | Push `gitops/` to main; wait for Argo `field-content` path error to clear; continue Phase 2 Vault/ESO |
+| Last green checkpoint | Argo apps mostly Synced; UI PF6 + OAuthClients live |
+| Blockers | Cleared for ZTP: NS conflict, Argo capacity, image gate, wave order |
+| Next action | Push ZTP commit; hard-refresh `field-content`; verify waves 5→60 |
 
 **Cluster-1 baseline (do not uninstall):** AAP Controller (`aap/aap`), RHBK (`keycloak/keycloak`), ODF/NooBaa, OpenShift GitOps, CNV, cert-manager.
 
 **Argo root:** Application `field-content` → `gitops/` @ `main`.
+
+**ZTP guide:** [`gitops/ZTP.md`](./ZTP.md)
 
 ---
 
@@ -348,15 +350,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | User action | Hard-refresh console; toggle light/dark — plugin should match console chrome |
 
 
-
 ---
-### 2026-09-20T15:10:00Z — Zero-touch provisioning hardening
+### 2026-09-20T15:10:00Z — ZTP follow-up: NS prune + AAPOrg schema
 
 | Field | Value |
 |-------|-------|
-| Analysis | Mapped app-of-apps waves, SharedResourceWarning, image race, Argo mem (~2Gi/4Gi 1 shard), sample annotation drift |
-| Fixes | Remove duplicate `sovereign-ui` NS from hs-ui; ZTP wave order 5→60; retries + ApplyOutOfSyncOnly; samples ignoreDifferences; `hs-argocd-capacity` (2 controller shards / 8Gi, 2 repo); operators `image-wait` Sync hook; `gitops/ZTP.md` |
-| Live | Patched ArgoCD openshift-gitops → shards=2, repo=2, memLimit=8Gi |
-| Status | pushed pending |
-| Next action | field-content sync; confirm hs-argocd-capacity + hs-operators hooks |
+| Incident | `hs-ui` prune deleted `sovereign-ui` (tracking-id still hs-ui) → Terminating; UI recreated via field-content sync |
+| Fix | `Prune=false` on parent Namespaces; remove invalid `AAPOrg.spec.description` (not in CRD OpenAPI → SSA ComparisonError) |
+| Chart | 0.1.3 |
+| Status | recovering |
 

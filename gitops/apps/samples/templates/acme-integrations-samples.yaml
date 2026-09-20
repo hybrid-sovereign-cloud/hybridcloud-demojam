@@ -143,7 +143,6 @@ metadata:
     hybridsovereign.redhat/sample: "true"
 spec:
   aapConfig: aap-sovereign-services
-  description: Primary automation organization for ACME Corp
   aapAdminRbac:
     - acme-aap-admins
     - acme-devops

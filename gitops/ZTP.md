@@ -33,14 +33,17 @@ Parent sync **waits for prior-wave Application health** before creating the next
 | Failure | Why | Mitigation in-repo |
 |---------|-----|--------------------|
 | Shared Namespace (`sovereign-ui`) | Parent + `hs-ui` both owned NS | NS only in parent `namespaces.yaml` |
+| Namespace pruned / Terminating | Child prune after removing NS from desired + tracking-id on child | `Prune=false` on all parent Namespaces; never manage NS in child apps |
 | Operators crash / ImagePullBackOff | Builds not finished when Deployments sync | `image-wait` Sync hook (wave 5) inside `hs-operators` |
 | `scope denied: user:full` on dashboards | SA OAuth client cannot request `user:full` | Real `OAuthClient` + bootstrap Job |
 | Sample CRs OutOfSync forever | Operator/ephemeral annotations + status | `ignoreDifferences` on `hs-samples` |
+| SSA ComparisonError on samples | Desired fields absent from CRD OpenAPI (e.g. `AAPOrg.spec.description`) | Manifests must match live CRD schema exactly |
 | Quay/Gitea thrash | Operand mutates spec/status | `ignoreDifferences` + `RespectIgnoreDifferences` |
 | Argo controller OOM / slow sync | 1 shard, heavy SSA | `hs-argocd-capacity` → 2 controller shards, 2 repo replicas, 8Gi limit |
 | Parallel child re-sync races | After first install, apps selfHeal independently | Retries + `ApplyOutOfSyncOnly` + resource waves inside charts |
 | Baseline missing (AAP/RHBK/ODF) | Adopt-not-install | Documented; Jobs fail closed with clear logs |
 | Parked kinds in samples | CloudAWS/OSO/PlatformOpenshift | `values.samples.parkedKinds` — not deployed |
+| Wave inversion | Manual sync of samples before operators | Parent wave annotations 5→60; do not reorder |
 
 ## Cross-dependencies (must not invert)
 
