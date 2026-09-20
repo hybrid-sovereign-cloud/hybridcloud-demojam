@@ -28,6 +28,12 @@ subjects:
   - kind: ServiceAccount
     name: tenancy-dashboard
     namespace: sovereign-ui
+  - kind: ServiceAccount
+    name: sovereign-admin-plugin
+    namespace: sovereign-ui
+  - kind: ServiceAccount
+    name: sovereign-tenant-plugin
+    namespace: sovereign-ui
 ---
 apiVersion: v1
 kind: ServiceAccount
