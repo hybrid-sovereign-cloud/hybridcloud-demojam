@@ -55,16 +55,7 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status:
-          phase: provisioned
-          ready: true
-          message: AAP job successful
-          observedGeneration: "{{ hs_generation | int }}"
-          aapJob:
-            jobId: "{{ cur_job_id | string }}"
-            status: successful
-            startedAt: "{{ cur_job_started }}"
-            url: "{{ aap_host }}/execution/jobs/playbook/{{ cur_job_id }}/details"
+        status: "{{ {'phase': 'provisioned', 'ready': true, 'message': 'AAP job successful', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
     - name: End after ready
       ansible.builtin.meta: end_play
 
@@ -80,16 +71,7 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status:
-          phase: reconciling
-          ready: false
-          message: "Waiting for AAP job {{ cur_job_id }}"
-          observedGeneration: "{{ hs_generation | int }}"
-          aapJob:
-            jobId: "{{ cur_job_id | string }}"
-            status: "{{ aap_job_status }}"
-            startedAt: "{{ cur_job_started }}"
-            url: "{{ aap_host }}/execution/jobs/playbook/{{ cur_job_id }}/details"
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'Waiting for AAP job ' ~ cur_job_id, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': aap_job_status, 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
     - name: End while running
       ansible.builtin.meta: end_play
 
@@ -151,10 +133,7 @@
             kind: "{{ hs_kind }}"
             name: "{{ hs_name }}"
             namespace: "{{ hs_namespace }}"
-            status:
-              phase: pending
-              message: "JobTemplate {{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) }} not found in AAP"
-              observedGeneration: "{{ hs_generation | int }}"
+            status: "{{ {'phase': 'pending', 'message': 'JobTemplate ' ~ ((is_delete | bool) | ternary(teardown_template_name, job_template_name)) ~ ' not found in AAP', 'observedGeneration': hs_generation | int} }}"
         - name: End
           ansible.builtin.meta: end_play
 
@@ -188,16 +167,7 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status:
-          phase: reconciling
-          ready: false
-          observedGeneration: "{{ hs_generation | int }}"
-          aapJob:
-            jobId: "{{ jt_launch.json.id | string }}"
-            status: "{{ jt_launch.json.status | default('pending') }}"
-            startedAt: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
-            url: "{{ aap_host }}/execution/jobs/playbook/{{ jt_launch.json.id }}/details"
-          message: AAP job launched
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'AAP job launched', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': jt_launch.json.id | string, 'status': jt_launch.json.status | default('pending'), 'startedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'url': aap_host ~ '/execution/jobs/playbook/' ~ (jt_launch.json.id | string) ~ '/details'}} }}"
 
     - name: End after launch
       ansible.builtin.meta: end_play
