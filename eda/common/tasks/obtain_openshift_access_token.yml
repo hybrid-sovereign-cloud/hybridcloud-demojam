@@ -1,8 +1,7 @@
 ---
 # Obtain OpenShift API bearer token.
-# If ocp_password looks like a JWT/SA token, use it directly.
-# Otherwise password-grant against oauth-openshift.
-- name: Use provided bearer token when password is a JWT
+# Prefer Vault token / JWT password; else password-grant via curl (Location fragment).
+- name: Use provided bearer token when password is a JWT or SA token
   when: (ocp_password | default('') | length) > 80 and ('.' in (ocp_password | default('')))
   ansible.builtin.set_fact:
     openshift_access_token: "{{ ocp_password }}"
@@ -24,30 +23,33 @@
         | regex_replace(':6443$', '')
       }}
 
-- name: Password-grant OpenShift OAuth token
+# ansible.builtin.uri drops URL fragments from Location; oauth-openshift returns
+# /oauth/token/implicit#access_token=... so use curl -D to capture the header intact.
+- name: Password-grant OpenShift OAuth token via curl
   when: openshift_access_token is not defined
-  ansible.builtin.uri:
-    url: "{{ _ocp_oauth_host }}/oauth/authorize?client_id=openshift-challenging-client&response_type=token"
-    method: GET
-    url_username: "{{ ocp_username }}"
-    url_password: "{{ ocp_password }}"
-    force_basic_auth: true
-    validate_certs: false
-    status_code: [302, 303]
-    follow_redirects: none
-  register: _ocp_oauth
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -sk -u "${OCP_USER}:${OCP_PASS}" -H 'X-CSRF-Token: 1' -D - -o /dev/null \
+      "${OCP_OAUTH}/oauth/authorize?client_id=openshift-challenging-client&response_type=token" \
+      | tr -d '\r' | awk 'tolower($1)=="location:"{print substr($0,index($0,$2))}'
+  environment:
+    OCP_USER: "{{ ocp_username }}"
+    OCP_PASS: "{{ ocp_password }}"
+    OCP_OAUTH: "{{ _ocp_oauth_host }}"
+  register: _ocp_oauth_curl
   no_log: true
+  changed_when: false
   failed_when: false
 
 - name: Extract access_token from Location header
   when:
     - openshift_access_token is not defined
-    - _ocp_oauth is defined
-    - (_ocp_oauth.location | default('') | length) > 0
+    - _ocp_oauth_curl is defined
+    - (_ocp_oauth_curl.stdout | default('') | length) > 0
   ansible.builtin.set_fact:
     openshift_access_token: >-
       {{
-        _ocp_oauth.location
+        _ocp_oauth_curl.stdout
         | regex_search('access_token=([^&]+)', '\\1')
       }}
   no_log: true
