@@ -9,9 +9,11 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "30"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-options: Force=true,Replace=true
 spec:
-  backoffLimit: 3
+  backoffLimit: 8
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
@@ -28,6 +30,15 @@ spec:
             - -ec
             - |
               set -euo pipefail
+              echo "Waiting for aap-operator-credentials in sovereign-cloud..."
+              for i in $(seq 1 60); do
+                if oc get secret aap-operator-credentials -n sovereign-cloud >/dev/null 2>&1; then
+                  break
+                fi
+                echo "  secret missing (attempt ${i}/60)"
+                sleep 5
+              done
+              oc get secret aap-operator-credentials -n sovereign-cloud >/dev/null
               HOST=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.host}' | base64 -d)
               USER=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.username}' | base64 -d)
               PASS=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.password}' | base64 -d)
