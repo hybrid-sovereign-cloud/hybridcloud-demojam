@@ -53,10 +53,17 @@ spec:
               if [ -z "${HS_PROJ}" ]; then
                 RESP=$(curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/projects/" \
                   -H 'Content-Type: application/json' \
-                  -d '{"name":"HybridSovereign EDA","organization":'"$ORG"',"scm_type":"git","scm_url":"https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git","scm_branch":"main","scm_update_on_launch":true}')
+                  -d '{"name":"HybridSovereign EDA","organization":'"$ORG"',"scm_type":"git","scm_url":"https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git","scm_branch":"main","scm_update_on_launch":true,"scm_delete_on_update":true}')
                 HS_PROJ=$(echo "$RESP" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
                 echo "created HybridSovereign EDA project id=$HS_PROJ"
                 sleep 15
+              else
+                # Clear dirty checkouts that break scm_update_on_launch after wipe/reseed
+                curl -sk "${auth[@]}" -X PATCH "$HOST/api/controller/v2/projects/$HS_PROJ/" \
+                  -H 'Content-Type: application/json' \
+                  -d '{"scm_delete_on_update":true,"scm_update_on_launch":true}' >/dev/null
+                curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/projects/$HS_PROJ/update/" >/dev/null || true
+                sleep 10
               fi
               echo "ORG=$ORG INV=$INV DEMO_PROJ=$DEMO_PROJ HS_PROJ=$HS_PROJ"
 
