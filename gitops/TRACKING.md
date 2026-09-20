@@ -76,3 +76,12 @@
 ---
 ### 2026-09-20T03:30:00Z — Status checkpoint
 Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault, Gitea, UI, samples.
+### 2026-09-20T03:35:00Z — Vault Ready
+
+| Field | Value |
+|-------|-------|
+| Change summary | Vault 1/1 Running (emptyDir config + no entrypoint). Quay Available. ESO ok. 24 CRDs. 8 platform operators. |
+| Next action | Unstick Gitea Job; UI BuildConfigs; live samples; Entity tenant-op spawn; PushSecrets; Phase 7–9 |
+| Status | in-progress |
+
+---
