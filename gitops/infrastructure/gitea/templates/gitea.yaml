@@ -6,6 +6,22 @@ metadata:
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
 ---
+# Rootless gitea image runs as UID 1000; allow explicit UID on OpenShift
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitea-anyuid
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: gitea
+    namespace: gitea
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -42,6 +58,11 @@ spec:
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: gitea
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
       containers:
         - name: gitea
           image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/gitea-local:latest
@@ -54,9 +75,20 @@ spec:
               value: "false"
             - name: GITEA__database__DB_TYPE
               value: sqlite3
+            - name: GITEA_WORK_DIR
+              value: /var/lib/gitea
+            - name: HOME
+              value: /var/lib/gitea/git
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
           volumeMounts:
             - name: data
-              mountPath: /data
+              mountPath: /var/lib/gitea
           resources:
             requests:
               cpu: 100m
@@ -64,6 +96,18 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
       volumes:
         - name: data
           persistentVolumeClaim:

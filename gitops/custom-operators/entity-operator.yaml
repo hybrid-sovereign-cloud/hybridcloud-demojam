@@ -60,7 +60,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: Entity
       role: kind_reconcile

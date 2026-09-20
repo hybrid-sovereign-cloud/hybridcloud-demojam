@@ -1,5 +1,5 @@
 ---
-- version: 1
+- version: v1alpha1
   group: hybridsovereign.redhat
   kind: PlatformOpenshift
   role: kind_reconcile

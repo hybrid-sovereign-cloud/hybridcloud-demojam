@@ -33,7 +33,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: RbacConfig
       role: kind_reconcile
@@ -141,7 +141,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: AAPConfig
       role: kind_reconcile
@@ -249,7 +249,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: QuayConfig
       role: kind_reconcile
@@ -357,7 +357,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: HybridFabric
       role: kind_reconcile
@@ -465,7 +465,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: CloudGateway
       role: kind_reconcile
@@ -573,7 +573,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: TransportLink
       role: kind_reconcile
@@ -681,7 +681,7 @@ metadata:
 data:
   watches.yaml: |
     ---
-    - version: 1
+    - version: v1alpha1
       group: hybridsovereign.redhat
       kind: UIHealthChecker
       role: kind_reconcile

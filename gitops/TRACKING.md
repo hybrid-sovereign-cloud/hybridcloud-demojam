@@ -85,3 +85,15 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | Status | in-progress |
 
 ---
+
+### 2026-09-20T03:45:00Z — Remediaton: watches v1alpha1 + Gitea rootless
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix operator watches ConfigMaps `version: 1` → `v1alpha1` (operators CrashLoop); Gitea anyuid + mount `/var/lib/gitea` for rootless image; image-puller RBAC already in tree |
+| Paths touched | `gitops/custom-operators/*-operator*.yaml`, `src/custom-operators/base/watches/*`, `gitops/infrastructure/gitea` |
+| Cluster actions | Push → hard-refresh hs-operators, hs-gitea; restart operator pods |
+| Rollback | git revert |
+| Status | in-progress |
+| Next action | Confirm Gitea 1/1 + operators Running; UI BuildConfigs; samples; PushSecrets |
+
