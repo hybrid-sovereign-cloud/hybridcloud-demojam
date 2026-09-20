@@ -52,16 +52,16 @@ spec:
         - name: vault
           image: docker.io/hashicorp/vault:1.17.6
           imagePullPolicy: IfNotPresent
-          command:
-            - vault
+          # Use image entrypoint so VAULT_LOCAL_CONFIG is written to local.json
           args:
             - server
-            - -config=/vault/config/local.json
           env:
             - name: VAULT_ADDR
               value: http://127.0.0.1:8200
             - name: SKIP_SETCAP
               value: "true"
+            - name: VAULT_API_ADDR
+              value: http://vault.vault.svc:8200
             - name: VAULT_LOCAL_CONFIG
               value: |
                 ui = true

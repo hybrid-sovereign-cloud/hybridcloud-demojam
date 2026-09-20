@@ -164,7 +164,4 @@ spec:
                 entity:
                   type: string
                   description: Entity this org belongs to.
-                message:
-                  type: string
-                  description: Human-readable status message.
               x-kubernetes-preserve-unknown-fields: true

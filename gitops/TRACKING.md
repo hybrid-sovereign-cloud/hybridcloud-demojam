@@ -65,3 +65,12 @@
 | Next action | Push; rebuild operator; vault Ready; hs-operators sync |
 
 ---
+### 2026-09-20T03:20:00Z — Remediation
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix duplicate CRD status.message keys; Vault entrypoint+VAULT_LOCAL_CONFIG |
+| Status | in-progress |
+| Next action | Sync hs-operators/vault; confirm operator build Complete |
+
+---
