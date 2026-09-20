@@ -108,6 +108,26 @@ spec:
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: sovereign-cloud-dashboard
+      initContainers:
+        - name: gen-cookie-secret
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              # Exactly 32 bytes required when pass_access_token=true
+              openssl rand -hex 16 > /etc/proxy/secrets/session_secret
+              chmod 0444 /etc/proxy/secrets/session_secret
+          volumeMounts:
+            - name: proxy-secret
+              mountPath: /etc/proxy/secrets
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       containers:
         - name: oauth-proxy
           image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9@sha256:649e898b993644eb7253fa36468d5417f124bdeedeebaa503660e4bc9f23fc8e
@@ -183,8 +203,7 @@ spec:
           secret:
             secretName: sovereign-cloud-dashboard-tls
         - name: proxy-secret
-          secret:
-            secretName: sovereign-cloud-dashboard-proxy
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -242,6 +261,25 @@ spec:
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: tenancy-dashboard
+      initContainers:
+        - name: gen-cookie-secret
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              openssl rand -hex 16 > /etc/proxy/secrets/session_secret
+              chmod 0444 /etc/proxy/secrets/session_secret
+          volumeMounts:
+            - name: proxy-secret
+              mountPath: /etc/proxy/secrets
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       containers:
         - name: oauth-proxy
           image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9@sha256:649e898b993644eb7253fa36468d5417f124bdeedeebaa503660e4bc9f23fc8e
@@ -315,8 +353,7 @@ spec:
           secret:
             secretName: tenancy-dashboard-tls
         - name: proxy-secret
-          secret:
-            secretName: tenancy-dashboard-proxy
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
