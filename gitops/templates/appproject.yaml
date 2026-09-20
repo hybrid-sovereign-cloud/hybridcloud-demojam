@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hybridsovereign
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  description: Hybrid Sovereign Cloud — multi-cluster mirror GitOps
+  sourceRepos:
+    - {{ .Values.global.repoURL | quote }}
+    - https://github.com/hybrid-sovereign-cloud/*
+  destinations:
+    - namespace: '*'
+      server: {{ .Values.global.destinationServer | quote }}
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

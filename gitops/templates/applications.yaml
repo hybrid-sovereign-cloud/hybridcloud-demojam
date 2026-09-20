@@ -1,0 +1,352 @@
+{{- /*
+Child Applications — each points at a path under gitops/ in the same repo.
+Everything is Argo-managed for mirror replica installs on clusters 1..N.
+*/ -}}
+{{- $repo := .Values.global.repoURL -}}
+{{- $rev := .Values.global.targetRevision -}}
+{{- $server := .Values.global.destinationServer -}}
+{{- $partOf := .Values.global.partOf -}}
+
+{{- if .Values.provision.eso }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-eso
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/operators/eso
+  destination:
+    server: {{ $server | quote }}
+    namespace: openshift-operators
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}
+
+{{- if .Values.provision.vault }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-vault
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/vault
+  destination:
+    server: {{ $server | quote }}
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}
+
+{{- if .Values.provision.quay }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-quay
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/quay
+  destination:
+    server: {{ $server | quote }}
+    namespace: quay
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+{{- end }}
+
+{{- if .Values.provision.gitea }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-gitea
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/gitea
+  destination:
+    server: {{ $server | quote }}
+    namespace: gitea
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}
+
+{{- if .Values.provision.acm }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-acm
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/acm
+  destination:
+    server: {{ $server | quote }}
+    namespace: open-cluster-management
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+{{- end }}
+
+{{- if .Values.provision.builds }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-builds
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/builds
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}
+
+{{- if .Values.provision.operators }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-operators
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/custom-operators
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+{{- end }}
+
+{{- if .Values.provision.aapConfig }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-aap-config
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "35"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/aap
+  destination:
+    server: {{ $server | quote }}
+    namespace: aap
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+{{- end }}
+
+{{- if .Values.provision.ui }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-ui
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/apps/ui
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+{{- end }}
+
+{{- if .Values.provision.samples }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-samples
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "60"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/apps/samples
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+{{- end }}
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-security
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "22"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/security
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true

@@ -1,0 +1,71 @@
+# Sovereign GitOps — multi-cluster mirror defaults
+# Parent Argo Application (field-content) may inject deployer/aap/keycloak URLs.
+# NEVER render *Password / secrets from parent values into manifests.
+
+global:
+  partOf: hybridsovereign-gitops
+  # Derived per-cluster; override via Argo helm values when needed
+  repoURL: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
+  targetRevision: main
+  # In-cluster destination for mirror replicas
+  destinationServer: https://kubernetes.default.svc
+
+# Pre-installed on every target cluster — adopt only, never reinstall/uninstall
+adopt:
+  aap: true
+  rhbk: true
+  odf: true
+  gitops: true
+  cnv: true
+  certManager: true
+
+# Installed identically via this chart on every cluster
+provision:
+  namespaces: true
+  eso: true
+  vault: true
+  quay: true
+  gitea: true
+  acm: true
+  mce: true
+  builds: true
+  operators: true
+  ui: true
+  samples: true
+  aapConfig: true  # JobTemplates / org config only (not AAP instance)
+
+# Hard bans
+kafka: false
+eda: false
+mtc: false
+mtv: false
+
+# Sample filters
+samples:
+  deployAllExceptParked: true
+  parkedKinds:
+    - CloudAWS
+    - CloudOSO
+    - PlatformOpenshift
+    - OpenStackMigration
+
+# Non-secret URLs (optional overrides from field-content)
+deployer:
+  domain: ""
+  apiUrl: ""
+aap:
+  url: ""
+keycloak:
+  consoleUrl: ""
+openshift:
+  consoleUrl: ""
+
+# Namespaces managed by gitops
+namespaces:
+  - sovereign-secrets
+  - sovereign-cloud
+  - sovereign-cloud-plugins
+  - vault
+  - quay
+  - gitea
+  - openshift-acm  # ACM hub when provisioned

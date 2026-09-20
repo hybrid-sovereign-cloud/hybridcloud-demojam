@@ -1,0 +1,12 @@
+apiVersion: v2
+name: sovereign-gitops
+description: Hybrid Sovereign Cloud — sole multi-cluster GitOps entry point (ArgoCD path gitops/)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - hybridsovereign
+  - gitops
+  - openshift
+maintainers:
+  - name: hybrid-sovereign-cloud
