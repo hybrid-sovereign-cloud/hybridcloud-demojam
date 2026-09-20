@@ -7,12 +7,16 @@
 *credentials*
 !aap-config/controller/credentials.yml
 !aap-config/eda/credentials.yml
+# Ansible task helpers (code, not secrets)
+!eda/**/obtain_*credentials*.yml
+!eda/**/obtain_*token*.yml
 *secret*
 !**/templates/externalsecret.yaml
 !**/templates/*-externalsecret.yaml
 !**/templates/externalsecret-*.yaml
 *token*
 !**/templates/*token*.yaml
+!eda/**/obtain_*token*.yml
 kubeconfig
 clouds.yaml
 

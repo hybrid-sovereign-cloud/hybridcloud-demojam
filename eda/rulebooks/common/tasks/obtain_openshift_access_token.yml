@@ -1,0 +1,59 @@
+---
+# Obtain OpenShift API bearer token.
+# If ocp_password looks like a JWT/SA token, use it directly.
+# Otherwise password-grant against oauth-openshift.
+- name: Use provided bearer token when password is a JWT
+  when: (ocp_password | default('') | length) > 80 and ('.' in (ocp_password | default('')))
+  ansible.builtin.set_fact:
+    openshift_access_token: "{{ ocp_password }}"
+
+- name: Use explicit token field when present
+  when:
+    - openshift_access_token is not defined
+    - (vault_kv_data.token | default('') | length) > 0
+  ansible.builtin.set_fact:
+    openshift_access_token: "{{ vault_kv_data.token }}"
+
+- name: Derive oauth route from API host
+  when: openshift_access_token is not defined
+  ansible.builtin.set_fact:
+    _ocp_oauth_host: >-
+      {{
+        ocp_api_host
+        | regex_replace('^https?://api\\.', 'https://oauth-openshift.apps.')
+        | regex_replace(':6443$', '')
+      }}
+
+- name: Password-grant OpenShift OAuth token
+  when: openshift_access_token is not defined
+  ansible.builtin.uri:
+    url: "{{ _ocp_oauth_host }}/oauth/authorize?client_id=openshift-challenging-client&response_type=token"
+    method: GET
+    url_username: "{{ ocp_username }}"
+    url_password: "{{ ocp_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [302, 303]
+    follow_redirects: none
+  register: _ocp_oauth
+  no_log: true
+  failed_when: false
+
+- name: Extract access_token from Location header
+  when:
+    - openshift_access_token is not defined
+    - _ocp_oauth is defined
+    - (_ocp_oauth.location | default('') | length) > 0
+  ansible.builtin.set_fact:
+    openshift_access_token: >-
+      {{
+        _ocp_oauth.location
+        | regex_search('access_token=([^&]+)', '\\1')
+      }}
+  no_log: true
+
+- name: Assert OpenShift token obtained
+  ansible.builtin.assert:
+    that:
+      - openshift_access_token | default('') | length > 0
+    fail_msg: Failed to obtain OpenShift access token
