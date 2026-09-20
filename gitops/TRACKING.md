@@ -201,3 +201,14 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Status | in-progress |
 | Next | Rebuild ansible-operator image; restart operators; CRs → provisioned |
 
+
+### 2026-09-20T05:55:00Z — Full CR checklist checkpoint
+
+| Field | Value |
+|-------|-------|
+| Change summary | 19 operators live (tenant+platform); all non-parked sample CRs present incl Vault/VaultKV/AAPOrg/QuayOrg/14 Rbacs; plugin secrets synced; standalone dashboards HTTP 200; operator memory/reconcile fixes |
+| Status | majority CRs provisioned; remaining rbacs/personas catching up on mark-ready |
+| UI | https://sovereign-cloud-dashboard-sovereign-ui.apps.cluster-qvhzm.dyn.redhatworkshops.io/ and tenancy-dashboard route |
+| Note | AAP JTs are hello_world stubs — Keycloak group creation is stub-success until real playbooks attached |
+| Next | Confirm remaining rbacs/personas → provisioned; Phase 9 optional |
+
