@@ -360,3 +360,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Chart | 0.1.3 |
 | Status | recovering |
 
+
+---
+### 2026-09-20T15:15:00Z — Clear residual OutOfSync (CRDs + PushSecrets)
+
+| Field | Value |
+|-------|-------|
+| Fix | Remove null `metadata.labels` from AAP/Quay CRDs; align PushSecret API defaults; ignoreDifferences for CRD conversion/status + PushSecret status |
+| Chart | 0.1.4 |
+| Status | pushed |
+

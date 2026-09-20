@@ -31,6 +31,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "45"
 spec:
   refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
   secretStoreRefs:
     - name: vault-backend
       kind: ClusterSecretStore
@@ -38,7 +40,8 @@ spec:
     secret:
       name: aap-admin
   data:
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: password
         remoteRef:
           remoteKey: aap-admin
@@ -55,6 +58,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "45"
 spec:
   refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
   secretStoreRefs:
     - name: vault-backend
       kind: ClusterSecretStore
@@ -62,12 +67,14 @@ spec:
     secret:
       name: vault-root
   data:
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: token
         remoteRef:
           remoteKey: vault-root
           property: token
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: unsealKey
         remoteRef:
           remoteKey: vault-root
