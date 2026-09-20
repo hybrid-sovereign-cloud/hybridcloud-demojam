@@ -71,3 +71,4 @@ namespaces:
   - quay
   - gitea
   - openshift-acm  # ACM hub when provisioned
+  - external-secrets  # ESO operand controllers (OpenShift ESO)
