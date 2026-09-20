@@ -27,3 +27,4 @@ resources:
   - crds/crd-vaultkv.yaml
   - entity-operator.yaml
   - platform-operators.yaml
+  - tenant-operators.yaml

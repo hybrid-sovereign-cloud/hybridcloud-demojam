@@ -183,3 +183,12 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Status | complete (Phase 9 still deferred) |
 | Next | Hard-refresh console Overview; Phase 9 zero-touch wipe when ready |
 
+
+### 2026-09-20T04:55:00Z — Tenant operators + full ACME samples + plugin creds
+
+| Field | Value |
+|-------|-------|
+| Change summary | Deploy missing tenant-kind operators (Rbac/Team/Project/Persona/Vault/…); expand samples (Vault/VaultKV/AAPOrg/QuayOrg/tool Rbacs/UI health); sync RHBK/AAP/Quay secrets into sovereign-cloud-plugins |
+| Status | in-progress |
+| Next | Sync Argo; force-reconcile configs; monitor all CRs to provisioned |
+

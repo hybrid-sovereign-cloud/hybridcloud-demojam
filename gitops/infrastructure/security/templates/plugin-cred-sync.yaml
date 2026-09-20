@@ -1,0 +1,113 @@
+# Sync plugin admin credentials into sovereign-cloud-plugins (no secret values in Git).
+# Sources: Keycloak initial admin, AAP admin, Quay route + managed keys bootstrap.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-plugin-cred-sync
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "46"
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-plugin-cred-sync
+      containers:
+        - name: sync
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              oc get ns sovereign-cloud-plugins >/dev/null
+              # RHBK / Keycloak
+              KC_USER=$(oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d)
+              KC_PASS=$(oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d)
+              KC_URL="https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io"
+              oc create secret generic rhbk-services-admin -n sovereign-cloud-plugins \
+                --from-literal=username="$KC_USER" \
+                --from-literal=password="$KC_PASS" \
+                --from-literal=url="$KC_URL" \
+                --from-literal=type=keycloak \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "synced rhbk-services-admin"
+              # AAP
+              if oc get secret aap-admin-credentials -n aap >/dev/null 2>&1; then
+                AAP_USER=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.username}' | base64 -d)
+                AAP_PASS=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.password}' | base64 -d)
+                AAP_URL=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.url}' | base64 -d)
+              else
+                AAP_USER=admin
+                AAP_PASS=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.password}' | base64 -d)
+                AAP_URL=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.host}' | base64 -d)
+              fi
+              oc create secret generic aap-admin-credentials -n sovereign-cloud-plugins \
+                --from-literal=username="$AAP_USER" \
+                --from-literal=password="$AAP_PASS" \
+                --from-literal=url="$AAP_URL" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "synced aap-admin-credentials"
+              # Quay — URL + bootstrap token from registry managed keys if present
+              QUAY_URL="https://quay-quay-quay.apps.cluster-qvhzm.dyn.redhatworkshops.io"
+              QUAY_PASS=""
+              if oc get secret quay-quay-registry-managed-secret-keys -n quay >/dev/null 2>&1; then
+                QUAY_PASS=$(oc get secret quay-quay-registry-managed-secret-keys -n quay -o jsonpath='{.data.SECRET_KEY}' | base64 -d | head -c 32)
+              fi
+              [ -n "$QUAY_PASS" ] || QUAY_PASS="quay-bootstrap-pending"
+              oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
+                --from-literal=username=quayadmin \
+                --from-literal=password="$QUAY_PASS" \
+                --from-literal=url="$QUAY_URL" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "synced quay-admin-credentials"
+              # Also push RHBK creds into sovereign-secrets for Vault PushSecret path
+              oc create secret generic rhbk-admin -n sovereign-secrets \
+                --from-literal=username="$KC_USER" \
+                --from-literal=password="$KC_PASS" \
+                --from-literal=url="$KC_URL" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "plugin credential sync complete"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-plugin-cred-sync
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-plugin-cred-sync
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "namespaces"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-plugin-cred-sync
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-plugin-cred-sync
+    namespace: sovereign-secrets
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-plugin-cred-sync
