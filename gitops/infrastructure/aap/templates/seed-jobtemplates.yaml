@@ -1,0 +1,75 @@
+# Seed stub AAP JobTemplates so operators can launch (demo stubs until full playbooks land).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-aap-seed-jobtemplates
+  namespace: aap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-aap-cred-sync
+      containers:
+        - name: seed
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              HOST=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.host}' | base64 -d)
+              USER=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.username}' | base64 -d)
+              PASS=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.password}' | base64 -d)
+              # Ensure demo project/org/inventory exist (idempotent best-effort)
+              ORG=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/organizations/?name=Default" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              if [ -z "$ORG" ]; then
+                ORG=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/organizations/" \
+                  -H 'Content-Type: application/json' -d '{"name":"Default","description":"hybridsovereign"}' \
+                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              fi
+              INV=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/inventories/?name=hybridsovereign" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              if [ -z "$INV" ]; then
+                INV=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/inventories/" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"hybridsovereign\",\"organization\":$ORG}" \
+                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              fi
+              # Use demo project if present; else create manual project pointing at this repo playbooks path
+              PROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/?name=hybridsovereign" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              if [ -z "$PROJ" ]; then
+                PROJ=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/projects/" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"hybridsovereign\",\"organization\":$ORG,\"scm_type\":\"\",\"local_path\":\"_8__demo\"}" \
+                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1 || true)
+              fi
+              KINDS="entity rbacconfig aapconfig quayconfig hybridfabric cloudgateway transportlink uihealthchecker team project assignment persona rbac vault vaultkv aaporg quayorg hybridnetwork networkplacement"
+              for k in $KINDS; do
+                for suffix in provision teardown; do
+                  NAME="${k}-${suffix}"
+                  EXISTS=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/job_templates/?name=$NAME" | grep -c '"count":0' || true)
+                  if echo "$EXISTS" | grep -q 1 || [ "$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/job_templates/?name=$NAME" | grep -o '"count":[0-9]*' | head -1)" = '"count":0' ]; then
+                    # Prefer hello_world playbook on Default project if available
+                    DEFPROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/?name=Demo%20Project%20on%20GitHub" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+                    [ -z "$DEFPROJ" ] && DEFPROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+                    curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/job_templates/" \
+                      -H 'Content-Type: application/json' \
+                      -d "{\"name\":\"$NAME\",\"organization\":$ORG,\"inventory\":$INV,\"project\":${DEFPROJ:-null},\"playbook\":\"hello_world.yml\",\"ask_variables_on_launch\":true}" \
+                      >/dev/null || echo "warn: could not create $NAME"
+                    echo "seeded $NAME"
+                  else
+                    echo "exists $NAME"
+                  fi
+                done
+              done
+              echo "AAP JobTemplate seed complete"

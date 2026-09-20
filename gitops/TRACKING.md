@@ -133,3 +133,12 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | AAP JTs | Not seeded yet (blocker for full Entity provision) |
 | Phase 9 | Deferred until JT seed + ACM Running |
 
+
+### 2026-09-20T04:15:00Z — Console plugins + AAP JT seed
+
+| Field | Value |
+|-------|-------|
+| Change summary | Deploy ConsolePlugins from local IS; seed stub AAP JobTemplates via Job |
+| Status | in-progress |
+| Next | Enable plugins in Console CR; verify Entity launches JT; ACM Running; Phase 9 |
+

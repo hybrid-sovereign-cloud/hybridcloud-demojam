@@ -1,0 +1,172 @@
+# Console plugins from local ImageStreams
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sovereign-admin-plugin
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sovereign-tenant-plugin
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sovereign-admin-plugin
+  namespace: sovereign-ui
+  labels:
+    app.kubernetes.io/name: sovereign-admin-plugin
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sovereign-admin-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sovereign-admin-plugin
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: sovereign-admin-plugin
+      containers:
+        - name: plugin
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-admin-plugin:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9001
+              name: http
+          volumeMounts:
+            - name: serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: serving-cert
+          secret:
+            secretName: sovereign-admin-plugin-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sovereign-tenant-plugin
+  namespace: sovereign-ui
+  labels:
+    app.kubernetes.io/name: sovereign-tenant-plugin
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sovereign-tenant-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sovereign-tenant-plugin
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: sovereign-tenant-plugin
+      containers:
+        - name: plugin
+          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-tenant-plugin:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9001
+              name: http
+          volumeMounts:
+            - name: serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: serving-cert
+          secret:
+            secretName: sovereign-tenant-plugin-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sovereign-admin-plugin
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: sovereign-admin-plugin-tls
+spec:
+  ports:
+    - port: 9001
+      targetPort: 9001
+      name: http
+  selector:
+    app.kubernetes.io/name: sovereign-admin-plugin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sovereign-tenant-plugin
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: sovereign-tenant-plugin-tls
+spec:
+  ports:
+    - port: 9001
+      targetPort: 9001
+      name: http
+  selector:
+    app.kubernetes.io/name: sovereign-tenant-plugin
+---
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: sovereign-admin-plugin
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+spec:
+  displayName: "Sovereign Cloud Admin"
+  backend:
+    type: Service
+    service:
+      name: sovereign-admin-plugin
+      namespace: sovereign-ui
+      port: 9001
+      basePath: /
+---
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: sovereign-tenant-plugin
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+spec:
+  displayName: "Sovereign Cloud Tenant"
+  backend:
+    type: Service
+    service:
+      name: sovereign-tenant-plugin
+      namespace: sovereign-ui
+      port: 9001
+      basePath: /
