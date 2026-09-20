@@ -4,7 +4,7 @@
       ansible.builtin.set_fact:
         platformopenshift_cr_name: "{{ event_payload.regarding.name }}"
         platformopenshift_cr_namespace: "{{ event_payload.regarding.namespace }}"
-        platform_spec: "{{ event_payload.note | from_json }}"
+        platform_spec: "{{ (event_payload.note | default('{}', true) | from_json) if (event_payload.note | default('') | length) > 0 else {} }}"
         eda_central_work_namespace: sovereign-cloud-jobs
 
     - name: Resolve services cluster API connection from Vault

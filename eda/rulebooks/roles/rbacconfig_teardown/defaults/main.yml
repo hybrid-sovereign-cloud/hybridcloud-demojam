@@ -1,2 +1,2 @@
 ---
-plugin_rbac_keycloak_realm: sovereign-tenants
+plugin_rbac_keycloak_realm: sso

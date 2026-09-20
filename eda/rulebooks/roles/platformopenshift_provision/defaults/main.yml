@@ -7,7 +7,7 @@ central_sa_secret_namespace: sovereign-cloud
 eda_central_work_namespace: sovereign-cloud-jobs
 keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.services-rhbk.svc:8080', true) }}"
 keycloak_external_url: "{{ lookup('env', 'KEYCLOAK_EXTERNAL_URL') }}"
-keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sovereign-tenants', true) }}"
+keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sso', true) }}"
 keycloak_admin_secret_name: "rhbk-admin-credentials"
 
 default_pull_secret_vault_path: "aws/ocp-pull-secret"

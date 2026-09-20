@@ -8,7 +8,7 @@ eda_central_work_namespace: sovereign-cloud-jobs
 keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.services-rhbk.svc:8080', true) }}"
 keycloak_external_url: "{{ lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default(lookup('env', 'RHBK_SERVICES_URL') | default('', true), true) }}"
 keycloak_api_url: "{{ keycloak_external_url if (keycloak_external_url | length > 0) else keycloak_internal_url }}"
-keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sovereign-tenants', true) }}"
+keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sso', true) }}"
 keycloak_admin_secret_name: "rhbk-services-initial-admin"
 keycloak_admin_secret_namespace: "services-rhbk"
 

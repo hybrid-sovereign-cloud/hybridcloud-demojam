@@ -4,7 +4,7 @@
       ansible.builtin.set_fact:
         rbac_config_cr_name: "{{ event_payload.regarding.name }}"
         rbac_config_cr_namespace: "{{ event_payload.regarding.namespace }}"
-        rbac_config_spec: "{{ event_payload.note | from_json }}"
+        rbac_config_spec: "{{ (event_payload.note | default('{}', true) | from_json) if (event_payload.note | default('') | length) > 0 else {} }}"
 
     - name: Resolve services cluster API connection
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
@@ -92,8 +92,22 @@
         status_code: [200, 404]
       register: realm_check
 
-    - name: Create realm when missing
-      when: realm_check.status == 404
+    # Lab/OpenShift SSO ships with realm `sso` (and `master`). Never create those —
+    # they are owned by the platform install, not HybridSovereign.
+    - name: Require pre-existing OpenShift SSO realm
+      when:
+        - realm_check.status == 404
+        - plugin_rbac_keycloak_realm in ['sso', 'master']
+      ansible.builtin.fail:
+        msg: >-
+          Keycloak realm '{{ plugin_rbac_keycloak_realm }}' is missing.
+          This demojam uses the OpenShift-provided `sso` realm (not sovereign-tenants).
+          Do not create it from HybridSovereign — fix the lab SSO install instead.
+
+    - name: Create realm when missing (non-platform realms only)
+      when:
+        - realm_check.status == 404
+        - plugin_rbac_keycloak_realm not in ['sso', 'master']
       ansible.builtin.uri:
         url: "{{ plugin_rbac_keycloak_url }}/admin/realms"
         method: POST
@@ -102,7 +116,7 @@
         body:
           realm: "{{ plugin_rbac_keycloak_realm }}"
           enabled: true
-          displayName: "Sovereign Tenants"
+          displayName: "{{ plugin_rbac_keycloak_realm }}"
           registrationAllowed: false
           loginWithEmailAllowed: true
           duplicateEmailsAllowed: false

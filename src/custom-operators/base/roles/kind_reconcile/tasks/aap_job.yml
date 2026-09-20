@@ -137,6 +137,10 @@
         - name: End
           ansible.builtin.meta: end_play
 
+    - name: Build event note from live CR spec
+      ansible.builtin.set_fact:
+        hs_event_note: "{{ (hs_live.resources | default([{}]))[0].spec | default({}) | to_json }}"
+
     - name: Launch job
       ansible.builtin.uri:
         url: "{{ aap_host }}/api/controller/v2/job_templates/{{ jt_lookup.json.results[0].id }}/launch/"
@@ -147,16 +151,26 @@
         validate_certs: false
         body_format: json
         body:
-          extra_vars:
-            event_payload:
-              reason: "{{ hs_kind }}{{ (is_delete | bool) | ternary('Delete', 'Create') }}Requested"
-              regarding:
-                apiVersion: "{{ hs_api_version }}"
-                kind: "{{ hs_kind }}"
-                name: "{{ hs_name }}"
-                namespace: "{{ hs_namespace }}"
-              action: "{{ (is_delete | bool) | ternary('Delete', 'Create') }}"
-              cluster: local
+          # AAP Controller expects extra_vars as a JSON/YAML *string*, not a nested object.
+          extra_vars: >-
+            {{
+              {
+                'event_payload': {
+                  'reason': hs_kind ~ ((is_delete | bool) | ternary('Delete', 'Create')) ~ 'Requested',
+                  'regarding': {
+                    'apiVersion': hs_api_version,
+                    'kind': hs_kind,
+                    'name': hs_name,
+                    'namespace': hs_namespace
+                  },
+                  'note': hs_event_note,
+                  'action': ((is_delete | bool) | ternary('Delete', 'Create')),
+                  'cluster': 'local'
+                },
+                'plugin_rbac_keycloak_realm': 'sso',
+                'KEYCLOAK_EXTERNAL_URL': 'https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io'
+              } | to_json
+            }}
         status_code: [201]
       register: jt_launch
       no_log: true

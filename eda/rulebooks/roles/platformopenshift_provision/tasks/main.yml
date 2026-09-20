@@ -4,7 +4,7 @@
       ansible.builtin.set_fact:
         platformopenshift_cr_name: "{{ event_payload.regarding.name }}"
         platformopenshift_cr_namespace: "{{ event_payload.regarding.namespace }}"
-        platform_spec: "{{ event_payload.note | from_json }}"
+        platform_spec: "{{ (event_payload.note | default('{}', true) | from_json) if (event_payload.note | default('') | length) > 0 else {} }}"
         ansible_operator_meta:
           name: "{{ event_payload.regarding.name }}"
           namespace: "{{ event_payload.regarding.namespace }}"

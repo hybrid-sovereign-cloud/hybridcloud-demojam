@@ -12,7 +12,7 @@
 #
 # Reads:
 #   KEYCLOAK_INTERNAL_URL env var (defaults to http://rhbk-services-service.rhbk.svc:8080)
-#   KEYCLOAK_REALM env var (defaults to sovereign-tenants)
+#   KEYCLOAK_REALM env var (defaults to sso (OpenShift lab SSO realm))
 #   keycloak_admin_secret_name from defaults
 
 - name: Skip OIDC setup if console URL not yet available or central token is missing

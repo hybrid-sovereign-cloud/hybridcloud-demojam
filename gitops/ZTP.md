@@ -40,6 +40,7 @@ Parent sync **waits for prior-wave Application health** before creating the next
 | SSA ComparisonError on samples | Desired fields absent from CRD OpenAPI (e.g. `AAPOrg.spec.description`) | Manifests must match live CRD schema exactly |
 | CRD forever OutOfSync | Empty `metadata.labels:` in YAML / API default `spec.conversion` | Drop null labels; `ignoreDifferences` on CRD status/conversion |
 | PushSecret forever OutOfSync | ESO injects defaults + status | Align defaults in manifest; ignore `.status` |
+| AAP extra_vars nested JSON | Controller drops `event_payload.note` | Launch with `extra_vars` as JSON string; playbooks tolerate missing note |
 | AAP project dirty checkout | `scm_update_on_launch` fails after wipe | Seed sets `scm_delete_on_update` + force project update |
 | Helm template fail (`hs-aap-config`) | AAP injector `{{ token }}` parsed by Helm | Escape with `` {{`{{ token }}`}} `` |
 | Quay/Gitea thrash | Operand mutates spec/status | `ignoreDifferences` + `RespectIgnoreDifferences` |
