@@ -74,3 +74,5 @@
 | Next action | Sync hs-operators/vault; confirm operator build Complete |
 
 ---
+### 2026-09-20T03:30:00Z — Status checkpoint
+Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault, Gitea, UI, samples.
