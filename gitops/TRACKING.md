@@ -174,3 +174,12 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Status | in-progress |
 | Next | Push; recreate MCE OG; rebuild admin plugin; verify MCH Running + Overview + samples |
 
+
+### 2026-09-20T04:50:00Z — ACM Running + samples + Overview fix deployed
+
+| Field | Value |
+|-------|-------|
+| Change summary | MCE CSV Succeeded after OwnNamespace OG recreate; MulticlusterHub Running; entity-acme-corp tenant samples + Hybrid VPC CRs synced; admin plugin rebuilt on e09f479 |
+| Status | complete (Phase 9 still deferred) |
+| Next | Hard-refresh console Overview; Phase 9 zero-touch wipe when ready |
+
