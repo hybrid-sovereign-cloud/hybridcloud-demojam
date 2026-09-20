@@ -115,8 +115,8 @@ spec:
             - /bin/bash
             - -ec
             - |
-              # Exactly 32 bytes required when pass_access_token=true
-              openssl rand -hex 16 > /etc/proxy/secrets/session_secret
+              # Exactly 32 bytes required when pass_access_token=true (no trailing newline)
+              printf '%s' "$(openssl rand -hex 16)" > /etc/proxy/secrets/session_secret
               chmod 0444 /etc/proxy/secrets/session_secret
           volumeMounts:
             - name: proxy-secret
