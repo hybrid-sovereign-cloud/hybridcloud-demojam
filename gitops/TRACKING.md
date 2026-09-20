@@ -228,8 +228,9 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 
 | Field | Value |
 |-------|-------|
-| Change summary | Add ose-oauth-proxy sidecars + SA OAuth redirect + cookie-secret bootstrap Job; reencrypt Routes on :8443 so Express gets X-Forwarded-Access-Token |
-| Paths touched | `gitops/apps/ui/templates/dashboards.yaml`, `oauth-bootstrap.yaml`, `Chart.yaml`, `TRACKING.md` |
-| Status | in-progress |
-| Next | Push; Argo sync hs-ui; login via OpenShift OAuth; verify Entities list loads |
+| Change summary | Add ose-oauth-proxy sidecars + SA OAuth redirect + initContainer cookie secret; reencrypt Routes on :8443 so Express gets X-Forwarded-Access-Token |
+| Paths touched | `gitops/apps/ui/templates/dashboards.yaml`, `Chart.yaml`, `TRACKING.md` |
+| Status | complete |
+| Verify | `/api/entities` + `/api/k8s/.../entities` return `acme-corp` with user token; oauth authorize redirects to RHBK |
+| Next | Browser login on admin dashboard → Entities live list |
 
