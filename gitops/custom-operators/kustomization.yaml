@@ -25,6 +25,5 @@ resources:
   - crds/crd-uihealthchecker.yaml
   - crds/crd-vault.yaml
   - crds/crd-vaultkv.yaml
-  - crds/crd.yaml
   - entity-operator.yaml
   - platform-operators.yaml
