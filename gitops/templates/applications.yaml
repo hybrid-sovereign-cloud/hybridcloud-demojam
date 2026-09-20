@@ -1,11 +1,66 @@
 {{- /*
-Child Applications — each points at a path under gitops/ in the same repo.
-Everything is Argo-managed for mirror replica installs on clusters 1..N.
+Child Applications — ZTP wave order (parent sync waits for prior wave Healthy):
+  0  AppProject + Namespaces (templates/)
+  5  hs-argocd-capacity — scale GitOps for phase-1
+ 10  hs-eso
+ 15  hs-builds          — start image builds early
+ 20  hs-vault
+ 22  hs-security        — needs Vault
+ 25  hs-acm
+ 30  hs-quay
+ 31  hs-gitea
+ 35  hs-aap-config
+ 40  hs-operators       — PreSync image-wait gate
+ 50  hs-ui
+ 60  hs-samples
 */ -}}
 {{- $repo := .Values.global.repoURL -}}
 {{- $rev := .Values.global.targetRevision -}}
 {{- $server := .Values.global.destinationServer -}}
 {{- $partOf := .Values.global.partOf -}}
+
+
+{{- if (default true .Values.provision.argocdCapacity) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-argocd-capacity
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/argocd-capacity
+  destination:
+    server: {{ $server | quote }}
+    namespace: openshift-gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
 
 {{- if .Values.provision.eso }}
 ---
@@ -34,9 +89,61 @@ spec:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
+{{- if .Values.provision.builds }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-builds
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/builds
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.vault }}
@@ -66,9 +173,101 @@ spec:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-security
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "22"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/security
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+
+{{- if .Values.provision.acm }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-acm
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/acm
+  destination:
+    server: {{ $server | quote }}
+    namespace: open-cluster-management
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.quay }}
@@ -100,15 +299,24 @@ spec:
       jqPathExpressions:
         - .spec.components
         - .status
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
       - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.gitea }}
@@ -122,7 +330,7 @@ metadata:
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
-    argocd.argoproj.io/sync-wave: "30"
+    argocd.argoproj.io/sync-wave: "31"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -140,108 +348,24 @@ spec:
       jsonPointers:
         - /spec/storageClassName
         - /spec/volumeName
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-{{- end }}
 
-{{- if .Values.provision.acm }}
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: hs-acm
-  namespace: openshift-gitops
-  labels:
-    app.kubernetes.io/part-of: {{ $partOf }}
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "25"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: hybridsovereign
-  source:
-    repoURL: {{ $repo | quote }}
-    targetRevision: {{ $rev | quote }}
-    path: gitops/infrastructure/acm
-  destination:
-    server: {{ $server | quote }}
-    namespace: open-cluster-management
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
-{{- end }}
-
-{{- if .Values.provision.builds }}
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: hs-builds
-  namespace: openshift-gitops
-  labels:
-    app.kubernetes.io/part-of: {{ $partOf }}
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "15"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: hybridsovereign
-  source:
-    repoURL: {{ $repo | quote }}
-    targetRevision: {{ $rev | quote }}
-    path: gitops/builds
-  destination:
-    server: {{ $server | quote }}
-    namespace: sovereign-cloud
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-{{- end }}
-
-{{- if .Values.provision.operators }}
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: hs-operators
-  namespace: openshift-gitops
-  labels:
-    app.kubernetes.io/part-of: {{ $partOf }}
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "40"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: hybridsovereign
-  source:
-    repoURL: {{ $repo | quote }}
-    targetRevision: {{ $rev | quote }}
-    path: gitops/custom-operators
-  destination:
-    server: {{ $server | quote }}
-    namespace: sovereign-cloud
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.aapConfig }}
@@ -271,9 +395,61 @@ spec:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
+      - CreateNamespace=true
       - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
       - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
+{{- if .Values.provision.operators }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-operators
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/custom-operators
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.ui }}
@@ -303,8 +479,19 @@ spec:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
 {{- end }}
 
 {{- if .Values.provision.samples }}
@@ -330,38 +517,39 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-cloud
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-{{- end }}
+  ignoreDifferences:
+    - group: hybridsovereign.redhat
+      kind: "*"
+      jqPathExpressions:
+        - .metadata.annotations["force-reconcile"]
+        - .metadata.annotations["fix422"]
+        - .metadata.annotations["live"]
+        - .metadata.annotations["markready"]
+        - .metadata.annotations["poll"]
+        - .metadata.annotations["requeue"]
+        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+        - .status
+    - group: ""
+      kind: Namespace
+      jsonPointers:
+        - /metadata/annotations
+        - /metadata/labels
 
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: hs-security
-  namespace: openshift-gitops
-  labels:
-    app.kubernetes.io/part-of: {{ $partOf }}
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "22"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: hybridsovereign
-  source:
-    repoURL: {{ $repo | quote }}
-    targetRevision: {{ $rev | quote }}
-    path: gitops/infrastructure/security
-  destination:
-    server: {{ $server | quote }}
-    namespace: sovereign-secrets
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}

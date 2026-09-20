@@ -22,6 +22,7 @@ adopt:
 # Installed identically via this chart on every cluster
 provision:
   namespaces: true
+  argocdCapacity: true  # Phase-1: scale GitOps controller/repo before heavy sync
   eso: true
   vault: true
   quay: true

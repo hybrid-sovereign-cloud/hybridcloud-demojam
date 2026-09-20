@@ -79,6 +79,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Entity
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:

@@ -1,14 +1,8 @@
 # Admin + tenant dashboards from local ImageStreams (built by hs-builds).
 # Auth: ose-oauth-proxy + real OAuthClient (user:full). SA-as-OAuth-client cannot
 # request user:full — see oauth-clients.yaml bootstrap Job.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sovereign-ui
-  labels:
-    app.kubernetes.io/part-of: hybridsovereign-gitops
-    hybridsovereign.redhat/gitops-owned: "true"
----
+# Namespace sovereign-ui is owned by parent app-of-apps (gitops/templates/namespaces.yaml)
+# — do not recreate here (SharedResourceWarning / OutOfSync).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

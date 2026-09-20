@@ -52,6 +52,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Rbac
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -161,6 +163,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Team
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -270,6 +274,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Project
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -379,6 +385,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Persona
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -488,6 +496,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Assignment
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -597,6 +607,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: Vault
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -706,6 +718,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: VaultKV
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -815,6 +829,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: AAPOrg
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -924,6 +940,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: QuayOrg
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -1033,6 +1051,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: HybridNetwork
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -1142,6 +1162,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: NetworkPlacement
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:

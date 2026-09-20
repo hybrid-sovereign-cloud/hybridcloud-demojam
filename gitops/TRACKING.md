@@ -336,3 +336,27 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Fix | Create real `OAuthClient`s (`tenancy-dashboard`, `sovereign-cloud-dashboard`) + secrets; proxy uses `-client-id` / `-client-secret-file`; gitops Job `dashboard-oauth-bootstrap` + chart 0.1.10 |
 | User action | Re-open tenancy dashboard URL and log in via rhbk |
 
+
+---
+### 2026-09-20T15:00:00Z — Console plugin CSS: migrate to PatternFly 6
+
+| Field | Value |
+|-------|-------|
+| Symptom | Entities page data OK but layout/CSS broken (overlapping filters, unstyled table) |
+| Root cause | OCP 4.22 console ships **PF6 only**; plugins still rendered `pf-v5-*` classes with no matching host CSS |
+| Fix | Upgrade `@patternfly/*` to ^6.4; migrate `openshift.css` to pf-v6 / pf-t tokens; PF6 Modal/Label APIs; admin **1.2.26** + tenant **1.3.21** |
+| User action | Hard-refresh console; toggle light/dark — plugin should match console chrome |
+
+
+
+---
+### 2026-09-20T15:10:00Z — Zero-touch provisioning hardening
+
+| Field | Value |
+|-------|-------|
+| Analysis | Mapped app-of-apps waves, SharedResourceWarning, image race, Argo mem (~2Gi/4Gi 1 shard), sample annotation drift |
+| Fixes | Remove duplicate `sovereign-ui` NS from hs-ui; ZTP wave order 5→60; retries + ApplyOutOfSyncOnly; samples ignoreDifferences; `hs-argocd-capacity` (2 controller shards / 8Gi, 2 repo); operators `image-wait` Sync hook; `gitops/ZTP.md` |
+| Live | Patched ArgoCD openshift-gitops → shards=2, repo=2, memLimit=8Gi |
+| Status | pushed pending |
+| Next action | field-content sync; confirm hs-argocd-capacity + hs-operators hooks |
+

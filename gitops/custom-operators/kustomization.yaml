@@ -28,3 +28,4 @@ resources:
   - entity-operator.yaml
   - platform-operators.yaml
   - tenant-operators.yaml
+  - image-wait.yaml

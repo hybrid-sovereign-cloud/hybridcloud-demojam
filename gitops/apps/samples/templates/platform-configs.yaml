@@ -1,6 +1,7 @@
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: RbacConfig
 metadata:
+  # CR name is historical; Keycloak realm is OpenShift lab `sso` (not sovereign-tenants).
   name: keycloak-sovereign-tenants-services
   namespace: sovereign-cloud-plugins
   labels:

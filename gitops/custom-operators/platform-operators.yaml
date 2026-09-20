@@ -51,6 +51,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: RbacConfig
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -161,6 +163,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: AAPConfig
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -271,6 +275,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: QuayConfig
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -381,6 +387,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: HybridFabric
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -491,6 +499,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: CloudGateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -601,6 +611,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: TransportLink
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
@@ -711,6 +723,8 @@ metadata:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/operator-kind: UIHealthChecker
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
