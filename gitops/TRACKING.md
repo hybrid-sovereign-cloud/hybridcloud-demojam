@@ -234,3 +234,12 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Verify | `/api/entities` + `/api/k8s/.../entities` return `acme-corp` with user token; oauth authorize redirects to RHBK |
 | Next | Browser login on admin dashboard → Entities live list |
 
+---
+### 2026-09-20T13:30:00Z — Console React #306 (tenant codeRef)
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix tenant `*.default` codeRefs (LazyComponent double-default → undefined); Overview error boundary + HTML table; rebuild plugins |
+| Status | in-progress |
+| Note | Temporarily removed `sovereign-tenant-plugin` from console.operator plugins until image rebuild |
+
