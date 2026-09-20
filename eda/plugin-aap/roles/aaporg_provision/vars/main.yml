@@ -1,5 +1,5 @@
 ---
 aap_controller_url: "{{ lookup('env', 'AAP_CONTROLLER_URL') }}"
 aap_gateway_url: "{{ lookup('env', 'AAP_GATEWAY_URL') }}"
-aap_gateway_internal_url: "{{ lookup('env', 'AAP_GATEWAY_INTERNAL_URL') | default('http://sovereign-aap.aap.svc:80', true) }}"
+aap_gateway_internal_url: "{{ lookup('env', 'AAP_GATEWAY_INTERNAL_URL') | default('http://aap.aap.svc:80', true) }}"
 plugin_aap_config_namespace: sovereign-cloud-plugins
