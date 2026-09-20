@@ -10,7 +10,7 @@ COPY packages/admin-dashboard/package.json ./packages/admin-dashboard/package.js
 COPY packages/tenant-dashboard/package.json ./packages/tenant-dashboard/package.json
 COPY packages/admin-console-plugin/package.json ./packages/admin-console-plugin/package.json
 COPY packages/tenant-console-plugin/package.json ./packages/tenant-console-plugin/package.json
-RUN npm ci --omit=optional
+RUN npm ci
 COPY packages/shared ./packages/shared
 COPY packages/${PLUGIN_PACKAGE} ./packages/${PLUGIN_PACKAGE}
 COPY docker ./docker

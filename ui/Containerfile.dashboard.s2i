@@ -10,7 +10,8 @@ COPY packages/admin-dashboard/package.json ./packages/admin-dashboard/package.js
 COPY packages/tenant-dashboard/package.json ./packages/tenant-dashboard/package.json
 COPY packages/admin-console-plugin/package.json ./packages/admin-console-plugin/package.json
 COPY packages/tenant-console-plugin/package.json ./packages/tenant-console-plugin/package.json
-RUN npm ci --omit=optional
+# Include optional native rollup bindings (npm omit=optional breaks vite on linux)
+RUN npm ci
 COPY packages/shared ./packages/shared
 COPY packages/${APP_PACKAGE} ./packages/${APP_PACKAGE}
 RUN npm run build -w @hybridsovereign/shared && \

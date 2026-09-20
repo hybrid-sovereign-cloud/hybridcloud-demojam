@@ -112,9 +112,7 @@
             kind: "{{ hs_kind }}"
             name: "{{ hs_name }}"
             namespace: "{{ hs_namespace }}"
-            status:
-              phase: pending
-              message: "JobTemplate {{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) }} not found in AAP"
+            status: "{{ {'phase': 'pending', 'message': 'JobTemplate ' ~ ((is_delete | bool) | ternary(teardown_template_name, job_template_name)) ~ ' not found in AAP', 'observedGeneration': hs_generation | int} }}"
         - name: End
           ansible.builtin.meta: end_play
 
