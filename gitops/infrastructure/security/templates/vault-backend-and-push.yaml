@@ -31,9 +31,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "45"
 spec:
   refreshInterval: 1h
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
   selector:
     secret:
       name: aap-admin
@@ -55,9 +55,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "45"
 spec:
   refreshInterval: 1h
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
   selector:
     secret:
       name: vault-root
