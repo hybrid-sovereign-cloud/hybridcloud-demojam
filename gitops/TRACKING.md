@@ -116,3 +116,20 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | Blockers | AAP JobTemplates not seeded; ClusterSecretStore blocked by ESO deny-all until netpol lands; ACM still Installing; Phase 9 wipe deferred |
 | Next | ESO→Vault netpol; seed AAP JTs; console plugins deploy; ACM; Phase 9 |
 
+
+### 2026-09-20T04:10:00Z — Platform mostly green
+
+| Component | Status |
+|-----------|--------|
+| Gitea | Synced Healthy Running |
+| Vault | Init+unsealed; CSS Ready |
+| Quay | Available |
+| Operators | 8/8 Running v1alpha1 |
+| Samples | Entity/AAP/Quay/Rbac/UIHealth live; Entity pending JT |
+| UI dashboards | Running + Routes |
+| Console plugins | Images built |
+| ESO | Operand + CSS Ready; PushSecrets syncing |
+| ACM | Still Installing |
+| AAP JTs | Not seeded yet (blocker for full Entity provision) |
+| Phase 9 | Deferred until JT seed + ACM Running |
+
