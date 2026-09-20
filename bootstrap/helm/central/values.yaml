@@ -133,7 +133,7 @@ sovereignNamespacesServices:
       identityProviderName: "sovereign-services"
       clientId: "openshift-services"
       clientSecretName: "sovereign-services-oauth-secret"
-      issuer: "https://rhbk-services.apps.shc-services5.lab.signal9.gg/realms/sovereign-tenants"
+      issuer: "https://rhbk-services.apps.shc-services5.lab.signal9.gg/realms/sso"
       caConfigMap: "keycloak-services-ca"
 
 # ─── RHBK Central (Keycloak) ─────────────────────────────────────────────────
@@ -1344,7 +1344,7 @@ sovereignJobs:
         - name: OCP_SERVICES_SERVER
           value: "https://api.shc-services5.lab.signal9.gg:6443"
         - name: SERVICES_REALM_NAME
-          value: "sovereign-tenants"
+          value: "sso"
     giteaInit:
       enabled: true  # enables Gitea init + token write to Vault
       playbook: gitea-init.yml
@@ -1437,7 +1437,7 @@ sovereignJobs:
         - name: KEYCLOAK_ADMIN_SECRET_NS
           value: "sovereign-cloud-jobs"
         - name: REALM_NAME
-          value: "sovereign-tenants"
+          value: "sso"
         - name: FORCE_RERUN
           value: "2026-06-24-services-rhbk"
     keycloakServicesGroups:
@@ -1453,7 +1453,7 @@ sovereignJobs:
         - name: KEYCLOAK_ADMIN_SECRET_NS
           value: "sovereign-cloud-jobs"
         - name: REALM_NAME
-          value: "sovereign-tenants"
+          value: "sso"
         - name: ADMIN_GROUP
           value: "sovereign-admin"
         - name: EXTRA_GROUPS
@@ -1471,9 +1471,9 @@ sovereignJobs:
         - name: KEYCLOAK_ADMIN_SECRET_NS
           value: "sovereign-cloud-jobs"
         - name: REALM_NAME
-          value: "sovereign-tenants"
+          value: "sso"
         - name: KEYCLOAK_CLIENTS
-          value: '[{"realm":"sovereign-tenants","client_id":"openshift-services","name":"OpenShift Services","redirect_uris":["*"]},{"realm":"sovereign-tenants","client_id":"quay-services","name":"Quay Services","redirect_uris":["*"]},{"realm":"sovereign-tenants","client_id":"aap","name":"Ansible Automation Platform","redirect_uris":["*"]},{"realm":"sovereign-tenants","client_id":"acs","name":"Advanced Cluster Security","redirect_uris":["*"]}]'
+          value: '[{"realm":"sso","client_id":"openshift-services","name":"OpenShift Services","redirect_uris":["*"]},{"realm":"sso","client_id":"quay-services","name":"Quay Services","redirect_uris":["*"]},{"realm":"sso","client_id":"aap","name":"Ansible Automation Platform","redirect_uris":["*"]},{"realm":"sso","client_id":"acs","name":"Advanced Cluster Security","redirect_uris":["*"]}]'
         - name: SECRETS_NAMESPACE
           value: "sovereign-cloud-jobs"
     vaultServicesInit:
@@ -1513,7 +1513,7 @@ sovereignJobs:
         - name: KEYCLOAK_CENTRAL_REALM
           value: "sovereign-central"
         - name: KEYCLOAK_SERVICES_REALM
-          value: "sovereign-tenants"
+          value: "sso"
         - name: KEYCLOAK_SERVICES_ADMIN_SECRET
           value: "rhbk-services-admin"
         - name: KEYCLOAK_SERVICES_ADMIN_SECRET_NS
@@ -1948,7 +1948,7 @@ sovereignJobs:
         - name: KEYCLOAK_CENTRAL_REALM
           value: "sovereign-central"
         - name: KEYCLOAK_SERVICES_REALM
-          value: "sovereign-tenants"
+          value: "sso"
         - name: KEYCLOAK_CENTRAL_ADMIN_SECRET
           value: "rhbk-central-initial-admin"
         - name: KEYCLOAK_CENTRAL_ADMIN_SECRET_NS
@@ -2069,7 +2069,7 @@ sovereignJobs:
         - name: KEYCLOAK_URL
           value: "https://rhbk-services.apps.shc-services5.lab.signal9.gg"
         - name: KEYCLOAK_REALM
-          value: "sovereign-tenants"
+          value: "sso"
         - name: KEYCLOAK_CLIENT_ID
           value: "quay-services"
         - name: KEYCLOAK_ADMIN_SECRET
@@ -2179,7 +2179,7 @@ pluginVault:
       tag: "1.21.2"
     keycloak:
       internalUrl: "http://rhbk-services-service.services-rhbk.svc:8080"
-      realm: sovereign-tenants
+      realm: sso
       adminSecret: rhbk-services-admin
     externalSecret:
       enabled: true
@@ -2213,7 +2213,7 @@ pluginAap:
       gatewayInternalUrl: "http://sovereign-aap.aap.svc:80"
     keycloak:
       internalUrl: "http://rhbk-services-service.services-rhbk.svc:8080"
-      realm: sovereign-tenants
+      realm: sso
     externalSecret:
       enabled: true
       targetSecretName: aap-admin-credentials
@@ -2251,7 +2251,7 @@ pluginQuay:
       internalUrl: "http://svc-sovereign-registry-quay-app.quay-enterprise.svc:443"
     keycloak:
       internalUrl: "http://rhbk-services-service.services-rhbk.svc:8080"
-      realm: sovereign-tenants
+      realm: sso
     externalSecret:
       enabled: true
       targetSecretName: quay-admin-credentials
@@ -2397,7 +2397,7 @@ platformOpenshiftOperator:
     keycloak:
       internalUrl: "http://rhbk-services-service.services-rhbk.svc:8080"
       externalUrl: "https://rhbk-services.apps.shc-services5.lab.signal9.gg"
-      realm: "sovereign-tenants"
+      realm: "sso"
       adminSecretName: "rhbk-admin-credentials"
       adminSecret:
         enabled: true
@@ -2558,7 +2558,7 @@ sovereignAdminPlugin:
     namespace: sovereign-cloud
     image:
       repository: quay.signal9.gg/hybrid-sovereign/sovereign-admin-plugin
-      tag: "1.2.20"
+      tag: "1.2.27"
       pullPolicy: Always
     imagePullSecrets:
       - name: quay-pull-secret
@@ -2583,7 +2583,7 @@ sovereignTenantPlugin:
     namespace: sovereign-cloud
     image:
       repository: quay.signal9.gg/hybrid-sovereign/sovereign-tenant-plugin
-      tag: "1.3.15"
+      tag: "1.3.22"
       pullPolicy: Always
     imagePullSecrets:
       - name: quay-pull-secret

@@ -201,7 +201,7 @@ function TenantLayout(): React.ReactElement {
       <MastheadContent>
         <Toolbar id="tenant-masthead-toolbar" isFullHeight isStatic>
           <ToolbarContent>
-            <ToolbarGroup align={{ default: 'alignRight' }}>
+            <ToolbarGroup align={{ default: 'alignEnd' }}>
               <ToolbarItem>
                 <LanguageToggle isCompact />
               </ToolbarItem>

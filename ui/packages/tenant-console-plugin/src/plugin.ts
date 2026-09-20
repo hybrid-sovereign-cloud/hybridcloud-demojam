@@ -1,7 +1,7 @@
 import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
-import { configureK8sClient, configurePermissionsClient, initI18n } from '@hybridsovereign/shared';
+import { configureK8sClient, configurePermissionsClient } from '@hybridsovereign/shared';
 
-initI18n();
+// Do not call initI18n() here — shared react-i18next would stomp console i18n.
 
 configureK8sClient({
   baseUrl: '/api/kubernetes',

@@ -202,7 +202,7 @@ export function OverviewPage(): React.ReactElement {
                               {p.metadata.name} <ExternalLinkAltIcon />
                             </Link>
                           </FlexItem>
-                          <FlexItem align={{ default: 'alignRight' }}>
+                          <FlexItem align={{ default: 'alignEnd' }}>
                             <Label color={healthy ? 'green' : 'red'} icon={healthy ? <CheckCircleIcon /> : undefined}>
                               {healthy ? 'Healthy' : 'Degraded'}
                             </Label>
@@ -241,7 +241,7 @@ export function OverviewPage(): React.ReactElement {
                       <Label color="orange">{overall.failed}</Label>
                     </CardTitle>
                   </FlexItem>
-                  <FlexItem align={{ default: 'alignRight' }}>
+                  <FlexItem align={{ default: 'alignEnd' }}>
                     <Link to="/operators">View all</Link>
                   </FlexItem>
                 </Flex>

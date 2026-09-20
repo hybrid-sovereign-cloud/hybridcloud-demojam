@@ -1,6 +1,6 @@
 {
   "name": "@hybridsovereign/admin-console-plugin",
-  "version": "1.2.22",
+  "version": "1.2.27",
   "private": true,
   "description": "OpenShift Console dynamic plugin for Hybrid Sovereign admin views",
   "main": "dist/plugin-entry.js",
@@ -11,7 +11,7 @@
   },
   "consolePlugin": {
     "name": "sovereign-admin-plugin",
-    "version": "1.2.22",
+    "version": "1.2.27",
     "displayName": "Sovereign Cloud",
     "description": "Sovereign Cloud admin perspective \u2014 Entities, Personas, Services, Operators",
     "exposedModules": {
@@ -49,7 +49,6 @@
       "AdminCloudGatewayDetailPage": "./src/components/AdminCloudGatewayDetailPage.tsx",
       "AdminTransportLinkDetailPage": "./src/components/AdminTransportLinkDetailPage.tsx",
       "AdminUIHealthCheckerDetailPage": "./src/components/AdminUIHealthCheckerDetailPage.tsx",
-      "PerspectiveIcon": "./src/PerspectiveIcon.tsx",
       "perspective": "./src/perspective.tsx",
       "AdminRbacConfigDetailPage": "./src/components/AdminRbacConfigDetailPage.tsx"
     }
@@ -57,9 +56,9 @@
   "dependencies": {
     "@hybridsovereign/shared": "*",
     "@openshift-console/dynamic-plugin-sdk": "^1.8.0",
-    "@patternfly/react-core": "^5.4.1",
-    "@patternfly/react-icons": "^5.4.0",
-    "@patternfly/react-table": "^5.4.1",
+    "@patternfly/react-core": "^6.4.0",
+    "@patternfly/react-icons": "^6.4.0",
+    "@patternfly/react-table": "^6.4.0",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
     "react-router-dom": "6.30.4"

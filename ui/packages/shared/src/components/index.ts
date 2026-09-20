@@ -11,7 +11,7 @@ export type { PageHeaderProps, PageHeaderCrumb } from './PageHeader';
 export { StatusBadge, normalizeHealth } from './StatusBadge';
 export type { StatusBadgeProps, ResourceHealth } from './StatusBadge';
 export { StatTile, HealthStrip } from './StatTile';
-export type { StatTileProps, HealthStripProps, HealthStripTile } from './StatTile';
+export type { StatTileProps, HealthStripProps, HealthStripTile, StatVariant } from './StatTile';
 export { FilterToolbar } from './FilterToolbar';
 export type { FilterToolbarProps, StatusFilter } from './FilterToolbar';
 export { NamespaceContextBar } from './NamespaceContextBar';

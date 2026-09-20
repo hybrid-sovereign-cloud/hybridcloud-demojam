@@ -1,7 +1,8 @@
 import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
-import { configureK8sClient, configurePermissionsClient, initI18n } from '@hybridsovereign/shared';
+import { configureK8sClient, configurePermissionsClient } from '@hybridsovereign/shared';
 
-initI18n();
+// Do not call initI18n() here — shared react-i18next would stomp console i18n.
+// Page components init an isolated instance via useTranslation().
 
 configureK8sClient({
   baseUrl: '/api/kubernetes',
@@ -51,5 +52,4 @@ export { default as AdminHybridFabricDetailPage } from './components/AdminHybrid
 export { default as AdminCloudGatewayDetailPage } from './components/AdminCloudGatewayDetailPage';
 export { default as AdminTransportLinkDetailPage } from './components/AdminTransportLinkDetailPage';
 export { default as AdminUIHealthCheckerDetailPage } from './components/AdminUIHealthCheckerDetailPage';
-export { default as PerspectiveIcon } from './PerspectiveIcon';
-export { getLandingPageURL, getImportRedirectURL } from './perspective';
+export { icon, getLandingPageURL, getImportRedirectURL } from './perspective';

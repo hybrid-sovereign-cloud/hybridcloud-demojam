@@ -4,6 +4,9 @@ import {
   Button,
   Label,
   Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
   ModalVariant,
   Spinner,
   Tab,
@@ -304,19 +307,22 @@ export function ResourceDetail({
 
       <Modal
         variant={ModalVariant.small}
-        title={`Delete ${kind}?`}
         isOpen={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        actions={[
+      >
+        <ModalHeader title={`Delete ${kind}?`} />
+        <ModalBody>
+          This will permanently delete <strong>{name}</strong> from namespace{' '}
+          <strong>{namespace}</strong>.
+        </ModalBody>
+        <ModalFooter>
           <Button key="confirm" variant="danger" isDisabled={deleting} onClick={handleDelete}>
             {deleting ? 'Deleting…' : 'Delete'}
-          </Button>,
+          </Button>
           <Button key="cancel" variant="link" onClick={() => setConfirmDelete(false)}>
             Cancel
-          </Button>,
-        ]}
-      >
-        This will permanently delete <strong>{name}</strong> from namespace <strong>{namespace}</strong>.
+          </Button>
+        </ModalFooter>
       </Modal>
     </div>
   );

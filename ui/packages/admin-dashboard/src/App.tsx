@@ -217,7 +217,7 @@ function AdminLayout(): React.ReactElement {
       <MastheadContent>
         <Toolbar id="admin-masthead-toolbar" isFullHeight isStatic>
           <ToolbarContent>
-            <ToolbarGroup align={{ default: 'alignRight' }}>
+            <ToolbarGroup align={{ default: 'alignEnd' }}>
               <ToolbarItem>
                 <LanguageToggle isCompact />
               </ToolbarItem>

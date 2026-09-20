@@ -13,6 +13,8 @@ import type { HybridSovereignKind, K8sResource } from '../types/crds';
 import { KindIcon } from '../icons/kindIcons';
 import { StatusBadge } from './StatusBadge';
 import { HealthStrip } from './StatTile';
+import type { StatVariant } from './StatTile';
+import { HealthDonut } from './HealthDonut';
 import { normalizeHealth } from './StatusBadge';
 import {
   CellMarker,
@@ -149,19 +151,34 @@ export function ResourceListTable({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const healthTiles = useMemo(() => {
+  const healthCounts = useMemo(() => {
     const counts = { ready: 0, failed: 0, pending: 0, reconciling: 0 };
     for (const item of items) {
       const h = normalizeHealth(item.status?.ready, item.status?.status);
       if (h in counts) counts[h as keyof typeof counts] += 1;
     }
+    return counts;
+  }, [items]);
+
+  const healthTiles = useMemo(() => {
+    const total = Math.max(
+      1,
+      healthCounts.ready + healthCounts.failed + healthCounts.pending + healthCounts.reconciling,
+    );
+    const mk = (key: StatVariant, value: number) => ({
+      key,
+      label: t(`status.${key}`),
+      value,
+      variant: key,
+      share: Math.round((value / total) * 100),
+    });
     return [
-      { key: 'ready', label: t('status.ready'), value: counts.ready },
-      { key: 'reconciling', label: t('status.reconciling'), value: counts.reconciling },
-      { key: 'pending', label: t('status.pending'), value: counts.pending },
-      { key: 'failed', label: t('status.failed'), value: counts.failed },
+      mk('ready', healthCounts.ready),
+      mk('reconciling', healthCounts.reconciling),
+      mk('pending', healthCounts.pending),
+      mk('failed', healthCounts.failed),
     ];
-  }, [items, t]);
+  }, [healthCounts, t]);
 
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.id === sortId) ?? columns[0];
@@ -208,10 +225,22 @@ export function ResourceListTable({
 
       {items.length > 0 && (
         <div className="sc-list-summary">
-          <HealthStrip tiles={healthTiles} />
-          <span className="sc-list-summary__count">
-            {t('list.showing', { count: items.length, defaultValue: `${items.length} resources` })}
-          </span>
+          <div className="sc-list-summary__viz">
+            <HealthDonut
+              size="sm"
+              ready={healthCounts.ready}
+              failed={healthCounts.failed}
+              pending={healthCounts.pending}
+              reconciling={healthCounts.reconciling}
+              title={t('common.status')}
+            />
+          </div>
+          <div className="sc-list-summary__kpis">
+            <HealthStrip tiles={healthTiles} />
+            <span className="sc-list-summary__count">
+              {t('list.showing', { count: items.length, defaultValue: `${items.length} resources` })}
+            </span>
+          </div>
         </div>
       )}
 
@@ -316,17 +345,26 @@ export function ResourceListTable({
                       {isOpen ? (
                         <ExpandableRowContent>
                           <div className="sc-list-expand">
+                            <div className="sc-list-expand__header">
+                              <StatusBadge
+                                status={item.status?.status}
+                                ready={item.status?.ready}
+                                message={item.status?.message}
+                                lastTransition={item.status?.lastReconciledAt}
+                              />
+                              <span className="sc-list-expand__title">{item.metadata.name}</span>
+                            </div>
                             {expandRows.length === 0 ? (
                               <span className="sc-muted">{t('list.noExtraDetails')}</span>
                             ) : (
-                              <dl className="sc-list-expand__dl">
+                              <div className="sc-list-expand__grid">
                                 {expandRows.map((r) => (
-                                  <div key={r.label} className="sc-list-expand__row">
-                                    <dt>{r.label}</dt>
-                                    <dd>{r.value}</dd>
+                                  <div key={r.label} className="sc-list-expand__card">
+                                    <div className="sc-list-expand__card-label">{r.label}</div>
+                                    <div className="sc-list-expand__card-value">{r.value}</div>
                                   </div>
                                 ))}
-                              </dl>
+                              </div>
                             )}
                             <div className="sc-list-expand__actions">
                               {linkMode === 'anchor' ? (

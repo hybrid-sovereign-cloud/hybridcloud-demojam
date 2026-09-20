@@ -192,7 +192,7 @@ const AdminOverviewPage: React.FC = () => {
                                 {p.metadata.name} <ExternalLinkAltIcon />
                               </a>
                             </FlexItem>
-                            <FlexItem align={{ default: 'alignRight' }}>
+                            <FlexItem align={{ default: 'alignEnd' }}>
                               <Label color={healthy ? 'green' : 'red'} icon={healthy ? <CheckCircleIcon /> : undefined}>
                                 {healthy ? 'Healthy' : 'Degraded'}
                               </Label>
@@ -230,7 +230,7 @@ const AdminOverviewPage: React.FC = () => {
                         Failed custom resources <Label color="orange">{overall.failed}</Label>
                       </CardTitle>
                     </FlexItem>
-                    <FlexItem align={{ default: 'alignRight' }}>
+                    <FlexItem align={{ default: 'alignEnd' }}>
                       <a href="/hybridsovereign/operators">View all</a>
                     </FlexItem>
                   </Flex>
