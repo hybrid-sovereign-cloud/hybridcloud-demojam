@@ -1,0 +1,49 @@
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: RbacConfig
+metadata:
+  name: keycloak-sovereign-tenants-services
+  namespace: sovereign-cloud-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: keycloak
+  secret: rhbk-services-admin
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: AAPConfig
+metadata:
+  name: aap-sovereign-services
+  namespace: sovereign-cloud-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  secret: aap-admin-credentials
+  rbacConfig: keycloak-sovereign-tenants-services
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: QuayConfig
+metadata:
+  name: quay-sovereign-services
+  namespace: sovereign-cloud-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  secret: quay-admin-credentials
+  rbacConfig: keycloak-sovereign-tenants-services
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: UIHealthChecker
+metadata:
+  name: sovereign-ui-health
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  url: https://gitea-gitea.apps.cluster-qvhzm.dyn.redhatworkshops.io/
+  displayName: Gitea
+  group: services
+  expectedStatus: 200

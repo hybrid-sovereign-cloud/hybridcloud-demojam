@@ -1,0 +1,125 @@
+# Vault init + unseal (lab). Keys/token only in K8s Secrets — never git.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-init
+  namespace: vault
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vault-init
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-init
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: vault-init
+    namespace: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vault-init
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-init
+  namespace: vault
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 8
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: vault-init
+      containers:
+        - name: init
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          env:
+            - name: VAULT_ADDR
+              value: http://vault.vault.svc:8200
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              echo "Waiting for Vault..."
+              for i in $(seq 1 90); do
+                if curl -sf "$VAULT_ADDR/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200" >/dev/null 2>&1 \
+                   || curl -sf -o /tmp/h -w '%{http_code}' "$VAULT_ADDR/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200" | grep -qE '200|429|472|473|501|503'; then
+                  break
+                fi
+                sleep 2
+              done
+              STATUS=$(curl -sf "$VAULT_ADDR/v1/sys/seal-status" || true)
+              echo "seal-status: $STATUS"
+              INIT=$(echo "$STATUS" | grep -o '"initialized":[^,]*' | head -1 | cut -d: -f2)
+              SEALED=$(echo "$STATUS" | grep -o '"sealed":[^,]*' | head -1 | cut -d: -f2)
+
+              if [ "$INIT" = "false" ]; then
+                echo "Initializing Vault (1/1 shares)"
+                INIT_JSON=$(curl -sf -X PUT "$VAULT_ADDR/v1/sys/init" \
+                  -H 'Content-Type: application/json' \
+                  -d '{"secret_shares":1,"secret_threshold":1}')
+                UNSEAL=$(echo "$INIT_JSON" | grep -o '"keys_base64":\["[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+                ROOT=$(echo "$INIT_JSON" | grep -o '"root_token":"[^"]*"' | cut -d'"' -f4)
+                [ -n "$UNSEAL" ] && [ -n "$ROOT" ]
+                oc create secret generic vault-init -n vault \
+                  --from-literal=unsealKey="$UNSEAL" \
+                  --from-literal=rootToken="$ROOT" \
+                  --dry-run=client -o yaml | oc apply -f -
+                oc create secret generic vault-root -n sovereign-secrets \
+                  --from-literal=token="$ROOT" \
+                  --from-literal=unsealKey="$UNSEAL" \
+                  --dry-run=client -o yaml | oc apply -f -
+                curl -sf -X PUT "$VAULT_ADDR/v1/sys/unseal" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"key\":\"$UNSEAL\"}" >/dev/null
+              else
+                echo "Already initialized"
+                if [ "$SEALED" = "true" ]; then
+                  UNSEAL=$(oc get secret vault-init -n vault -o jsonpath='{.data.unsealKey}' | base64 -d)
+                  curl -sf -X PUT "$VAULT_ADDR/v1/sys/unseal" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"key\":\"$UNSEAL\"}" >/dev/null
+                fi
+                ROOT=$(oc get secret vault-root -n sovereign-secrets -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
+                if [ -z "${ROOT:-}" ]; then
+                  ROOT=$(oc get secret vault-init -n vault -o jsonpath='{.data.rootToken}' | base64 -d)
+                  oc create secret generic vault-root -n sovereign-secrets \
+                    --from-literal=token="$ROOT" \
+                    --dry-run=client -o yaml | oc apply -f -
+                fi
+              fi
+
+              echo "Enabling KV engines"
+              curl -sf -X POST "$VAULT_ADDR/v1/sys/mounts/hybridsovereign" \
+                -H "X-Vault-Token: $ROOT" \
+                -H 'Content-Type: application/json' \
+                -d '{"type":"kv","options":{"version":"2"}}' >/dev/null 2>&1 || true
+              curl -sf -X POST "$VAULT_ADDR/v1/sys/mounts/secret" \
+                -H "X-Vault-Token: $ROOT" \
+                -H 'Content-Type: application/json' \
+                -d '{"type":"kv","options":{"version":"2"}}' >/dev/null 2>&1 || true
+              echo "Vault ready"

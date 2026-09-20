@@ -65,6 +65,7 @@ namespaces:
   - sovereign-secrets
   - sovereign-cloud
   - sovereign-cloud-plugins
+  - sovereign-ui
   - vault
   - quay
   - gitea

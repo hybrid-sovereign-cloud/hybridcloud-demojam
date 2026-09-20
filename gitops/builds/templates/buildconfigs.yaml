@@ -64,3 +64,127 @@ spec:
   triggers:
     - type: ConfigChange
   runPolicy: Serial
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: sovereign-cloud-dashboard
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: sovereign-cloud-dashboard:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      ref: main
+    contextDir: ui
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.dashboard.s2i
+      buildArgs:
+        - name: APP_PACKAGE
+          value: admin-dashboard
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: tenancy-dashboard
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: tenancy-dashboard:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      ref: main
+    contextDir: ui
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.dashboard.s2i
+      buildArgs:
+        - name: APP_PACKAGE
+          value: tenant-dashboard
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: sovereign-admin-plugin
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: sovereign-admin-plugin:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      ref: main
+    contextDir: ui
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.plugin.s2i
+      buildArgs:
+        - name: PLUGIN_PACKAGE
+          value: admin-console-plugin
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: sovereign-tenant-plugin
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: sovereign-tenant-plugin:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      ref: main
+    contextDir: ui
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.plugin.s2i
+      buildArgs:
+        - name: PLUGIN_PACKAGE
+          value: tenant-console-plugin
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial

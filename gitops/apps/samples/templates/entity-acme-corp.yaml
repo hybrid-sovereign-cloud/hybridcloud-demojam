@@ -1,0 +1,45 @@
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Entity
+metadata:
+  name: acme-corp
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  description: >-
+    ACME Corporation — primary demojam tenant (non-parked sample).
+  billingID: ACME-2024-001
+  websiteLink: https://acme-corp.example.com
+  namespaceRbac:
+    entityAdmin:
+      - acme-platform-admins
+    auditor:
+      - acme-auditors
+      - acme-viewers
+    BobsTeam:
+      - acme-viewers
+    cloudOSOAdmin:
+      - acme-infra-team
+    cloudOSOView:
+      - acme-devs
+    cloudAWSAdmin:
+      - acme-infra-team
+    cloudAWSView:
+      - acme-devs
+    platformOpenshiftAdmin:
+      - acme-platform-admins
+    platformOpenshiftView:
+      - acme-viewers
+    teamAdmin:
+      - acme-platform-admins
+    teamView:
+      - acme-viewers
+    projectAdmin:
+      - acme-platform-admins
+    projectView:
+      - acme-viewers
+    assignmentAdmin:
+      - acme-platform-admins
+    identityAdmin:
+      - acme-platform-admins

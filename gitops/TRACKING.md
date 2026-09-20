@@ -97,3 +97,13 @@ Quay Available; 24 CRDs; 8 platform operators; ESO ok; images built. Next: Vault
 | Status | in-progress |
 | Next action | Confirm Gitea 1/1 + operators Running; UI BuildConfigs; samples; PushSecrets |
 
+
+### 2026-09-20T03:50:00Z — Phase 2–7 advance
+
+| Field | Value |
+|-------|-------|
+| Change summary | Gitea Healthy; operators watching v1alpha1; Vault init Job; ClusterSecretStore+PushSecrets; live Entity+platform sample CRs; UI BuildConfigs + dashboard Deployments; Quay/Gitea ignoreDifferences |
+| Paths touched | `gitops/**`, `ui/Containerfile.*.s2i`, `src/custom-operators/base/watches/*` |
+| Status | in-progress |
+| Next action | Sync; vault init; UI builds Complete; Entity reconcile; ACM Running; Phase 8–9 |
+

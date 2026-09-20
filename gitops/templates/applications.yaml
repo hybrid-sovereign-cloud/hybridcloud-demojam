@@ -94,6 +94,12 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: quay
+  ignoreDifferences:
+    - group: quay.redhat.com
+      kind: QuayRegistry
+      jqPathExpressions:
+        - .spec.components
+        - .status
   syncPolicy:
     automated:
       prune: true
@@ -102,6 +108,7 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
 {{- end }}
 
 {{- if .Values.provision.gitea }}
@@ -127,6 +134,12 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: gitea
+  ignoreDifferences:
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/storageClassName
+        - /spec/volumeName
   syncPolicy:
     automated:
       prune: true
@@ -285,11 +298,13 @@ spec:
     path: gitops/apps/ui
   destination:
     server: {{ $server | quote }}
-    namespace: sovereign-cloud
+    namespace: sovereign-ui
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
 {{- end }}
 
 {{- if .Values.provision.samples }}
