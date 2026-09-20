@@ -82,14 +82,14 @@
         validate_certs: false
         api_version: route.openshift.io/v1
         kind: Route
-        namespace: services-rhbk
+        namespace: keycloak
         label_selectors:
           - "app=keycloak"
       register: kc_route
 
     - name: Debug Keycloak route discovery
       ansible.builtin.debug:
-        msg: "Found {{ kc_route.resources | length }} Keycloak route(s) in services-rhbk"
+        msg: "Found {{ kc_route.resources | length }} Keycloak route(s) in keycloak"
 
     - name: Override keycloak_internal_url with discovered Route
       ansible.builtin.set_fact:

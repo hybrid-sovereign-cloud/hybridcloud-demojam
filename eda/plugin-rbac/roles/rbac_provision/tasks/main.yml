@@ -87,7 +87,7 @@
         validate_certs: false
         api_version: route.openshift.io/v1
         kind: Route
-        namespace: services-rhbk
+        namespace: keycloak
         label_selectors:
           - "app=keycloak"
       register: kc_route

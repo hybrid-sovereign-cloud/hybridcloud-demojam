@@ -111,7 +111,7 @@
             validate_certs: false
             api_version: route.openshift.io/v1
             kind: Route
-            namespace: services-rhbk
+            namespace: keycloak
             label_selectors:
               - "app=keycloak"
           register: kc_route_fin
@@ -122,7 +122,7 @@
               {{
                 ('https://' + kc_route_fin.resources[0].spec.host)
                 if (kc_route_fin.resources | length > 0)
-                else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://rhbk-services.apps.cluster.local', true)
+                else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io', true)
               }}
 
         - name: Get Keycloak admin token

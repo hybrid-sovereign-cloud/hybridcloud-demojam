@@ -14,7 +14,8 @@
 
     - name: Set Quay token alias for QuayConfig tasks
       ansible.builtin.set_fact:
-        quay_token: "{{ quay_api_token }}"
+        quay_token: "{{ quay_api_token | default(quay_admin_password, true) }}"
+        quay_api_token: "{{ quay_api_token | default(quay_admin_password, true) }}"
       no_log: true
 
     - name: Announce AAP job started in CR status
@@ -87,7 +88,7 @@
         validate_certs: false
         api_version: route.openshift.io/v1
         kind: Route
-        namespace: services-rhbk
+        namespace: keycloak
         label_selectors:
           - "app=keycloak"
       register: kc_route
