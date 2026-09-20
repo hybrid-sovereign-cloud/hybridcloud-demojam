@@ -42,18 +42,26 @@
   ansible.builtin.set_fact:
     need_launch: >-
       {{
-        (is_delete | bool and True) or
-        (cur_observed | int != hs_generation | int and aap_job_status not in ['pending', 'waiting', 'running']) or
-        (aap_job_status in ['failed', 'error', 'canceled', 'missing', 'none'] and cur_observed | int != hs_generation | int) or
-        (aap_job_status in ['pending', 'waiting', 'running'] and (job_age_seconds | int) > (job_stale_seconds | int)) or
-        (aap_job_status in ['failed', 'error', 'canceled'] and cur_phase not in ['ready', 'provisioned'])
+        (is_delete | bool) or
+        (
+          cur_observed | int != hs_generation | int and
+          aap_job_status not in ['pending', 'waiting', 'running', 'successful']
+        ) or
+        (
+          aap_job_status in ['failed', 'error', 'canceled', 'missing', 'none'] and
+          cur_observed | int != hs_generation | int
+        ) or
+        (
+          aap_job_status in ['pending', 'waiting', 'running'] and
+          (job_age_seconds | int) > (job_stale_seconds | int)
+        )
       }}
     need_cancel: >-
       {{
         aap_job_status in ['pending', 'waiting', 'running'] and
-        ((job_age_seconds | int) > (job_stale_seconds | int) or aap_job_status in ['failed', 'error'])
+        (job_age_seconds | int) > (job_stale_seconds | int)
       }}
-    mark_ready: "{{ aap_job_status == 'successful' }}"
+    mark_ready: "{{ aap_job_status == 'successful' and not (is_delete | bool) }}"
     noop_running: "{{ aap_job_status in ['pending', 'waiting', 'running'] and (job_age_seconds | int) <= (job_stale_seconds | int) }}"
 
 - name: No-op while job running within 3h window

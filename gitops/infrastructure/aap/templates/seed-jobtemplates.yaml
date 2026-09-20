@@ -1,4 +1,4 @@
-# Seed stub AAP JobTemplates so operators can launch (demo stubs until full playbooks land).
+# Seed stub AAP JobTemplates (Demo Project / hello_world.yml) for operator launches.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -30,42 +30,28 @@ spec:
               HOST=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.host}' | base64 -d)
               USER=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.username}' | base64 -d)
               PASS=$(oc get secret aap-operator-credentials -n sovereign-cloud -o jsonpath='{.data.password}' | base64 -d)
-              # Ensure demo project/org/inventory exist (idempotent best-effort)
-              ORG=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/organizations/?name=Default" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-              if [ -z "$ORG" ]; then
-                ORG=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/organizations/" \
-                  -H 'Content-Type: application/json' -d '{"name":"Default","description":"hybridsovereign"}' \
-                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-              fi
-              INV=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/inventories/?name=hybridsovereign" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-              if [ -z "$INV" ]; then
-                INV=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/inventories/" \
-                  -H 'Content-Type: application/json' \
-                  -d "{\"name\":\"hybridsovereign\",\"organization\":$ORG}" \
-                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-              fi
-              # Use demo project if present; else create manual project pointing at this repo playbooks path
-              PROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/?name=hybridsovereign" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-              if [ -z "$PROJ" ]; then
-                PROJ=$(curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/projects/" \
-                  -H 'Content-Type: application/json' \
-                  -d "{\"name\":\"hybridsovereign\",\"organization\":$ORG,\"scm_type\":\"\",\"local_path\":\"_8__demo\"}" \
-                  | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1 || true)
-              fi
+              auth=(-u "$USER:$PASS")
+              ORG=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/organizations/?name=Default" | sed -n 's/.*"count":1.*"id":\([0-9]*\).*/\1/p' | head -1)
+              [ -n "$ORG" ] || ORG=1
+              INV=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/inventories/?name=Demo%20Inventory" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              [ -n "$INV" ] || INV=1
+              PROJ=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/projects/?name=Demo%20Project" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
+              [ -n "$PROJ" ] || PROJ=6
+              echo "ORG=$ORG INV=$INV PROJ=$PROJ"
               KINDS="entity rbacconfig aapconfig quayconfig hybridfabric cloudgateway transportlink uihealthchecker team project assignment persona rbac vault vaultkv aaporg quayorg hybridnetwork networkplacement"
               for k in $KINDS; do
                 for suffix in provision teardown; do
                   NAME="${k}-${suffix}"
-                  EXISTS=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/job_templates/?name=$NAME" | grep -c '"count":0' || true)
-                  if echo "$EXISTS" | grep -q 1 || [ "$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/job_templates/?name=$NAME" | grep -o '"count":[0-9]*' | head -1)" = '"count":0' ]; then
-                    # Prefer hello_world playbook on Default project if available
-                    DEFPROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/?name=Demo%20Project%20on%20GitHub" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-                    [ -z "$DEFPROJ" ] && DEFPROJ=$(curl -sk -u "$USER:$PASS" "$HOST/api/controller/v2/projects/" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
-                    curl -sk -u "$USER:$PASS" -X POST "$HOST/api/controller/v2/job_templates/" \
+                  COUNT=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/job_templates/?name=$NAME" | sed -n 's/.*"count":\([0-9]*\).*/\1/p' | head -1)
+                  if [ "${COUNT:-0}" = "0" ]; then
+                    RESP=$(curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/job_templates/" \
                       -H 'Content-Type: application/json' \
-                      -d "{\"name\":\"$NAME\",\"organization\":$ORG,\"inventory\":$INV,\"project\":${DEFPROJ:-null},\"playbook\":\"hello_world.yml\",\"ask_variables_on_launch\":true}" \
-                      >/dev/null || echo "warn: could not create $NAME"
-                    echo "seeded $NAME"
+                      -d "{\"name\":\"$NAME\",\"organization\":$ORG,\"inventory\":$INV,\"project\":$PROJ,\"playbook\":\"hello_world.yml\",\"ask_variables_on_launch\":true}")
+                    if echo "$RESP" | grep -q '"id":'; then
+                      echo "created $NAME"
+                    else
+                      echo "FAILED $NAME: $RESP" >&2
+                    fi
                   else
                     echo "exists $NAME"
                   fi
