@@ -1,5 +1,6 @@
 # Admin + tenant dashboards from local ImageStreams (built by hs-builds).
-# Auth: ose-oauth-proxy sidecar (OpenShift SA OAuth) → X-Forwarded-User / Access-Token.
+# Auth: ose-oauth-proxy + real OAuthClient (user:full). SA-as-OAuth-client cannot
+# request user:full — see oauth-clients.yaml bootstrap Job.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -43,8 +44,6 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"sovereign-cloud-dashboard"}}'
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -53,8 +52,6 @@ metadata:
   namespace: sovereign-ui
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"tenancy-dashboard"}}'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -115,7 +112,6 @@ spec:
             - /bin/bash
             - -ec
             - |
-              # Exactly 32 bytes required when pass_access_token=true (no trailing newline)
               printf '%s' "$(openssl rand -hex 16)" > /etc/proxy/secrets/session_secret
               chmod 0444 /etc/proxy/secrets/session_secret
           volumeMounts:
@@ -141,7 +137,8 @@ spec:
             - -tls-cert=/etc/tls/private/tls.crt
             - -tls-key=/etc/tls/private/tls.key
             - -cookie-secret-file=/etc/proxy/secrets/session_secret
-            - -openshift-service-account=sovereign-cloud-dashboard
+            - -client-id=sovereign-cloud-dashboard
+            - -client-secret-file=/etc/oauth-client/client-secret
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - -pass-access-token=true
             - -pass-user-headers=true
@@ -160,6 +157,9 @@ spec:
               readOnly: true
             - name: proxy-secret
               mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-client
+              mountPath: /etc/oauth-client
               readOnly: true
           readinessProbe:
             httpGet:
@@ -184,8 +184,6 @@ spec:
           env:
             - name: PORT
               value: "8080"
-            - name: ENTITY_NAMESPACE
-              value: sovereign-cloud
           readinessProbe:
             httpGet:
               path: /healthz
@@ -205,6 +203,9 @@ spec:
             secretName: sovereign-cloud-dashboard-tls
         - name: proxy-secret
           emptyDir: {}
+        - name: oauth-client
+          secret:
+            secretName: sovereign-cloud-dashboard-oauth-client
 ---
 apiVersion: v1
 kind: Service
@@ -294,7 +295,8 @@ spec:
             - -tls-cert=/etc/tls/private/tls.crt
             - -tls-key=/etc/tls/private/tls.key
             - -cookie-secret-file=/etc/proxy/secrets/session_secret
-            - -openshift-service-account=tenancy-dashboard
+            - -client-id=tenancy-dashboard
+            - -client-secret-file=/etc/oauth-client/client-secret
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - -pass-access-token=true
             - -pass-user-headers=true
@@ -313,6 +315,9 @@ spec:
               readOnly: true
             - name: proxy-secret
               mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-client
+              mountPath: /etc/oauth-client
               readOnly: true
           readinessProbe:
             httpGet:
@@ -356,6 +361,9 @@ spec:
             secretName: tenancy-dashboard-tls
         - name: proxy-secret
           emptyDir: {}
+        - name: oauth-client
+          secret:
+            secretName: tenancy-dashboard-oauth-client
 ---
 apiVersion: v1
 kind: Service

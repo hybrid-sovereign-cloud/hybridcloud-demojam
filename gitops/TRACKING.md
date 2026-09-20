@@ -253,3 +253,86 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Paths | admin/tenant console-plugin components + package.json react-router-dom ^6 |
 | Status | in-progress |
 
+
+---
+### 2026-09-20T13:45:00Z — Keycloak sovereign-tenants backfill
+
+| Field | Value |
+|-------|-------|
+| Change summary | AAP JTs were hello_world stubs — Rbacs ready with empty Group; provisioned realm `sovereign-tenants`, 14 groups under `/acme-corp/*`, 4 persona users, OIDC client; patched Rbac/Persona status |
+| Status | complete (manual API backfill) |
+| Where to look | Keycloak admin → switch realm to **sovereign-tenants** (not master); Groups + Users |
+| Caveat | Still stub JTs — future Rbac CRs will not auto-create groups until real eda playbooks replace hello_world |
+| Demo users | test-entity-admin / test-assignment-admin / test-auditor / test-identity-admin — password `AcmeDemo123!` |
+
+
+---
+### 2026-09-20T14:05:00Z — Real jobs + SSO realm + Vault/Quay installs
+
+| Field | Value |
+|-------|-------|
+| Change summary | AAP JTs → HybridSovereign EDA real playbooks (except cloudoso/cloudaws/platformopenshift stubs); Keycloak realm **sso** (OpenShift IdP); groups+users; OAuth groups claim; OCP Groups/RoleBindings; entity Vault install; Quay admin+org |
+| AAP | Project `HybridSovereign EDA` + Vault credential; seed Job updated |
+| Keycloak | Realm `sso` (existing SSO); Rbac.status.realm=sso; groups under `/acme-corp/*`; OIDC client `idp-4-ocp` groups mapper (leaf names) |
+| OpenShift | OAuth claims.groups=[groups]; 14 Groups + RoleBindings in entity-acme-corp |
+| Vault | `vault-acme-vault` Running in entity-acme-corp; CR URL set; OIDC to sso |
+| Quay | Admin initialized; org `acme-corp-acme-registry`; token in quay-admin-credentials |
+| RBAC test | **14/14** PASS (SSO groups claim + OCP group + can-i) |
+| Demo users | `test-entity-admin`, `test-auditor`, … / `u-acme-*` — password `AcmeDemo123!` via IdP **rhbk** |
+| Code | Missing obtain_* common tasks; realm defaults→sso; ansible.cfg; seed-jobtemplates; aap_job note+realm |
+| Note | Push repo so AAP scm_update_on_launch picks up obtain_* permanently; operators still skip relaunch while phase=provisioned |
+
+
+---
+### 2026-09-20T14:15:00Z — Use OpenShift lab `sso` realm only
+
+| Field | Value |
+|-------|-------|
+| Change summary | Drop `sovereign-tenants` entirely; all Keycloak ops target OpenShift-provided realm **`sso`**; deleted leftover `sovereign-tenants` realm from Keycloak; rbacconfig will not create `sso`/`master` |
+| Live | Realms = master + sso; OAuth issuer = .../realms/sso; all Rbac.status.realm = sso |
+| Note | RbacConfig CR name `keycloak-sovereign-tenants-services` is historical only — not a Keycloak realm name |
+
+
+---
+### 2026-09-20T14:20:00Z — Fix console plugin React #306 (PerspectiveIcon)
+
+| Field | Value |
+|-------|-------|
+| Root cause | Webpack MF chunk for PerspectiveIcon emitted broken `default` export (arrow FC) → `m.default` undefined → React #306 in console nav |
+| Fix | Rewrite PerspectiveIcon as `export default function`; rebuild admin plugin **1.2.23**; rolled out |
+| Verify | Live chunk has `t.d(e,{default:()=>o})` + `function o()`; plugins re-enabled on console.operator |
+| User action | Hard-refresh OpenShift console (Ctrl+Shift+R) to drop cached plugin-entry |
+
+
+---
+### 2026-09-20T14:25:00Z — React #306 real fix: LazyComponent icon shape (1.2.24)
+
+| Field | Value |
+|-------|-------|
+| Root cause | OCP 4.22 NavHeader does `icon().then(m => m.default)`. CodeRef must resolve to `{ default: Component }` (LazyComponent), not a bare component. Prior `PerspectiveIcon` default-export module left `m.default` undefined after codeRef unwrap → #306 even with cache disabled |
+| Fix | Match MCE: `export const icon = { default: PerspectiveIcon }` + `"$codeRef": "perspective.icon"`; admin plugin **1.2.24** |
+| Live | IS `sovereign-admin-plugin:latest` → 1.2.24; console.operator plugins include sovereign-admin/tenant + acm/mce |
+| User action | Hard-refresh console once (Disable cache OK) |
+
+
+---
+### 2026-09-20T14:45:00Z — Fix raw i18n keys in perspective switcher
+
+| Field | Value |
+|-------|-------|
+| Symptom | Perspective switcher / nav showed `console-app~Core platform`, `plugin__mce~Fleet management`, etc. Sovereign Cloud Entities page itself worked |
+| Root cause | Console shares `react-i18next` with plugins; our `initI18n()` called `initReactI18next` and replaced the host i18n singleton |
+| Fix | Console host path uses isolated `createInstance()` and never calls `initReactI18next`; removed eager `initI18n()` from plugin.ts; admin **1.2.25** + tenant **1.3.19** |
+| User action | Hard-refresh once — labels should read Core platform / Fleet management / etc. |
+
+
+---
+### 2026-09-20T14:55:00Z — Fix standalone dashboard OAuth `scope denied: user:full`
+
+| Field | Value |
+|-------|-------|
+| Symptom | tenancy-dashboard `/oauth/callback?error=access_denied&error_description=scope+denied:+user:full` |
+| Root cause | ose-oauth-proxy used SA-as-OAuth-client (`-openshift-service-account=…`) which **cannot** request `user:full` (only user:info / user:check-access / role:…:ns) |
+| Fix | Create real `OAuthClient`s (`tenancy-dashboard`, `sovereign-cloud-dashboard`) + secrets; proxy uses `-client-id` / `-client-secret-file`; gitops Job `dashboard-oauth-bootstrap` + chart 0.1.10 |
+| User action | Re-open tenancy dashboard URL and log in via rhbk |
+
