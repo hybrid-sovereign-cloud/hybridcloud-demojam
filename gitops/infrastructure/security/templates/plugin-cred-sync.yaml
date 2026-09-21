@@ -203,9 +203,10 @@ spec:
               if subprocess.call(["oc", "-n", "sovereign-secrets", "get", "secret", "openshift-kubeadmin-seed"],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
                   def secret_field(f):
+                      # Avoid Python f-string brace doubling — Helm treats that as a template action (ZTP-010)
                       b = subprocess.check_output(
                           ["oc", "-n", "sovereign-secrets", "get", "secret", "openshift-kubeadmin-seed",
-                           "-o", f"jsonpath={{.data.{f}}}"], text=True)
+                           "-o", "jsonpath={.data." + f + "}"], text=True)
                       return subprocess.check_output(["base64", "-d"], input=b, text=True)
                   api = secret_field("api_host")
                   ocp_user = secret_field("username")

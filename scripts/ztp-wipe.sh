@@ -223,7 +223,7 @@ while IFS= read -r r; do
   [ -n "$r" ] || continue
   run oc delete "$r" --wait=false 2>/dev/null || true
 done < <(oc get clusterrole,clusterrolebinding -o name 2>/dev/null | grep -E 'hybridsovereign|hs-aap-cred-sync|hs-ui-health|hs-plugin-cred' || true)
-run oc delete clustersecretstore vault-backend --wait=false 2>/dev/null || true
+run oc delete clustersecretstores.external-secrets.io --all --wait=false 2>/dev/null || true
 run oc delete pushsecrets.external-secrets.io --all -A --wait=false 2>/dev/null || true
 run oc delete externalsecrets.external-secrets.io --all -A --wait=false 2>/dev/null || true
 while IFS= read -r r; do

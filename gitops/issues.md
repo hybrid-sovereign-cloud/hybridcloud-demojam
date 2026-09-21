@@ -14,7 +14,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-006 | 2026-09-21 (l9mxc) | `hs-aap-config` Sync hook `hs-aap-cred-sync` Failed (backoff); no `aap-operator-credentials` | ClusterRole lacked `ingresses.config.openshift.io` + `routes` | Expand ClusterRole | 1 (**verified** after wipe) |
 | ZTP-007 | 2026-09-21 (l9mxc) | `hs-quay` Degraded: Subscription `ResolutionFailed` | Orphan CSV after wipe | Wipe deletes quay Subscription/IP/CSV | 1 (**quay Healthy** after fix) |
 | ZTP-008 | 2026-09-21 (l9mxc) | All BuildConfigs `PushImageToRegistryFailed`; UI/Gitea ImagePullBackOff | Wipe deleted all secrets/SAs in `sovereign-cloud` (+ emptied `external-secrets`) | Preserve dockercfg/builder SAs; never empty `external-secrets`; refresh builder SA | 1 (**builds Complete**) |
-| ZTP-009 | 2026-09-21 (l9mxc) | `hs-security` Degraded; CSS `unable to create client`; ESO webhook CrashLoop (`tls.crt` missing); cert-controller Unauthorized | ESO operand damaged by earlier wipe of `external-secrets`; pods kept stale Unauthorized tokens | Wipe soft-restarts ESO pods only (no SA wipe) | 1 (fixing) |
+| ZTP-009 | 2026-09-21 (l9mxc) | `hs-security` Degraded; CSS `unable to create client`; ESO webhook CrashLoop (`tls.crt` missing); cert-controller Unauthorized | ESO operand damaged by earlier wipe of `external-secrets`; pods kept stale Unauthorized tokens | Wipe soft-restarts ESO pods only (no SA wipe) | 1 (**ESO Ready after soft-restart**) |
+| ZTP-010 | 2026-09-21 (l9mxc) | `hs-security` Unknown/Degraded: helm `parse error ... plugin-cred-sync.yaml:208 bad character '{'` | Python f-string `jsonpath={{.data.{f}}}` is invalid Helm | Concatenate jsonpath; bump hs-security 0.1.8; wipe deletes all CSS | 1 (fixing) |
 
 ## Recurrence halt rule
 
