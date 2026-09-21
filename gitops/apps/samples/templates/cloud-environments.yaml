@@ -50,7 +50,7 @@ metadata:
 spec:
   vaultPath: virt/accounts/example-admin
   baseDomain: virt.example.com
-  storageClass: ocs-storagecluster-ceph-rbd
+  storageClass: ocs-external-storagecluster-ceph-rbd
   enableVRF: false
   toolRbac:
     environmentAdminRbac:

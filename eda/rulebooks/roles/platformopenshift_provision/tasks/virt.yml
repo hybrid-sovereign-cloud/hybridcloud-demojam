@@ -66,7 +66,7 @@
     hc_etcd_storage_class: >-
       {{
         virt_cloud_cr.resources[0].spec.storageClass
-        | default('ocs-storagecluster-ceph-rbd')
+        | default('ocs-external-storagecluster-ceph-rbd')
       }}
 
 - name: Ensure HostedCluster namespace
