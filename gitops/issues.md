@@ -18,7 +18,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-010 | 2026-09-21 (l9mxc) | `hs-security` Unknown/Degraded: helm `parse error ... plugin-cred-sync.yaml:208 bad character '{'` | Python f-string `jsonpath={{.data.{f}}}` is invalid Helm | Concatenate jsonpath; bump hs-security 0.1.8; wipe deletes all CSS | 1 (**hs-security Healthy, CSS Valid**) |
 | ZTP-011 | 2026-09-21 (l9mxc) | All BuildConfigs `PushImageToRegistryFailed`; registry `invalid token` / SA UID mismatch | Builder dockercfg secret predates recreated SA | Wipe deletes builder SA and dockercfg; waits for a newer secret | 1 (**builds Complete**) |
 | ZTP-012 | 2026-09-21 (l9mxc) | `hs-quay` `UpgradePending`; MCE CSV `Pending` | Wipe deleted InstallPlans the Subscriptions still referenced | Delete Subscription+IP+CSV; ignore copied ESO/GitOps CSVs | 1 (**quay + MCE CSV Succeeded**) |
-| ZTP-013 | 2026-09-21 (l9mxc) | `hs-acm` stuck Progressing: MultiClusterHub `Uninstalling` / "Pending deletion" | MCE cannot delete ManagedCluster (dead ocm-webhook); merge-patch empty finalizers no-op | Wipe deletes OCM webhooks; JSON-remove finalizers on ManagedCluster→MCE→MCH | 2 (fixing) |
+| ZTP-013 | 2026-09-21 (l9mxc) | `hs-acm` stuck Progressing: MultiClusterHub `Uninstalling` / "Pending deletion" | MCE cannot delete ManagedCluster (dead ocm-webhook); merge-patch empty finalizers no-op | Wipe deletes OCM webhooks; JSON-remove finalizers on ManagedCluster→MCE→MCH | 2 (**MCH created fresh**) |
+| ZTP-014 | 2026-09-21 (l9mxc) | MCE `Error`; hypershift-addon create forbidden while ManagedClusterAddOn CRD Terminating | Partial wipe left CRD Terminating with customresourcecleanup finalizer | Wipe deletes addons/templates; strip finalizers on Terminating OCM CRDs | 1 (fixing) |
 
 ## Recurrence halt rule
 

@@ -368,6 +368,42 @@ if [ "$DRY_RUN" != 1 ]; then
   done
 fi
 
+echo "== F4. Clear stuck OCM CRDs / addons (ZTP-014) =="
+# MCE Error: ManagedClusterAddOn create forbidden while CRD is Terminating.
+# Force-delete leftover addons and strip CRD finalizers so OLM can reinstall.
+run oc delete managedclusteraddon --all -A --wait=false 2>/dev/null || true
+run oc delete clustermanagementaddon --all -A --wait=false 2>/dev/null || true
+run oc delete addontemplate --all -A --wait=false 2>/dev/null || true
+run oc delete addondeploymentconfig --all -A --wait=false 2>/dev/null || true
+if [ "$DRY_RUN" != 1 ]; then
+  for i in $(seq 1 24); do
+    term=$(oc get crd -o json 2>/dev/null | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+n=0
+for i in d.get("items",[]):
+  name=i["metadata"]["name"]
+  if not i["metadata"].get("deletionTimestamp"):
+    continue
+  if any(x in name for x in ("open-cluster-management","multicluster","addon.open-cluster","cluster.open-cluster","work.open-cluster","operator.open-cluster","hive.openshift","hypershift")):
+    print(name)
+    n+=1
+print("COUNT", n)' 2>/dev/null || echo "COUNT 0")
+    count=$(echo "$term" | awk '/^COUNT/{print $2}')
+    names=$(echo "$term" | grep -v '^COUNT' || true)
+    echo "  terminating_ocm_crds=${count:-0} t=$i"
+    if [ "${count:-0}" = "0" ]; then
+      break
+    fi
+    if [ "$i" -ge 3 ]; then
+      while IFS= read -r crd; do
+        [ -n "$crd" ] || continue
+        oc patch crd "$crd" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
+      done <<< "$names"
+    fi
+    sleep 5
+  done
+fi
+
 echo "== G. Delete hybridsovereign CRDs (FQ CRD names only) =="
 while IFS= read -r crd; do
   [ -n "$crd" ] || continue
