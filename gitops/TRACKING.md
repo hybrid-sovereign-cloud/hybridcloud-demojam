@@ -392,3 +392,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Chart | 0.1.5 |
 | Status | green pending refresh |
 
+
+### 2026-09-21T01:05:00Z — ZTP-001/002/003 fix (cluster-fbwcv stuck)
+
+| Field | Value |
+|-------|-------|
+| Change summary | Unstick hs-operators CRD health wait (disable SSA on CRDs/app); dynamic apps-domain for AAP/Vault/UIHealth; remove shared external-secrets NS from ESO chart; add issues.md |
+| Paths touched | `gitops/custom-operators/crds/*`, `gitops/templates/applications.yaml`, `gitops/infrastructure/aap/*`, `gitops/infrastructure/security/*`, `gitops/apps/samples/*`, `gitops/operators/eso`, `gitops/issues.md`, Chart bumps |
+| Next action | Push; full wipe; single field-content sync; monitor-only |
+| Status | in-progress |
+

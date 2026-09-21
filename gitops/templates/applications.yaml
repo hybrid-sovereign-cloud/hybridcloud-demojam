@@ -454,12 +454,14 @@ spec:
       prune: true
       selfHeal: true
       allowEmpty: false
+    # CRDs: do NOT use app-level ServerSideApply — SSA + annotation tracking
+    # never persists argocd.argoproj.io/tracking-id on CRDs, so sync hangs forever
+    # on "waiting for healthy state of ...CustomResourceDefinition".
+    # Per-CRD sync-options set ServerSideApply=false,Replace=true.
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
       - RespectIgnoreDifferences=true
-      - ApplyOutOfSyncOnly=true
     retry:
       limit: 15
       backoff:

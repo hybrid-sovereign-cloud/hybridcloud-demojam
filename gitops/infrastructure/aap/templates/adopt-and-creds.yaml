@@ -73,7 +73,13 @@ spec:
                 exit 0
               fi
               PASS=$(oc get secret -n aap "$SECRET" -o jsonpath='{.data.password}' | base64 -d)
-              HOST="https://aap-aap.apps.cluster-qvhzm.dyn.redhatworkshops.io"
+              APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+              # Prefer live AAP route when present
+              if oc -n aap get route aap >/dev/null 2>&1; then
+                HOST="https://$(oc -n aap get route aap -o jsonpath='{.spec.host}')"
+              else
+                HOST="https://aap-aap.${APPS_DOMAIN}"
+              fi
               oc create secret generic aap-operator-credentials -n sovereign-cloud \
                 --from-literal=host="$HOST" \
                 --from-literal=username=admin \

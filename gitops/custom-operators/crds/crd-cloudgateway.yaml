@@ -4,7 +4,7 @@ metadata:
   name: cloudgateways.hybridsovereign.redhat
   annotations:
     argocd.argoproj.io/sync-wave: "1"
-    argocd.argoproj.io/sync-options: Replace=true
+    argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
   group: hybridsovereign.redhat
   names:

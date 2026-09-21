@@ -30,6 +30,17 @@ spec:
             - -ec
             - |
               set -euo pipefail
+              APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+              if oc -n vault get route vault >/dev/null 2>&1; then
+                VADDR="https://$(oc -n vault get route vault -o jsonpath='{.spec.host}')"
+              else
+                VADDR="https://vault-vault.${APPS_DOMAIN}"
+              fi
+              if oc -n keycloak get route keycloak >/dev/null 2>&1; then
+                KC_URL="https://$(oc -n keycloak get route keycloak -o jsonpath='{.spec.host}')"
+              else
+                KC_URL="https://sso.${APPS_DOMAIN}"
+              fi
               echo "Waiting for aap-operator-credentials in sovereign-cloud..."
               for i in $(seq 1 60); do
                 if oc get secret aap-operator-credentials -n sovereign-cloud >/dev/null 2>&1; then
@@ -128,7 +139,6 @@ spec:
               CRED_ID=""
               if oc get secret vault-init -n vault >/dev/null 2>&1; then
                 VROOT=$(oc get secret vault-init -n vault -o jsonpath='{.data.rootToken}' | base64 -d)
-                VADDR=https://vault-vault.apps.cluster-qvhzm.dyn.redhatworkshops.io
                 CRED_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credentials/?name=sovereign-vault-admin" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
                 if [ -z "${CRED_ID}" ]; then
                   curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/credentials/" \
@@ -153,14 +163,14 @@ spec:
                 if [ "${COUNT:-0}" = "0" ]; then
                   RESP=$(curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/job_templates/" \
                     -H 'Content-Type: application/json' \
-                    -d "{\"name\":\"$NAME\",\"organization\":$ORG,\"inventory\":$INV,\"project\":$PROJ,\"playbook\":\"$PB\",\"ask_variables_on_launch\":true,\"extra_vars\":\"plugin_rbac_keycloak_realm: sso\\nKEYCLOAK_EXTERNAL_URL: https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io\\n\"}")
+                    -d "{\"name\":\"$NAME\",\"organization\":$ORG,\"inventory\":$INV,\"project\":$PROJ,\"playbook\":\"$PB\",\"ask_variables_on_launch\":true,\"extra_vars\":\"plugin_rbac_keycloak_realm: sso\\nKEYCLOAK_EXTERNAL_URL: ${KC_URL}\\n\"}")
                   ID=$(echo "$RESP" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
                   echo "created $NAME id=$ID pb=$PB"
                 else
                   ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/job_templates/?name=$NAME" | sed -n 's/.*"id":\([0-9]*\).*/\1/p' | head -1)
                   curl -sk "${auth[@]}" -X PATCH "$HOST/api/controller/v2/job_templates/$ID/" \
                     -H 'Content-Type: application/json' \
-                    -d "{\"project\":$PROJ,\"playbook\":\"$PB\",\"ask_variables_on_launch\":true,\"extra_vars\":\"plugin_rbac_keycloak_realm: sso\\nKEYCLOAK_EXTERNAL_URL: https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io\\n\"}" >/dev/null
+                    -d "{\"project\":$PROJ,\"playbook\":\"$PB\",\"ask_variables_on_launch\":true,\"extra_vars\":\"plugin_rbac_keycloak_realm: sso\\nKEYCLOAK_EXTERNAL_URL: ${KC_URL}\\n\"}" >/dev/null
                   echo "updated $NAME id=$ID pb=$PB"
                 fi
                 if [ -n "${CRED_ID:-}" ] && [ -n "${ID:-}" ] && [ "$PROJ" = "$HS_PROJ" ]; then

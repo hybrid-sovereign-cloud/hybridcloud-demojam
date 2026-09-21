@@ -36,7 +36,10 @@ spec:
 
               # --- Discover cluster domain for routes ---
               APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)
-              [ -n "$APPS_DOMAIN" ] || APPS_DOMAIN="apps.cluster-qvhzm.dyn.redhatworkshops.io"
+              if [ -z "$APPS_DOMAIN" ]; then
+                echo "FATAL: cannot discover apps domain from ingresses.config.openshift.io/cluster" >&2
+                exit 1
+              fi
               KC_URL="https://sso.${APPS_DOMAIN}"
               # Prefer live Keycloak route host when present
               if oc -n keycloak get route keycloak >/dev/null 2>&1; then
