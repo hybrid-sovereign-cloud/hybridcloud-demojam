@@ -114,6 +114,13 @@ for app in $(oc -n openshift-gitops get applications.argoproj.io -o name 2>/dev/
 done
 
 echo "== B. Delete hs-* / gitops-owned Applications (keep field-content) =="
+# Strip Argo resource finalizers so deletes do not hang (apps wait to prune children)
+for app in $(oc -n openshift-gitops get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E '^hs-' || true); do
+  run oc -n openshift-gitops patch application.argoproj.io/"$app" --type=json \
+    -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || \
+  run oc -n openshift-gitops patch application.argoproj.io/"$app" --type=merge \
+    -p='{"metadata":{"finalizers":null}}' 2>/dev/null || true
+done
 run oc -n openshift-gitops delete applications.argoproj.io -l "$OWNED" --wait=false 2>/dev/null || true
 for app in $(oc -n openshift-gitops get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E '^hs-' || true); do
   run oc -n openshift-gitops delete application.argoproj.io/"$app" --wait=false 2>/dev/null || true
