@@ -113,8 +113,15 @@ spec:
                   }
                 }
               }'
-              echo "ArgoCD capacity patch applied."
-              oc get argocd "${NAME}" -n "${NS}" -o jsonpath='controller.shards={.spec.controller.sharding.replicas} repo.replicas={.spec.repo.replicas}{"\n"}'
+              # ZTP-001: CRDs never get tracking-id under annotation-only + Replace;
+              # enable label tracking so app.kubernetes.io/instance on CRDs is enough.
+              oc patch argocd "${NAME}" -n "${NS}" --type=merge -p '{
+                "spec": {
+                  "resourceTrackingMethod": "annotation+label"
+                }
+              }' || true
+              echo "ArgoCD capacity + tracking patch applied."
+              oc get argocd "${NAME}" -n "${NS}" -o jsonpath='controller.shards={.spec.controller.sharding.replicas} repo.replicas={.spec.repo.replicas} tracking={.spec.resourceTrackingMethod}{"\n"}'
           resources:
             requests:
               cpu: 10m

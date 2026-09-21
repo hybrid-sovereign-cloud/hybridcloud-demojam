@@ -423,3 +423,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Next action | Push; `./scripts/ztp-wipe.sh`; monitor-only |
 | Status | in-progress |
 
+
+### 2026-09-21T03:45:00Z — ZTP-001 HALT + stronger tracking fix (l9mxc)
+
+| Field | Value |
+|-------|-------|
+| Incident | ZTP-001 recurred after SSA=false fix: CRDs still lack tracking-id; hs-operators stuck |
+| Change summary | Embed tracking-id + instance label on all CRDs; ArgoCD annotation+label tracking via capacity tune |
+| Note | ZTP-005/006 verified (aap-cred-sync + PushSecrets green). No further wipe for ZTP-001 until this lands and is retested |
+| Status | halted |
+

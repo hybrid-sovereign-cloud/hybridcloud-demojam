@@ -94,3 +94,4 @@ Re-run is idempotent (Sync hook Job).
 - Failed Sync hook: delete Job `*-image-wait` / `argocd-capacity-tune` and hard-refresh the Application.
 - Stuck OutOfSync with SharedResourceWarning: ensure resource is owned by exactly one Application.
 - Never delete `sovereign-*` namespaces as a remediation.
+- **Full ZTP wipe:** only `./scripts/ztp-wipe.sh` (or `--wipe-only` / `--dry-run`). Never ad-hoc `oc delete <plural>` from CRD short names — `projects` destroys the cluster (ZTP-004).
