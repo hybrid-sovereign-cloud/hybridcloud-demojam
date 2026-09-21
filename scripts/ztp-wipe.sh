@@ -310,30 +310,59 @@ echo "== F3. Release stuck ACM/MCE uninstall (ZTP-013) =="
 # MCE finalize deletes ManagedCluster local-cluster via ocm-validating-webhook.
 # After a partial wipe that webhook Service is gone, so uninstall loops forever
 # and the next MultiClusterHub stays Pending deletion.
-if oc get validatingwebhookconfiguration ocm-validating-webhook >/dev/null 2>&1; then
-  if ! oc get svc -n multicluster-engine ocm-webhook >/dev/null 2>&1; then
-    echo "  ocm-webhook service missing; removing dead validating webhook"
-    run oc delete validatingwebhookconfiguration ocm-validating-webhook --wait=false 2>/dev/null || true
-    run oc delete mutatingwebhookconfiguration ocm-mutating-webhook --wait=false 2>/dev/null || true
-  fi
-fi
+#
+# Merge-patch {"finalizers":[]} does NOT clear finalizers on these CRs —
+# use JSON remove. Strip ManagedCluster first, then MCE, then MCH.
+run oc delete validatingwebhookconfiguration ocm-validating-webhook --wait=false 2>/dev/null || true
+run oc delete mutatingwebhookconfiguration ocm-mutating-webhook --wait=false 2>/dev/null || true
+run oc delete validatingwebhookconfiguration \
+  managedclustervalidators.admission.cluster.open-cluster-management.io \
+  managedclustersetbindingvalidators.admission.cluster.open-cluster-management.io \
+  manifestworkvalidators.admission.work.open-cluster-management.io \
+  discovery.open-cluster-management.io \
+  multiclusterengines.multicluster.openshift.io \
+  multiclusterhub-operator-validating-webhook \
+  --wait=false 2>/dev/null || true
+run oc delete mutatingwebhookconfiguration \
+  managedclustermutators.admission.cluster.open-cluster-management.io \
+  --wait=false 2>/dev/null || true
+
+strip_finalizers() {
+  local args=("$@")
+  run oc patch "${args[@]}" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
+}
+
 if [ "$DRY_RUN" != 1 ]; then
+  for mc in $(oc get managedcluster -o name 2>/dev/null || true); do
+    strip_finalizers "$mc"
+    oc delete "$mc" --wait=false 2>/dev/null || true
+  done
+  for obj in $(oc get multiclusterengine -o name 2>/dev/null || true); do
+    strip_finalizers "$obj"
+    oc delete "$obj" --wait=false 2>/dev/null || true
+  done
+  for obj in $(oc get multiclusterhub -n open-cluster-management -o name 2>/dev/null || true); do
+    strip_finalizers -n open-cluster-management "$obj"
+    oc -n open-cluster-management delete "$obj" --wait=false 2>/dev/null || true
+  done
   for i in $(seq 1 36); do
     mch_phase=$(oc get multiclusterhub -n open-cluster-management -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
     mce_phase=$(oc get multiclusterengine -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
-    echo "  mch=${mch_phase:-gone} mce=${mce_phase:-gone} t=$i"
-    if [ -z "$mch_phase" ] && [ -z "$mce_phase" ]; then
+    mc_count=$(oc get managedcluster --no-headers 2>/dev/null | wc -l || true)
+    echo "  mch=${mch_phase:-gone} mce=${mce_phase:-gone} managedclusters=$mc_count t=$i"
+    if [ -z "$mch_phase" ] && [ -z "$mce_phase" ] && [ "${mc_count:-0}" = "0" ]; then
       break
     fi
-    if [ "$i" -eq 18 ] || [ "$i" -eq 30 ]; then
-      # Last resort: drop finalizers on objects that have been Terminating > this wipe
+    if [ "$i" -eq 6 ] || [ "$i" -eq 12 ] || [ "$i" -eq 24 ]; then
+      for mc in $(oc get managedcluster -o name 2>/dev/null || true); do
+        strip_finalizers "$mc"
+      done
       for obj in $(oc get multiclusterengine -o name 2>/dev/null || true); do
-        oc patch "$obj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        strip_finalizers "$obj"
       done
       for obj in $(oc get multiclusterhub -n open-cluster-management -o name 2>/dev/null || true); do
-        oc -n open-cluster-management patch "$obj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        strip_finalizers -n open-cluster-management "$obj"
       done
-      oc delete managedcluster local-cluster --wait=false 2>/dev/null || true
     fi
     sleep 5
   done
