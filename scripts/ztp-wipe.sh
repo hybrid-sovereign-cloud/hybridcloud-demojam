@@ -368,37 +368,44 @@ if [ "$DRY_RUN" != 1 ]; then
   done
 fi
 
-echo "== F4. Clear stuck OCM CRDs / addons (ZTP-014) =="
-# MCE Error: ManagedClusterAddOn create forbidden while CRD is Terminating.
-# Force-delete leftover addons and strip CRD finalizers so OLM can reinstall.
+echo "== F4. Clear stuck OCM addons / force ClusterManager reinstall (ZTP-014) =="
+# MCE Error when ManagedClusterAddOn CRD is Terminating or force-deleted:
+# "create not allowed while CRD is terminating" / "no matches for kind".
+# Prefer deleting CRs and waiting for natural CRD cleanup. Never leave the
+# cluster without ClusterManager — delete it so MCE recreates CRDs on next sync.
 run oc delete managedclusteraddon --all -A --wait=false 2>/dev/null || true
 run oc delete clustermanagementaddon --all -A --wait=false 2>/dev/null || true
 run oc delete addontemplate --all -A --wait=false 2>/dev/null || true
 run oc delete addondeploymentconfig --all -A --wait=false 2>/dev/null || true
+run oc delete clustermanager.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
+run oc delete klusterlet.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
 if [ "$DRY_RUN" != 1 ]; then
-  for i in $(seq 1 24); do
-    term=$(oc get crd -o json 2>/dev/null | python3 -c 'import json,sys
+  for i in $(seq 1 36); do
+    term_names=$(oc get crd -o json 2>/dev/null | python3 -c 'import json,sys
 d=json.load(sys.stdin)
-n=0
 for i in d.get("items",[]):
-  name=i["metadata"]["name"]
   if not i["metadata"].get("deletionTimestamp"):
     continue
+  name=i["metadata"]["name"]
   if any(x in name for x in ("open-cluster-management","multicluster","addon.open-cluster","cluster.open-cluster","work.open-cluster","operator.open-cluster","hive.openshift","hypershift")):
-    print(name)
-    n+=1
-print("COUNT", n)' 2>/dev/null || echo "COUNT 0")
-    count=$(echo "$term" | awk '/^COUNT/{print $2}')
-    names=$(echo "$term" | grep -v '^COUNT' || true)
+    print(name)' 2>/dev/null || true)
+    count=$(printf '%s\n' "$term_names" | grep -c . || true)
     echo "  terminating_ocm_crds=${count:-0} t=$i"
     if [ "${count:-0}" = "0" ]; then
       break
     fi
-    if [ "$i" -ge 3 ]; then
+    # Ensure no leftover instances block customresourcecleanup
+    while IFS= read -r crd; do
+      [ -n "$crd" ] || continue
+      plural=${crd%%.*}
+      group=${crd#*.}
+      oc delete "$plural.$group" --all -A --wait=false 2>/dev/null || true
+    done <<< "$term_names"
+    if [ "$i" -ge 12 ]; then
       while IFS= read -r crd; do
         [ -n "$crd" ] || continue
         oc patch crd "$crd" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
-      done <<< "$names"
+      done <<< "$term_names"
     fi
     sleep 5
   done
