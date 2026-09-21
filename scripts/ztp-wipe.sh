@@ -345,6 +345,27 @@ if [ "$DRY_RUN" != 1 ]; then
     strip_finalizers -n open-cluster-management "$obj"
     oc -n open-cluster-management delete "$obj" --wait=false 2>/dev/null || true
   done
+  # ZTP-019: leftover local-cluster NS blocks MCE from recreating ManagedCluster
+  # ("Waiting on local cluster namespace to be removed").
+  if oc get ns local-cluster >/dev/null 2>&1; then
+    oc delete managedclusteraddon,manifestwork,appliedmanifestwork,klusterletaddonconfig \
+      --all -n local-cluster --wait=false 2>/dev/null || true
+    oc delete ns local-cluster --wait=false 2>/dev/null || true
+    for i in $(seq 1 12); do
+      phase=$(oc get ns local-cluster -o jsonpath='{.status.phase}' 2>/dev/null || echo Gone)
+      [ "$phase" = "Gone" ] && break
+      if [ "$phase" = "Terminating" ]; then
+        oc get ns local-cluster -o json 2>/dev/null | python3 -c '
+import json,sys
+ns=json.load(sys.stdin)
+ns.setdefault("spec",{})["finalizers"]=[]
+ns["metadata"]["finalizers"]=[]
+json.dump(ns, open("/tmp/ztp-local-cluster-ns.json","w"))
+' 2>/dev/null && oc replace --raw "/api/v1/namespaces/local-cluster/finalize" -f /tmp/ztp-local-cluster-ns.json 2>/dev/null || true
+      fi
+      sleep 2
+    done
+  fi
   for i in $(seq 1 36); do
     mch_phase=$(oc get multiclusterhub -n open-cluster-management -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
     mce_phase=$(oc get multiclusterengine -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)

@@ -9,9 +9,11 @@
 #   ./scripts/ztp-app.sh list
 #   ./scripts/ztp-app.sh status [APP]
 #   ./scripts/ztp-app.sh wait APP [--timeout SECS]
+#   ./scripts/ztp-app.sh wait-all [--timeout SECS]   # parallel wait every catalog app
 #   ./scripts/ztp-app.sh cleanup APP
 #   ./scripts/ztp-app.sh redeploy APP
-#   ./scripts/ztp-app.sh validate-sequence [--from WAVE] [--to WAVE]
+#   ./scripts/ztp-app.sh redeploy-wave WAVE          # parallel cleanup+redeploy same-wave apps
+#   ./scripts/ztp-app.sh validate-sequence [--from WAVE] [--to WAVE] [--parallel]
 #   ./scripts/ztp-app.sh catalog
 set -euo pipefail
 
@@ -65,14 +67,14 @@ status_all() {
 }
 
 wait_app() {
-  local app="$1" timeout="${2:-900}" start
+  local app="$1" timeout="${2:-900}" start quiet="${3:-0}"
   start=$(date +%s)
-  echo "Waiting for $app Synced+Healthy (timeout ${timeout}s)..."
+  [ "$quiet" = "1" ] || echo "Waiting for $app Synced+Healthy (timeout ${timeout}s)..."
   while true; do
     local sync health
     sync=$(oc -n "$NS_ARGO" get application.argoproj.io "$app" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Missing)
     health=$(oc -n "$NS_ARGO" get application.argoproj.io "$app" -o jsonpath='{.status.health.status}' 2>/dev/null || echo Missing)
-    echo "  $(date -u +%H:%M:%SZ) sync=$sync health=$health"
+    [ "$quiet" = "1" ] || echo "  $(date -u +%H:%M:%SZ) sync=$sync health=$health"
     if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
       echo "OK $app"
       return 0
@@ -82,8 +84,43 @@ wait_app() {
       oc -n "$NS_ARGO" get application.argoproj.io "$app" -o jsonpath='{.status.conditions[*].message}{"\n"}' 2>/dev/null || true
       return 1
     fi
-    sleep 20
+    sleep 15
   done
+}
+
+# Wait many apps concurrently (one poller per app).
+wait_apps_parallel() {
+  local timeout="${1:-900}"; shift
+  local apps=("$@") pids=() app rc=0 failed=()
+  [ "${#apps[@]}" -gt 0 ] || return 0
+  echo "Parallel wait (${#apps[@]} apps, timeout ${timeout}s): ${apps[*]}"
+  for app in "${apps[@]}"; do
+    ( wait_app "$app" "$timeout" 1 ) &
+    pids+=("$!")
+  done
+  local i=0
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      rc=1
+      failed+=("${apps[$i]}")
+    fi
+    i=$((i + 1))
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL parallel wait: ${failed[*]}" >&2
+    return 1
+  fi
+  echo "OK parallel wait (${#apps[@]} apps)"
+}
+
+wait_all_apps() {
+  local timeout="${1:-1200}"
+  local apps=()
+  while IFS='|' read -r _wave app _path _ns _notes; do
+    [ -n "${app:-}" ] || continue
+    apps+=("$app")
+  done <<< "$CATALOG"
+  wait_apps_parallel "$timeout" "${apps[@]}"
 }
 
 # Scoped cleanup — never delete sovereign-* namespace shells, never touch baseline.
@@ -119,6 +156,11 @@ cleanup_app() {
         oc patch "$obj" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
         oc delete "$obj" --wait=false 2>/dev/null || true
       done
+      # ZTP-019: NS leftover blocks ManagedCluster recreate
+      if oc get ns local-cluster >/dev/null 2>&1; then
+        oc delete managedclusteraddon,manifestwork --all -n local-cluster --wait=false 2>/dev/null || true
+        oc delete ns local-cluster --wait=false 2>/dev/null || true
+      fi
       ;;
     hs-acm)
       oc -n open-cluster-management delete subscription,installplan,csv,operatorgroup --all --wait=false 2>/dev/null || true
@@ -126,6 +168,13 @@ cleanup_app() {
         oc -n open-cluster-management patch "$obj" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
         oc -n open-cluster-management delete "$obj" --wait=false 2>/dev/null || true
       done
+      for mc in $(oc get managedcluster -o name 2>/dev/null || true); do
+        oc patch "$mc" --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
+        oc delete "$mc" --wait=false 2>/dev/null || true
+      done
+      if oc get ns local-cluster >/dev/null 2>&1; then
+        oc delete ns local-cluster --wait=false 2>/dev/null || true
+      fi
       ;;
     hs-quay)
       oc -n quay delete quayregistry,subscription,installplan,csv,objectbucketclaim --all --wait=false 2>/dev/null || true
@@ -208,31 +257,80 @@ redeploy_app() {
 }
 
 validate_sequence() {
-  local from_wave="${1:-5}" to_wave="${2:-60}"
-  echo "== validate-sequence waves ${from_wave}→${to_wave} =="
+  local from_wave="${1:-5}" to_wave="${2:-60}" parallel="${3:-0}"
+  echo "== validate-sequence waves ${from_wave}→${to_wave} parallel=${parallel} =="
+  local wave_apps=() cur_wave=""
+  flush_wave() {
+    [ "${#wave_apps[@]}" -eq 0 ] && return 0
+    echo ""
+    echo "### wave ${cur_wave} :: ${wave_apps[*]}"
+    local a
+    for a in "${wave_apps[@]}"; do
+      if ! oc -n "$NS_ARGO" get application.argoproj.io "$a" >/dev/null 2>&1; then
+        echo "  Application $a missing — triggering parent sync"
+        oc -n "$NS_ARGO" patch application.argoproj.io "$ROOT_APP" --type=merge -p="{
+          \"operation\": {
+            \"initiatedBy\": {\"username\": \"ztp-app\"},
+            \"sync\": {\"revision\": \"main\", \"prune\": true}
+          }
+        }"
+        break
+      fi
+    done
+    if [ "$parallel" = "1" ]; then
+      if ! wait_apps_parallel 1200 "${wave_apps[@]}"; then
+        echo "FAIL wave ${cur_wave}: ${wave_apps[*]}" >&2
+        return 1
+      fi
+    else
+      for a in "${wave_apps[@]}"; do
+        if ! wait_app "$a" 1200; then
+          echo "FAIL $a — run: ./scripts/ztp-app.sh cleanup $a && fix git && ./scripts/ztp-app.sh redeploy $a" >&2
+          return 1
+        fi
+      done
+    fi
+    wave_apps=()
+  }
   while IFS='|' read -r wave app path ns notes; do
     [ -n "$wave" ] || continue
     if [ "$wave" -lt "$from_wave" ] || [ "$wave" -gt "$to_wave" ]; then
       continue
     fi
-    echo ""
-    echo "### wave $wave :: $app ($notes)"
-    if ! oc -n "$NS_ARGO" get application.argoproj.io "$app" >/dev/null 2>&1; then
-      echo "  Application missing — triggering parent sync"
-      oc -n "$NS_ARGO" patch application.argoproj.io "$ROOT_APP" --type=merge -p="{
-        \"operation\": {
-          \"initiatedBy\": {\"username\": \"ztp-app\"},
-          \"sync\": {\"revision\": \"main\", \"prune\": true}
-        }
-      }"
+    if [ -n "$cur_wave" ] && [ "$wave" != "$cur_wave" ]; then
+      flush_wave || return 1
     fi
-    if ! wait_app "$app" 1200; then
-      echo "FAIL $app — run: ./scripts/ztp-app.sh cleanup $app && fix git && ./scripts/ztp-app.sh redeploy $app" >&2
-      return 1
-    fi
+    cur_wave="$wave"
+    wave_apps+=("$app")
   done <<< "$CATALOG"
+  flush_wave || return 1
   echo ""
   echo "SEQUENCE OK ${from_wave}→${to_wave}"
+}
+
+redeploy_wave() {
+  local wave="$1"
+  local apps=()
+  while IFS='|' read -r w app _path _ns _notes; do
+    [ "$w" = "$wave" ] || continue
+    apps+=("$app")
+  done <<< "$CATALOG"
+  [ "${#apps[@]}" -gt 0 ] || { echo "no apps in wave $wave" >&2; return 2; }
+  echo "== redeploy-wave $wave parallel: ${apps[*]} =="
+  local app pids=() rc=0
+  for app in "${apps[@]}"; do
+    ( cleanup_app "$app" ) &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+  [ "$rc" -eq 0 ] || return 1
+  oc -n "$NS_ARGO" patch application.argoproj.io "$ROOT_APP" --type=merge -p="{
+    \"operation\": {
+      \"initiatedBy\": {\"username\": \"ztp-app\"},
+      \"sync\": {\"revision\": \"main\", \"prune\": true}
+    }
+  }"
+  wait_apps_parallel 1200 "${apps[@]}"
 }
 
 cmd="${1:-}"
@@ -253,22 +351,37 @@ case "$cmd" in
     done
     wait_app "$app" "$timeout"
     ;;
+  wait-all)
+    timeout=1200
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --timeout) timeout="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    wait_all_apps "$timeout"
+    ;;
   cleanup)
     cleanup_app "${1:?app required}"
     ;;
   redeploy)
     redeploy_app "${1:?app required}"
     ;;
+  redeploy-wave)
+    redeploy_wave "${1:?wave required}"
+    ;;
   validate-sequence)
-    from=5; to=60
+    from=5; to=60; parallel=1
     while [ $# -gt 0 ]; do
       case "$1" in
         --from) from="$2"; shift 2 ;;
         --to) to="$2"; shift 2 ;;
+        --parallel) parallel=1; shift ;;
+        --serial) parallel=0; shift ;;
         *) shift ;;
       esac
     done
-    validate_sequence "$from" "$to"
+    validate_sequence "$from" "$to" "$parallel"
     ;;
   -h|--help|"") usage ;;
   *) echo "unknown: $cmd" >&2; usage ;;
