@@ -47,6 +47,11 @@
         msg: QuayConfig {{ quayconfig_cr_name }} not found in {{ quayconfig_cr_namespace }}
       when: _quayconfig_cr.resources | length == 0
 
+    - name: Load quayconfig_spec from live CR
+      ansible.builtin.set_fact:
+        quayconfig_spec: "{{ _quayconfig_cr.resources[0].spec | default({}) }}"
+        quayconfig_generation: "{{ _quayconfig_cr.resources[0].metadata.generation | default(0) | int }}"
+
     - name: Set generation fact
       ansible.builtin.set_fact:
         quayconfig_generation: "{{ _quayconfig_cr.resources[0].metadata.generation | default(0) | int }}"

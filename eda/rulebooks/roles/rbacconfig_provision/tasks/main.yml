@@ -41,11 +41,12 @@
     - name: Set generation fact
       ansible.builtin.set_fact:
         rbac_config_generation: "{{ rbac_config_cr.resources[0].metadata.generation | default(0) | int }}"
+        rbac_config_spec: "{{ rbac_config_cr.resources[0].spec | default({}) }}"
 
     - name: Require Keycloak backend type
       ansible.builtin.assert:
         that:
-          - rbac_config_spec.type == 'keycloak'
+          - rbac_config_spec.type | default('') == 'keycloak'
         fail_msg: spec.type must be 'keycloak'
 
     - name: Discover Keycloak external URL from services cluster Route

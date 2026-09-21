@@ -70,19 +70,11 @@
           Namespace {{ cloudoso_cr_namespace }} is missing label
           hybridsovereign.redhat/entity. Cannot provision CloudOSO.
 
-    - name: Detect openstack.cloud collection in EE
-      ansible.builtin.command:
-        argv: [ansible-doc, -t, module, openstack.cloud.project]
-      register: _openstack_cloud_doc
-      failed_when: false
-      changed_when: false
-
     - name: Run OpenStack environment preparation
       ansible.builtin.include_tasks: environmentprep.yml
-      when: _openstack_cloud_doc.rc == 0
+      when: false  # workshop: default AAP EE lacks openstack.cloud; use stub below
 
-    - name: Workshop CloudOSO stub when EE lacks openstack.cloud
-      when: _openstack_cloud_doc.rc != 0
+    - name: Workshop CloudOSO stub (default EE lacks openstack.cloud)
       block:
         - name: Set CloudOSO stub facts from CR spec
           ansible.builtin.set_fact:
@@ -109,7 +101,7 @@
 
     - name: Log VRF spec passthrough for future use
       ansible.builtin.include_tasks: vrf_passthrough.yml
-      when: _openstack_cloud_doc.rc == 0
+      when: false
 
     - name: Get reconciliation timestamp
       ansible.builtin.set_fact:

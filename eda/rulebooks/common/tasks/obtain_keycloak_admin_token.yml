@@ -24,6 +24,9 @@
     validate_certs: false
     status_code: [200]
   register: _kc_token_resp
+  retries: 5
+  delay: 5
+  until: _kc_token_resp is succeeded
   no_log: true
 
 - name: Expose Keycloak admin token

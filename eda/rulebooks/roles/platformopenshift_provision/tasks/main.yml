@@ -99,6 +99,10 @@
       ansible.builtin.include_tasks: openstack.yml
       when: platform_type == "openstack"
 
+    - name: Dispatch to Virt / Hosted handler
+      ansible.builtin.include_tasks: virt.yml
+      when: platform_type in ["virt", "hosted"]
+
     - name: Handle default (namespace metadata) reconciliation
       ansible.builtin.include_tasks: default.yml
       when: platform_type == ""

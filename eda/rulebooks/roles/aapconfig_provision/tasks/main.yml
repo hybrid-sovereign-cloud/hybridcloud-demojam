@@ -53,6 +53,10 @@
         msg: AAPConfig {{ aapconfig_cr_name }} not found in {{ aapconfig_cr_namespace }}
       when: _cr.resources | length == 0
 
+    - name: Load aapconfig_spec from live CR
+      ansible.builtin.set_fact:
+        aapconfig_spec: "{{ _cr.resources[0].spec | default({}) }}"
+
     - name: Set generation fact
       ansible.builtin.set_fact:
         aapconfig_generation: "{{ _cr.resources[0].metadata.generation | default(0) | int }}"

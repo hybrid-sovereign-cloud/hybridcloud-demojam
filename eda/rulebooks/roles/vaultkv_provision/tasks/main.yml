@@ -20,6 +20,10 @@
         namespace: "{{ vaultkv_cr_namespace }}"
       register: vaultkv_cr
 
+    - name: Load vaultkv_spec from live CR
+      ansible.builtin.set_fact:
+        vaultkv_spec: "{{ vaultkv_cr.resources[0].spec | default({}) }}"
+
     - name: Read referenced Vault CR
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"

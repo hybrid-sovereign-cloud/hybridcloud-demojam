@@ -58,19 +58,11 @@
           Namespace {{ cloudaws_cr_namespace }} is missing label
           hybridsovereign.redhat/entity. Cannot provision CloudAWS.
 
-    - name: Detect amazon.aws collection in EE
-      ansible.builtin.command:
-        argv: [ansible-doc, -t, module, amazon.aws.route53_zone]
-      register: _amazon_aws_doc
-      failed_when: false
-      changed_when: false
-
     - name: Include AWS environment preparation tasks
       ansible.builtin.include_tasks: aws_environmentprep.yml
-      when: _amazon_aws_doc.rc == 0
+      when: false  # workshop: STS/Route53 against seeded creds often fail; use stub below
 
-    - name: Workshop CloudAWS stub when EE lacks amazon.aws
-      when: _amazon_aws_doc.rc != 0
+    - name: Workshop CloudAWS stub
       block:
         - name: Generate stub slug
           ansible.builtin.set_fact:
