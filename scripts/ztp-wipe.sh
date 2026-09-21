@@ -200,6 +200,22 @@ for ns in "${CLEAN_NS[@]}"; do
   run oc -n "$ns" delete role,rolebinding -l "$OWNED" --wait=false 2>/dev/null || true
 done
 
+echo "== E2. Refresh builder SA dockercfg in build namespaces (ZTP-008) =="
+# Stale dockercfg after mass secret delete causes PushImageToRegistryFailed
+for ns in sovereign-cloud; do
+  oc get ns "$ns" >/dev/null 2>&1 || continue
+  run oc -n "$ns" delete sa builder --wait=false 2>/dev/null || true
+done
+[ "$DRY_RUN" = 1 ] || sleep 3
+
+echo "== E3. Refresh ESO operand pods (ZTP-009) =="
+# Prior wipes that emptied external-secrets left controllers Unauthorized
+# (stale projected tokens / missing webhook certs). Soft-restart only — do not
+# delete SAs/CRBs in that namespace.
+if oc get ns external-secrets >/dev/null 2>&1; then
+  run oc -n external-secrets delete pods --all --wait=false 2>/dev/null || true
+fi
+
 echo "== F. Cluster-scoped gitops leftovers (label / name scoped) =="
 run oc delete clusterrole,clusterrolebinding -l "$OWNED" --wait=false 2>/dev/null || true
 # Name-scoped deletes — never broad 'projects'
