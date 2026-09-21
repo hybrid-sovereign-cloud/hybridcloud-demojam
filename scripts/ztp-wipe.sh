@@ -43,7 +43,9 @@ oc whoami --show-server
 
 OWNED='hybridsovereign.redhat/gitops-owned=true'
 HS_GROUP='hybridsovereign.redhat'
-# Namespaces we empty (never delete sovereign-* shells)
+# Namespaces we empty carefully (never delete sovereign-* shells)
+# Do NOT empty external-secrets — that is the ESO operand; wiping SAs/tokens
+# leaves controllers Unauthorized (ZTP-008).
 CLEAN_NS=(
   sovereign-cloud
   sovereign-cloud-plugins
@@ -52,7 +54,6 @@ CLEAN_NS=(
   vault
   gitea
   quay
-  external-secrets
   open-cluster-management
   multicluster-engine
   openshift-acm
@@ -156,7 +157,7 @@ for ns in $(oc get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
   run oc delete ns "$ns" --wait=false 2>/dev/null || true
 done
 
-echo "== E. Empty gitops namespaces (keep sovereign-* shells) =="
+echo "== E. Empty gitops namespaces (keep sovereign-* shells; preserve builder/registry auth) =="
 for ns in "${CLEAN_NS[@]}"; do
   oc get ns "$ns" >/dev/null 2>&1 || continue
   if echo "$ns" | grep -qE "$PROTECTED_NS_RE"; then
@@ -166,7 +167,37 @@ for ns in "${CLEAN_NS[@]}"; do
   echo "--- empty $ns ---"
   run oc -n "$ns" delete quayregistry --all --wait=false 2>/dev/null || true
   run oc -n "$ns" delete objectbucketclaim --all --wait=false 2>/dev/null || true
-  run oc -n "$ns" delete deploy,sts,ds,job,cronjob,bc,build,is,svc,route,ingress,networkpolicy,pvc,cm,secret,sa,role,rolebinding --all --wait=false 2>/dev/null || true
+  run oc -n "$ns" delete deploy,sts,ds,job,cronjob,bc,build,is,svc,route,ingress,networkpolicy,pvc,cm --all --wait=false 2>/dev/null || true
+  # Secrets: delete gitops-owned / known HS only — never wipe dockercfg or builder tokens (ZTP-008)
+  while IFS= read -r sec; do
+    [ -n "$sec" ] || continue
+    base=${sec##*/}
+    case "$base" in
+      builder-dockercfg-*|default-dockercfg-*|deployer-dockercfg-*|*-dockercfg-*) continue ;;
+    esac
+    labeled=$(oc -n "$ns" get "$sec" -o jsonpath='{.metadata.labels.hybridsovereign\.redhat/gitops-owned}' 2>/dev/null || true)
+    case "$base" in
+      aap-admin|aap-operator-credentials|vault-root|vault-init|rhbk-admin|rhbk-services-admin|quay-admin-credentials|aap-admin-credentials|openshift-kubeadmin-seed|hs-*)
+        run oc -n "$ns" delete "$sec" --wait=false 2>/dev/null || true
+        ;;
+      *)
+        if [ "$labeled" = "true" ]; then
+          run oc -n "$ns" delete "$sec" --wait=false 2>/dev/null || true
+        fi
+        ;;
+    esac
+  done < <(oc -n "$ns" get secrets -o name 2>/dev/null || true)
+  # ServiceAccounts: only gitops-owned / hs-* — never default/builder/deployer
+  while IFS= read -r sa; do
+    [ -n "$sa" ] || continue
+    base=${sa##*/}
+    case "$base" in default|builder|deployer) continue ;; esac
+    labeled=$(oc -n "$ns" get "$sa" -o jsonpath='{.metadata.labels.hybridsovereign\.redhat/gitops-owned}' 2>/dev/null || true)
+    if [ "$labeled" = "true" ] || [[ "$base" == hs-* ]] || [[ "$base" == hybridsovereign-* ]] || [[ "$base" == argocd-* ]]; then
+      run oc -n "$ns" delete "$sa" --wait=false 2>/dev/null || true
+    fi
+  done < <(oc -n "$ns" get sa -o name 2>/dev/null || true)
+  run oc -n "$ns" delete role,rolebinding -l "$OWNED" --wait=false 2>/dev/null || true
 done
 
 echo "== F. Cluster-scoped gitops leftovers (label / name scoped) =="
