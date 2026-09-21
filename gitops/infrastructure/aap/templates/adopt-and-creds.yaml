@@ -112,3 +112,16 @@ data:
     EDA remains disabled on the adopted AAP instance.
   eda: "disabled"
   adopt_instance: "aap/aap"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hs-aap-seed-catalog
+  namespace: aap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+data:
+  generation: "2"
+  includes: "cloudoso,cloudaws,cloudvirt,platformopenshift"

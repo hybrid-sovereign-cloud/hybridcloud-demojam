@@ -3,19 +3,19 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hs-aap-seed-jobtemplates
+  name: hs-aap-seed-jobtemplates-v2
   namespace: aap
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/seed-generation: "2"
   annotations:
     argocd.argoproj.io/sync-wave: "30"
-    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-options: Force=true,Replace=true
 spec:
   backoffLimit: 8
   ttlSecondsAfterFinished: 86400
-  # Force new Job identity after JT catalog changes (ZTP-021/cloudvirt)
   template:
     metadata:
       labels:
