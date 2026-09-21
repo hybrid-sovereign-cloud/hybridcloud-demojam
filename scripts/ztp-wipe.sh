@@ -377,8 +377,31 @@ run oc delete managedclusteraddon --all -A --wait=false 2>/dev/null || true
 run oc delete clustermanagementaddon --all -A --wait=false 2>/dev/null || true
 run oc delete addontemplate --all -A --wait=false 2>/dev/null || true
 run oc delete addondeploymentconfig --all -A --wait=false 2>/dev/null || true
-run oc delete clustermanager.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
-run oc delete klusterlet.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
+# ClusterManager stuck Terminating (no finalizer strip) leaves ManagedClusterAddOn
+# CRD missing forever and MCE in Error (ZTP-014 recurrence).
+for obj in $(oc get clustermanager.operator.open-cluster-management.io -o name 2>/dev/null || true); do
+  strip_finalizers "$obj"
+  run oc delete "$obj" --wait=false 2>/dev/null || true
+done
+for obj in $(oc get klusterlet.operator.open-cluster-management.io -o name 2>/dev/null || true); do
+  strip_finalizers "$obj"
+  run oc delete "$obj" --wait=false 2>/dev/null || true
+done
+if [ "$DRY_RUN" != 1 ]; then
+  for i in $(seq 1 24); do
+    cm=$(oc get clustermanager.operator.open-cluster-management.io --no-headers 2>/dev/null | wc -l || true)
+    echo "  clustermanagers=$cm t=$i"
+    if [ "${cm:-0}" = "0" ]; then
+      break
+    fi
+    if [ "$i" -ge 3 ]; then
+      for obj in $(oc get clustermanager.operator.open-cluster-management.io -o name 2>/dev/null || true); do
+        strip_finalizers "$obj"
+      done
+    fi
+    sleep 5
+  done
+fi
 if [ "$DRY_RUN" != 1 ]; then
   for i in $(seq 1 36); do
     term_names=$(oc get crd -o json 2>/dev/null | python3 -c 'import json,sys
