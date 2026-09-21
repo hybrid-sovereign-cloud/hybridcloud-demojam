@@ -1,5 +1,5 @@
 # Seed AAP JobTemplates against HybridSovereign EDA project (real playbooks).
-# Parked kinds stay on hello_world (Demo Project): cloudoso, cloudaws, platformopenshift.
+# Includes cloudoso, cloudaws, cloudvirt, platformopenshift (no hello_world park stubs).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,10 +15,12 @@ metadata:
 spec:
   backoffLimit: 8
   ttlSecondsAfterFinished: 86400
+  # Force new Job identity after JT catalog changes (ZTP-021/cloudvirt)
   template:
     metadata:
       labels:
         hybridsovereign.redhat/gitops-owned: "true"
+        hybridsovereign.redhat/seed-generation: "2"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: hs-aap-cred-sync
