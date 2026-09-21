@@ -200,13 +200,31 @@ for ns in "${CLEAN_NS[@]}"; do
   run oc -n "$ns" delete role,rolebinding -l "$OWNED" --wait=false 2>/dev/null || true
 done
 
-echo "== E2. Refresh builder SA dockercfg in build namespaces (ZTP-008) =="
-# Stale dockercfg after mass secret delete causes PushImageToRegistryFailed
+echo "== E2. Refresh builder SA dockercfg in build namespaces (ZTP-008/011) =="
+# Deleting the SA invalidates its dockercfg, but the controller may not recreate
+# the secret if the old one is still present — builds then push with a stale
+# token (UID mismatch → authentication required). Delete SA + dockercfg and
+# wait until a NEW secret is bound to the recreated SA.
 for ns in sovereign-cloud; do
   oc get ns "$ns" >/dev/null 2>&1 || continue
   run oc -n "$ns" delete sa builder --wait=false 2>/dev/null || true
+  run oc -n "$ns" delete secret -l openshift.io/internal-registry-auth-token.service-account=builder --wait=false 2>/dev/null || true
 done
-[ "$DRY_RUN" = 1 ] || sleep 3
+if [ "$DRY_RUN" != 1 ]; then
+  for i in $(seq 1 30); do
+    uid=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    ref=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.secrets[0].name}' 2>/dev/null || true)
+    created=""
+    if [ -n "$ref" ]; then
+      created=$(oc -n sovereign-cloud get secret "$ref" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)
+    fi
+    echo "  builder uid=${uid:-missing} secret=${ref:-missing} created=${created:-missing} t=$i"
+    if [ -n "$uid" ] && [ -n "$ref" ] && [ -n "$created" ]; then
+      break
+    fi
+    sleep 2
+  done
+fi
 
 echo "== E3. Refresh ESO operand pods (ZTP-009) =="
 # Prior wipes that emptied external-secrets left controllers Unauthorized
