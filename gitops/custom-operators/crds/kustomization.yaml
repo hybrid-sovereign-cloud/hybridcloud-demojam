@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - crd-aapconfig.yaml
+  - crd-aaporg.yaml
+  - crd-assignment.yaml
+  - crd-cloudaws.yaml
+  - crd-cloudgateway.yaml
+  - crd-cloudoso.yaml
+  - crd-entity.yaml
+  - crd-hybridfabric.yaml
+  - crd-hybridnetwork.yaml
+  - crd-iaac.yaml
+  - crd-networkplacement.yaml
+  - crd-openstackmigration.yaml
+  - crd-persona.yaml
+  - crd-platformopenshift.yaml
+  - crd-project.yaml
+  - crd-quayconfig.yaml
+  - crd-quayorg.yaml
+  - crd-rbac.yaml
+  - crd-rbacconfig.yaml
+  - crd-team.yaml
+  - crd-transportlink.yaml
+  - crd-uihealthchecker.yaml
+  - crd-vault.yaml
+  - crd-vaultkv.yaml

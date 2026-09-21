@@ -1,18 +1,23 @@
 {{- /*
 Child Applications — ZTP wave order (parent sync waits for prior wave Healthy):
   0  AppProject + Namespaces (templates/)
-  5  hs-argocd-capacity — scale GitOps for phase-1
+  5  hs-argocd-capacity
  10  hs-eso
- 15  hs-builds          — start image builds early
+ 15  hs-builds
  20  hs-vault
- 22  hs-security        — needs Vault
- 25  hs-acm
+ 22  hs-security
+ 24  hs-mce              — MulticlusterEngine OLM (before ACM hub)
+ 26  hs-acm              — ACM hub / MultiClusterHub
  30  hs-quay
  31  hs-gitea
  35  hs-aap-config
- 40  hs-operators       — PreSync image-wait gate
+ 38  hs-crds             — hybridsovereign CRDs only
+ 40  hs-operators        — Deployments + image-wait (needs CRDs + image)
  50  hs-ui
  60  hs-samples
+
+Per-app debug (no full wipe): ./scripts/ztp-app.sh cleanup|redeploy|wait APP
+Full wipe only after every app is independently Healthy: ./scripts/ztp-wipe.sh
 */ -}}
 {{- $repo := .Values.global.repoURL -}}
 {{- $rev := .Values.global.targetRevision -}}
@@ -237,6 +242,48 @@ spec:
         factor: 2
         maxDuration: 5m
 
+{{- if .Values.provision.mce }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-mce
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/mce
+  destination:
+    server: {{ $server | quote }}
+    namespace: multicluster-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
 {{- if .Values.provision.acm }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -248,7 +295,7 @@ metadata:
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
-    argocd.argoproj.io/sync-wave: "25"
+    argocd.argoproj.io/sync-wave: "26"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -260,6 +307,12 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: open-cluster-management
+  ignoreDifferences:
+    - group: operator.open-cluster-management.io
+      kind: MultiClusterHub
+      jqPathExpressions:
+        - .status
+        - .spec.overrides
   syncPolicy:
     automated:
       prune: true
@@ -424,6 +477,50 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: hs-crds
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "38"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/custom-operators/crds
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - .status
+        - .spec.conversion
+        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: hs-operators
   namespace: openshift-gitops
   labels:
@@ -442,26 +539,17 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-cloud
-  ignoreDifferences:
-    - group: apiextensions.k8s.io
-      kind: CustomResourceDefinition
-      jqPathExpressions:
-        - .status
-        - .spec.conversion
-        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
       allowEmpty: false
-    # CRDs: do NOT use app-level ServerSideApply — SSA + annotation tracking
-    # never persists argocd.argoproj.io/tracking-id on CRDs, so sync hangs forever
-    # on "waiting for healthy state of ...CustomResourceDefinition".
-    # Per-CRD sync-options set ServerSideApply=false,Replace=true.
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
       - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
     retry:
       limit: 15
       backoff:

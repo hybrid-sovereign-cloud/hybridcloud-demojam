@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hs-mce
+description: Multicluster Engine operator (before ACM hub)
+type: application
+version: 0.1.0
+appVersion: "2.17"

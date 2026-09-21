@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: open-cluster-management
+  name: multicluster-engine
   labels:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
@@ -12,43 +12,29 @@ metadata:
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
-  name: open-cluster-management
-  namespace: open-cluster-management
+  name: multicluster-engine
+  namespace: multicluster-engine
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   targetNamespaces:
-    - open-cluster-management
+    - multicluster-engine
 ---
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: acm-operator-subscription
-  namespace: open-cluster-management
+  name: multicluster-engine
+  namespace: multicluster-engine
   labels:
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  channel: release-2.17
+  channel: stable-2.17
   installPlanApproval: Automatic
-  name: advanced-cluster-management
+  name: multicluster-engine
   source: redhat-operators
   sourceNamespace: openshift-marketplace
----
-# ACM Hub — after MCE CSV Ready (SkipDryRun). Wave 26 app runs after hs-mce (24).
-apiVersion: operator.open-cluster-management.io/v1
-kind: MultiClusterHub
-metadata:
-  name: multiclusterhub
-  namespace: open-cluster-management
-  labels:
-    app.kubernetes.io/part-of: hybridsovereign-gitops
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-spec: {}
