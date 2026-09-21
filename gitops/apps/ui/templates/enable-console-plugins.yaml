@@ -1,0 +1,96 @@
+# OpenShift only loads ConsolePlugins listed on console.operator cluster.spec.plugins.
+# Creating the ConsolePlugin CR alone does not enable it (ZTP-022).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-enable-console-plugins
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-enable-console-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["consoles"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-enable-console-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-enable-console-plugins
+    namespace: sovereign-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-enable-console-plugins
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-enable-console-plugins
+  namespace: sovereign-ui
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-enable-console-plugins
+      containers:
+        - name: enable
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              NEED=(sovereign-admin-plugin sovereign-tenant-plugin)
+              # Wait briefly for ConsolePlugin CRs (same sync wave deploy)
+              for i in $(seq 1 30); do
+                ok=1
+                for p in "${NEED[@]}"; do
+                  oc get consoleplugin "$p" >/dev/null 2>&1 || ok=0
+                done
+                [ "$ok" = "1" ] && break
+                sleep 2
+              done
+              for p in "${NEED[@]}"; do
+                oc get consoleplugin "$p" >/dev/null
+              done
+              CUR=$(oc get console.operator.openshift.io cluster -o json)
+              NEW=$(echo "$CUR" | python3 -c '
+              import json,sys
+              d=json.load(sys.stdin)
+              plugins=list(d.get("spec",{}).get("plugins") or [])
+              need=["sovereign-admin-plugin","sovereign-tenant-plugin"]
+              changed=False
+              for p in need:
+                if p not in plugins:
+                  plugins.append(p)
+                  changed=True
+              d.setdefault("spec",{})["plugins"]=plugins
+              json.dump({"changed": changed, "plugins": plugins, "patch": {"spec": {"plugins": plugins}}}, sys.stdout)
+              ')
+              echo "$NEW" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("plugins=", d["plugins"]); print("changed=", d["changed"])'
+              echo "$NEW" | python3 -c 'import json,sys; json.dump(json.load(sys.stdin)["patch"], open("/tmp/console-plugins-patch.json","w"))'
+              oc patch console.operator.openshift.io cluster --type=merge --patch-file=/tmp/console-plugins-patch.json
+              echo "console.operator plugins enabled for sovereign-admin/tenant"
