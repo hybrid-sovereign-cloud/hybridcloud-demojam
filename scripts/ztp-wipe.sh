@@ -201,28 +201,40 @@ for ns in "${CLEAN_NS[@]}"; do
 done
 
 echo "== E2. Refresh builder SA dockercfg in build namespaces (ZTP-008/011) =="
-# Deleting the SA invalidates its dockercfg, but the controller may not recreate
-# the secret if the old one is still present — builds then push with a stale
-# token (UID mismatch → authentication required). Delete SA + dockercfg and
-# wait until a NEW secret is bound to the recreated SA.
+# Deleting the SA invalidates its dockercfg, but the controller reattaches the
+# old secret if it still exists — registry then rejects the token (SA UID mismatch).
+# Delete SA + every builder dockercfg, then wait until the secret timestamp is
+# newer than the recreated SA.
 for ns in sovereign-cloud; do
   oc get ns "$ns" >/dev/null 2>&1 || continue
   run oc -n "$ns" delete sa builder --wait=false 2>/dev/null || true
   run oc -n "$ns" delete secret -l openshift.io/internal-registry-auth-token.service-account=builder --wait=false 2>/dev/null || true
+  # Label selector misses secrets created before the annotation existed
+  while IFS= read -r sec; do
+    [ -n "$sec" ] || continue
+    run oc -n "$ns" delete secret "$sec" --wait=false 2>/dev/null || true
+  done < <(oc -n "$ns" get secret -o json 2>/dev/null | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+for i in d.get("items",[]):
+  n=i["metadata"]["name"]
+  ann=i["metadata"].get("annotations") or {}
+  if n.startswith("builder-dockercfg-") or ann.get("openshift.io/internal-registry-auth-token.service-account")=="builder":
+    print(n)' || true)
 done
 if [ "$DRY_RUN" != 1 ]; then
-  for i in $(seq 1 30); do
-    uid=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
-    ref=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.secrets[0].name}' 2>/dev/null || true)
-    created=""
+  for i in $(seq 1 40); do
+    sa_ts=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)
+    ref=$(oc -n sovereign-cloud get sa builder -o jsonpath='{.imagePullSecrets[0].name}' 2>/dev/null || true)
+    sec_ts=""
     if [ -n "$ref" ]; then
-      created=$(oc -n sovereign-cloud get secret "$ref" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)
+      sec_ts=$(oc -n sovereign-cloud get secret "$ref" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)
     fi
-    echo "  builder uid=${uid:-missing} secret=${ref:-missing} created=${created:-missing} t=$i"
-    if [ -n "$uid" ] && [ -n "$ref" ] && [ -n "$created" ]; then
+    echo "  builder sa=${sa_ts:-missing} secret=${ref:-missing} created=${sec_ts:-missing} t=$i"
+    if [ -n "$sa_ts" ] && [ -n "$sec_ts" ] && [[ "$sec_ts" > "$sa_ts" || "$sec_ts" == "$sa_ts" ]]; then
+      echo "  builder dockercfg is fresh"
       break
     fi
-    sleep 2
+    sleep 3
   done
 fi
 
