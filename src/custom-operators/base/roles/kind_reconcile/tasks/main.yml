@@ -11,7 +11,8 @@
     hs_api_version: "{{ ansible_operator_meta.api_version | default('hybridsovereign.redhat/v1alpha1') }}"
     hs_generation: "{{ ansible_operator_meta.generation | default(0) | int }}"
     job_stale_seconds: 10800
-    aap_host: "{{ lookup('env', 'AAP_HOST') | default('https://aap-aap.apps.cluster-qvhzm.dyn.redhatworkshops.io', true) }}"
+    # Never hardcode a demojam apps domain — empty host fails loud if secret missing.
+    aap_host: "{{ lookup('env', 'AAP_HOST') | default('', true) }}"
 
 - name: Map kind to JobTemplate name
   ansible.builtin.set_fact:
