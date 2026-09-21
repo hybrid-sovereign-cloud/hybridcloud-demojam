@@ -18,8 +18,7 @@
     cr_plural: cloudvirts
     cr_name: "{{ cloudvirt_name }}"
     cr_namespace: "{{ cloudvirt_namespace }}"
-    cr_action: failed
-    status_patch:
+    cr_status_body:
       status: deleted
       ready: false
       deletionComplete: true

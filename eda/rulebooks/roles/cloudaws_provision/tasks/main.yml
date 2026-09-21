@@ -58,8 +58,30 @@
           Namespace {{ cloudaws_cr_namespace }} is missing label
           hybridsovereign.redhat/entity. Cannot provision CloudAWS.
 
+    - name: Detect amazon.aws collection in EE
+      ansible.builtin.command:
+        argv: [ansible-doc, -t, module, amazon.aws.route53_zone]
+      register: _amazon_aws_doc
+      failed_when: false
+      changed_when: false
+
     - name: Include AWS environment preparation tasks
       ansible.builtin.include_tasks: aws_environmentprep.yml
+      when: _amazon_aws_doc.rc == 0
+
+    - name: Workshop CloudAWS stub when EE lacks amazon.aws
+      when: _amazon_aws_doc.rc != 0
+      block:
+        - name: Generate stub slug
+          ansible.builtin.set_fact:
+            ep_slug: "{{ (cloudaws_cr_name | hash('sha256'))[:5] }}"
+            ep_base_domain: "{{ aws_base_domain }}"
+            ep_region: "{{ cloudaws_spec.region | default('us-east-1') }}"
+            aws_account_id: "{{ aws_account }}"
+        - name: Derive stub domain
+          ansible.builtin.set_fact:
+            ep_domain: "{{ ep_slug }}.{{ ep_base_domain }}"
+            ep_subdomain_zone_id: "stub-zone-{{ ep_slug }}"
 
     - name: Get reconciliation timestamp
       ansible.builtin.set_fact:
