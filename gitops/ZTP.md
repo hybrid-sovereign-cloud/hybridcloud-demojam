@@ -51,6 +51,7 @@ Parent sync **waits for prior-wave Application health** before creating the next
 | Wave inversion | Manual sync of samples before operators | Parent wave annotations 5→60; do not reorder |
 | CRD health wait forever | SSA + annotation tracking: CRDs lack `tracking-id` → health=Missing | Per-CRD `ServerSideApply=false,Replace=true`; no app-level SSA on `hs-operators` |
 | Hardcoded apps domain | Lab URLs baked into Jobs/samples | Discover `ingresses.config.openshift.io/cluster` (+ Routes); UIHealthChecker PostSync Job |
+| Wipe deletes OpenShift Projects | Bare `oc delete projects` hits `project.project.openshift.io` | **Only** `./scripts/ztp-wipe.sh` — FQ `*.hybridsovereign.redhat` |
 
 ## Cross-dependencies (must not invert)
 

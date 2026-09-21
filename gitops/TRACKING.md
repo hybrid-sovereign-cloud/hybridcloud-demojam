@@ -402,3 +402,14 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Next action | Push; full wipe; single field-content sync; monitor-only |
 | Status | in-progress |
 
+
+### 2026-09-21T01:25:00Z — ZTP-004 safe wipe script (cluster-fbwcv destroyed)
+
+| Field | Value |
+|-------|-------|
+| Incident | Ad-hoc wipe used bare CRD plural `projects` → deleted OpenShift Projects; OAuth/:443 died |
+| Change summary | Add `scripts/ztp-wipe.sh` with FQ-only HS deletes + Project API refuse; document ZTP-004 |
+| Paths touched | `scripts/ztp-wipe.sh`, `gitops/issues.md`, `gitops/ZTP.md` |
+| Next action | Rebuild cluster; use only `./scripts/ztp-wipe.sh` for future wipes |
+| Status | halted pending new cluster |
+
