@@ -1,0 +1,35 @@
+---
+# CloudVirt provision — mark ready after validating CR shape (CNV prep stub).
+# Full CNV environment prep lands in a later iteration; this unblocks JT + operator soak.
+- name: Set CloudVirt facts
+  ansible.builtin.set_fact:
+    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default('') }}"
+    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default('entity-acme-corp') }}"
+
+- name: Read CloudVirt CR
+  kubernetes.core.k8s_info:
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudVirt
+    name: "{{ cloudvirt_name }}"
+    namespace: "{{ cloudvirt_namespace }}"
+  register: cloudvirt_cr
+  when: cloudvirt_name | length > 0
+
+- name: Mark CloudVirt ready (stub)
+  when: cloudvirt_name | length > 0
+  operator_sdk.util.k8s_status:
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudVirt
+    name: "{{ cloudvirt_name }}"
+    namespace: "{{ cloudvirt_namespace }}"
+    status:
+      status: ready
+      ready: true
+      message: CloudVirt environment stub ready (CNV prep deferred)
+      slug: "{{ cloudvirt_name[:5] }}"
+      domain: "{{ (cloudvirt_cr.resources[0].spec.baseDomain | default('virt.example.com')) if cloudvirt_cr.resources | default([]) else 'virt.example.com' }}"
+  ignore_errors: true
+
+- name: CloudVirt provision complete
+  ansible.builtin.debug:
+    msg: "cloudvirt provision stub complete for {{ cloudvirt_name }}"

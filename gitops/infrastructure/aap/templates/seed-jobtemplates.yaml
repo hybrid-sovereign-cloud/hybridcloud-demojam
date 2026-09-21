@@ -110,6 +110,7 @@ spec:
                 [platformopenshift]=eda/rulebooks/platformopenshift-provision-playbook.yml
                 [cloudoso]=eda/rulebooks/cloudoso-provision-playbook.yml
                 [cloudaws]=eda/rulebooks/cloudaws-provision-playbook.yml
+                [cloudvirt]=eda/rulebooks/cloudvirt-provision-playbook.yml
               )
               declare -A REAL_TD=(
                 [entity]=eda/rulebooks/entity-teardown-playbook.yml
@@ -134,6 +135,7 @@ spec:
                 [platformopenshift]=eda/rulebooks/platformopenshift-teardown-playbook.yml
                 [cloudoso]=eda/rulebooks/cloudoso-teardown-playbook.yml
                 [cloudaws]=eda/rulebooks/cloudaws-teardown-playbook.yml
+                [cloudvirt]=eda/rulebooks/cloudvirt-teardown-playbook.yml
               )
 
               # Ensure Vault credential type + credential for VAULT_TOKEN/VAULT_ADDR
@@ -197,16 +199,10 @@ spec:
                 upsert_jt "${k}-teardown" "${REAL_TD[$k]}" "$HS_PROJ"
               done
 
-              # Parked kinds remain hello_world stubs
-              for k in cloudoso cloudaws platformopenshift; do
-                upsert_jt "${k}-provision" "hello_world.yml" "$DEMO_PROJ"
-                upsert_jt "${k}-teardown" "hello_world.yml" "$DEMO_PROJ"
-              done
-
               # Prove seed landed (operators look these up by exact name)
               EP_COUNT=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/job_templates/?name=entity-provision" | jget count)
               if [ "${EP_COUNT:-0}" = "0" ]; then
                 echo "FATAL: entity-provision JobTemplate missing after seed" >&2
                 exit 1
               fi
-              echo "AAP JobTemplate seed complete (real playbooks + parked stubs); entity-provision ok"
+              echo "AAP JobTemplate seed complete (real playbooks including cloud/platform); entity-provision ok"

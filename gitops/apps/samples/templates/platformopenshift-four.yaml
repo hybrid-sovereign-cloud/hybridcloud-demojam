@@ -1,0 +1,91 @@
+# Four PlatformOpenshift samples: openstack | aws | virt | hosted.
+# Environments reference unparked Cloud* CRs in the same entity namespace.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: workshop-ocp-oso
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: openstack
+  openstack:
+    environment: workshop-oso
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterOperatorRbac:
+      - acme-infra-team
+    clusterViewerRbac:
+      - acme-viewers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: workshop-ocp-aws
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: aws
+  aws:
+    environment: workshop-aws
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterOperatorRbac:
+      - acme-infra-team
+    clusterViewerRbac:
+      - acme-viewers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: workshop-ocp-virt
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: virt
+  virt:
+    environment: workshop-virt
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterOperatorRbac:
+      - acme-infra-team
+    clusterViewerRbac:
+      - acme-viewers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: workshop-ocp-hosted
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: hosted
+  hosted:
+    environment: workshop-virt
+    nodePoolReplicas: 2
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterOperatorRbac:
+      - acme-infra-team
+    clusterViewerRbac:
+      - acme-viewers

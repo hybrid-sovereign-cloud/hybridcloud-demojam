@@ -1,0 +1,12 @@
+---
+- name: CloudVirt Teardown Playbook
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    kubernetes.core.k8s:
+      validate_certs: false
+    kubernetes.core.k8s_info:
+      validate_certs: false
+  roles:
+    - cloudvirt_teardown

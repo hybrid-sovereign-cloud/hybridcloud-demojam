@@ -7,7 +7,10 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
 data:
   parked: |
-    CloudAWS, CloudOSO, PlatformOpenshift, OpenStackMigration — YAML retained in repo samples/; not applied until cloud secrets provided.
+    OpenStackMigration — YAML retained in repo samples/; not applied this pass.
+  unparked: |
+    CloudAWS, CloudOSO, CloudVirt, PlatformOpenshift (openstack|aws|virt|hosted) —
+    applied via hs-samples after Step 0 secrets + PushSecrets to Vault.
   status: |
-    Live sample CRs are added in a subsequent commit after CRDs and operators are Ready.
-    This placeholder keeps the hs-samples Application healthy during bootstrap.
+    Cloud environment + four PlatformOpenshift samples live under
+    templates/cloud-environments.yaml and templates/platformopenshift-four.yaml.

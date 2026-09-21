@@ -2,5 +2,5 @@ apiVersion: v2
 name: hs-aap-config
 description: AAP configuration hooks — adopt existing AAP; JobTemplates via infra.aap_configuration PostSync
 type: application
-version: 0.1.6
+version: 0.1.7
 appVersion: "0.1.0"

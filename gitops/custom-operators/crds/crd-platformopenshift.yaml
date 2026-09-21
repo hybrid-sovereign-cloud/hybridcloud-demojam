@@ -42,8 +42,8 @@ spec:
               properties:
                 type:
                   type: string
-                  description: "Platform type: openstack or aws"
-                  enum: [openstack, aws]
+                  description: "Platform type: openstack | aws | virt (CNV VMs) | hosted (ACM Hypershift HCP)"
+                  enum: [openstack, aws, virt, hosted]
                 openstack:
                   type: object
                   description: "OpenStack-specific configuration"
@@ -104,6 +104,46 @@ spec:
                       type: string
                       description: "AWS instance type for workers"
                       default: m5.large
+                virt:
+                  type: object
+                  description: "CNV VirtualMachine-based OpenShift install"
+                  required: [environment]
+                  properties:
+                    environment:
+                      type: string
+                      description: "CloudVirt CR name providing the virt environment"
+                    controlPlaneCount:
+                      type: integer
+                      default: 3
+                    workerCount:
+                      type: integer
+                      default: 2
+                    controlPlaneMemory:
+                      type: string
+                      default: "16Gi"
+                    workerMemory:
+                      type: string
+                      default: "8Gi"
+                    controlPlaneCores:
+                      type: integer
+                      default: 4
+                    workerCores:
+                      type: integer
+                      default: 2
+                hosted:
+                  type: object
+                  description: "ACM Hypershift HostedControlPlane on virt infrastructure"
+                  required: [environment]
+                  properties:
+                    environment:
+                      type: string
+                      description: "CloudVirt CR name providing the virt environment"
+                    releaseImage:
+                      type: string
+                      description: "Optional OCP release image override (empty = discover)"
+                    nodePoolReplicas:
+                      type: integer
+                      default: 2
                 toolRbac:
                   description: Controls who gets roles on the provisioned OpenShift cluster (Layer 2 RBAC)
                   type: object

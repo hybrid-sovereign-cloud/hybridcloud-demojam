@@ -1,0 +1,20 @@
+# Sample CloudVirt — workshop virt environment (CNV)
+# Applied via gitops/apps/samples (hs-samples), not manual oc apply.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudVirt
+metadata:
+  name: workshop-virt
+  namespace: entity-acme-corp
+spec:
+  vaultPath: virt/accounts/example-admin
+  baseDomain: virt.example.com
+  storageClass: ocs-storagecluster-ceph-rbd
+  enableVRF: false
+  toolRbac:
+    environmentAdminRbac:
+      - acme-platform-admins
+    environmentPoweruserRbac:
+      - acme-infra-team
+    environmentViewerRbac:
+      - acme-viewers

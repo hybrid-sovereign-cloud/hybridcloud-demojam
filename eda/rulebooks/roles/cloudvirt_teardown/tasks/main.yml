@@ -1,0 +1,23 @@
+---
+- name: Set CloudVirt teardown facts
+  ansible.builtin.set_fact:
+    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default('') }}"
+    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default('entity-acme-corp') }}"
+
+- name: Mark CloudVirt deletionComplete
+  when: cloudvirt_name | length > 0
+  operator_sdk.util.k8s_status:
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudVirt
+    name: "{{ cloudvirt_name }}"
+    namespace: "{{ cloudvirt_namespace }}"
+    status:
+      status: deleted
+      ready: false
+      deletionComplete: true
+      message: CloudVirt teardown stub complete
+  ignore_errors: true
+
+- name: CloudVirt teardown complete
+  ansible.builtin.debug:
+    msg: "cloudvirt teardown stub complete for {{ cloudvirt_name }}"

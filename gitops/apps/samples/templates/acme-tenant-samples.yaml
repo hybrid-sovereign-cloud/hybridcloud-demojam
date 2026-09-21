@@ -1,5 +1,6 @@
-# Non-parked ACME tenant + Hybrid VPC sample CRs (GitOps-owned).
-# Parked (intentionally omitted): CloudAWS, CloudOSO, PlatformOpenshift, OpenStackMigration
+# ACME tenant + Hybrid VPC sample CRs (GitOps-owned).
+# CloudAWS/OSO/Virt + PlatformOpenshift: see cloud-environments.yaml / platformopenshift-four.yaml
+# Still parked: OpenStackMigration
 ---
 apiVersion: v1
 kind: Namespace

@@ -7,6 +7,7 @@ resources:
   - crd-cloudaws.yaml
   - crd-cloudgateway.yaml
   - crd-cloudoso.yaml
+  - crd-cloudvirt.yaml
   - crd-entity.yaml
   - crd-hybridfabric.yaml
   - crd-hybridnetwork.yaml
