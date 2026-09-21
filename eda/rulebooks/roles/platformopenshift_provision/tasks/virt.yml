@@ -131,6 +131,28 @@
   ansible.builtin.set_fact:
     hc_release_image: "{{ hub_cv.resources[0].status.desired.image }}"
 
+- name: Resolve NodePort address for HostedCluster API (bare-metal hub)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Node
+    label_selectors:
+      - "node-role.kubernetes.io/worker"
+  register: worker_nodes
+
+- name: Set NodePort publish address
+  ansible.builtin.set_fact:
+    hc_nodeport_address: >-
+      {{
+        (worker_nodes.resources | default([{}]))[0].status.addresses
+        | selectattr('type','equalto','InternalIP')
+        | map(attribute='address')
+        | first
+        | default('10.10.10.30')
+      }}
+
 - name: Create HostedCluster (KubeVirt platform)
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
@@ -161,12 +183,13 @@
             baseDomainPassthrough: true
         pullSecret:
           name: "{{ hc_pull_secret_name }}"
-        sshKey: {}
         infraID: "{{ hc_name }}"
         services:
           - service: APIServer
             servicePublishingStrategy:
-              type: LoadBalancer
+              type: NodePort
+              nodePort:
+                address: "{{ hc_nodeport_address }}"
           - service: OAuthServer
             servicePublishingStrategy:
               type: Route
@@ -204,7 +227,7 @@
         namespace: "{{ hc_namespace }}"
       spec:
         clusterName: "{{ hc_name }}"
-        replicas: "{{ hc_node_replicas | int }}"
+        replicas: {{ hc_node_replicas | int }}
         management:
           autoRepair: false
           upgradeType: Replace
@@ -212,7 +235,7 @@
           type: KubeVirt
           kubevirt:
             compute:
-              cores: "{{ hc_worker_cores | int }}"
+              cores: {{ hc_worker_cores | int }}
               memory: "{{ hc_worker_memory }}"
             rootVolume:
               size: "32Gi"

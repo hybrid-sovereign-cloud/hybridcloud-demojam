@@ -11,7 +11,7 @@
 
 - name: Write install-config to Vault
   ansible.builtin.uri:
-    url: "{{ vault_init_addr }}/v1/central/data/{{ cb_install_config_vault }}"
+    url: "{{ vault_init_addr }}/v1/hybridsovereign/data/{{ cb_install_config_vault }}"
     method: POST
     headers:
       X-Vault-Token: "{{ vault_root_token }}"
