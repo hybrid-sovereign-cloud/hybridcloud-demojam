@@ -389,7 +389,7 @@ json.dump(ns, open("/tmp/ztp-local-cluster-ns.json","w"))
   done
 fi
 
-echo "== F4. Clear stuck OCM addons / force ClusterManager reinstall (ZTP-014) =="
+echo "== F4. Clear stuck OCM addons / force ClusterManager reinstall (ZTP-014/020) =="
 # MCE Error when ManagedClusterAddOn CRD is Terminating or force-deleted:
 # "create not allowed while CRD is terminating" / "no matches for kind".
 # Prefer deleting CRs and waiting for natural CRD cleanup. Never leave the
@@ -408,16 +408,43 @@ for obj in $(oc get klusterlet.operator.open-cluster-management.io -o name 2>/de
   strip_finalizers "$obj"
   run oc delete "$obj" --wait=false 2>/dev/null || true
 done
+# ZTP-020: stale open-cluster-management-hub pods/secrets survive MCE recreate and
+# leave klusterlet Unauthorized (ManagedClusterLeaseUpdateStopped). Delete agent/hub
+# namespaces so ClusterManager boots a fresh registration plane.
+for ns in open-cluster-management-hub open-cluster-management-agent open-cluster-management-agent-addon; do
+  if oc get ns "$ns" >/dev/null 2>&1; then
+    echo "  delete leftover NS $ns (ZTP-020)"
+    oc delete ns "$ns" --wait=false 2>/dev/null || true
+  fi
+done
 if [ "$DRY_RUN" != 1 ]; then
   for i in $(seq 1 24); do
     cm=$(oc get clustermanager.operator.open-cluster-management.io --no-headers 2>/dev/null | wc -l || true)
-    echo "  clustermanagers=$cm t=$i"
-    if [ "${cm:-0}" = "0" ]; then
+    hub=$(oc get ns open-cluster-management-hub --no-headers 2>/dev/null | wc -l || true)
+    echo "  clustermanagers=$cm hub_ns=$hub t=$i"
+    if [ "${cm:-0}" = "0" ] && [ "${hub:-0}" = "0" ]; then
       break
     fi
     if [ "$i" -ge 3 ]; then
       for obj in $(oc get clustermanager.operator.open-cluster-management.io -o name 2>/dev/null || true); do
         strip_finalizers "$obj"
+        oc delete "$obj" --wait=false 2>/dev/null || true
+      done
+      for ns in open-cluster-management-hub open-cluster-management-agent open-cluster-management-agent-addon; do
+        phase=$(oc get ns "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || echo Gone)
+        if [ "$phase" = "Terminating" ]; then
+          oc get ns "$ns" -o json 2>/dev/null | python3 -c '
+import json,sys
+ns=json.load(sys.stdin)
+name=ns["metadata"]["name"]
+ns.setdefault("spec",{})["finalizers"]=[]
+ns["metadata"]["finalizers"]=[]
+json.dump(ns, open("/tmp/ztp-ocm-ns.json","w"))
+print(name)
+' 2>/dev/null | while read -r n; do
+            oc replace --raw "/api/v1/namespaces/${n}/finalize" -f /tmp/ztp-ocm-ns.json 2>/dev/null || true
+          done
+        fi
       done
     fi
     sleep 5

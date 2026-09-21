@@ -25,6 +25,7 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-017 | 2026-09-21 (l9mxc) | `hs-mce` CSV `TooManyOperatorGroups`; MCE Progressing forever | `hs-mce` OG named `multicluster-engine` + MulticlusterHub creates OG `default` in same NS | Name MCE OG `default` so MCH adopts; bump hs-mce 0.1.1 | 1 (fixing) |
 | ZTP-018 | 2026-09-21 (l9mxc) | `hs-crds`/`hs-operators` SharedResourceWarning; samples stuck on missing Persona | CRD YAML still had `tracking-id`/`instance` = `hs-operators` after path split | Retarget CRD annotations to `hs-crds`; SSA on hs-crds; operators path has no CRDs | 1 (**verified**) |
 | ZTP-019 | 2026-09-21 (l9mxc) | MCE Progressing forever; MCH `multicluster-engine: False` | Leftover `local-cluster` NS without ManagedCluster — MCE waits for NS removal | Wipe + hs-mce/hs-acm cleanup delete `local-cluster` NS (finalize if Terminating) | 1 (**MCE Available, MCH Running**) |
+| ZTP-020 | 2026-09-21 (l9mxc) | Post-wipe MCE Progressing; MC `ManagedClusterLeaseUpdateStopped`; klusterlet `Unauthorized` | Stale `open-cluster-management-hub` NS (11h) survived wipe while ClusterManager recreated | Wipe F4 deletes hub/agent/agent-addon namespaces + finalize | 1 (fixing) |
 
 ## Recurrence halt rule
 
