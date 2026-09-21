@@ -16,11 +16,14 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 ./scripts/ztp-app.sh list
 ./scripts/ztp-app.sh status
 ./scripts/ztp-app.sh wait hs-vault
+./scripts/ztp-app.sh wait-all                 # parallel: all catalog apps
 # on failure — fix git, push, then ONLY that app:
 ./scripts/ztp-app.sh cleanup hs-vault
 ./scripts/ztp-app.sh redeploy hs-vault
-# walk waves after a change:
+./scripts/ztp-app.sh redeploy-wave 24         # parallel same-wave apps
+# walk waves (parallel within each wave by default):
 ./scripts/ztp-app.sh validate-sequence --from 5 --to 60
+./scripts/ztp-app.sh validate-sequence --serial   # optional sequential
 ```
 
 **Do not** run `./scripts/ztp-wipe.sh` while debugging a single app. Full wipe is the **final** soak after every app is Healthy in isolation.
