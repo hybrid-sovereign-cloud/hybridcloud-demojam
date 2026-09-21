@@ -33,9 +33,9 @@ metadata:
     hybridsovereign.redhat/sample: "true"
 spec:
   # ACCOUNT_ID for API calls comes from Vault aws/accounts/example-admin
-  account: "000000000000"
+  account: "929186565356"
   vaultPath: aws/accounts/example-admin
-  baseDomain: sandbox.example.com
+  baseDomain: sandbox356.opentlc.com
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt

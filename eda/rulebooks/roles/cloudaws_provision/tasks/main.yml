@@ -60,20 +60,6 @@
 
     - name: Include AWS environment preparation tasks
       ansible.builtin.include_tasks: aws_environmentprep.yml
-      when: false  # workshop: STS/Route53 against seeded creds often fail; use stub below
-
-    - name: Workshop CloudAWS stub
-      block:
-        - name: Generate stub slug
-          ansible.builtin.set_fact:
-            ep_slug: "{{ (cloudaws_cr_name | hash('sha256'))[:5] }}"
-            ep_base_domain: "{{ aws_base_domain }}"
-            ep_region: "{{ cloudaws_spec.region | default('us-east-1') }}"
-            aws_account_id: "{{ aws_account }}"
-        - name: Derive stub domain
-          ansible.builtin.set_fact:
-            ep_domain: "{{ ep_slug }}.{{ ep_base_domain }}"
-            ep_subdomain_zone_id: "stub-zone-{{ ep_slug }}"
 
     - name: Get reconciliation timestamp
       ansible.builtin.set_fact:
