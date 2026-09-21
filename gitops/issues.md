@@ -28,6 +28,7 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-020 | 2026-09-21 (l9mxc) | Post-wipe MCE Progressing; MC `ManagedClusterLeaseUpdateStopped`; klusterlet `Unauthorized` | Stale `open-cluster-management-hub` NS (11h) survived wipe while ClusterManager recreated | Wipe F4 deletes hub/agent/agent-addon namespaces + finalize | 1 (fixing) |
 | ZTP-021 | 2026-09-21 (l9mxc) | Sample Entity/Team/Persona pending: `JobTemplate entity-provision not found in AAP` | `hs-aap-seed-jobtemplates` sed-parsed wrong org id (`14`); project create failed; JT creates no-op with empty ids; Job still Completed | Parse AAP JSON with python3; fail if HS_PROJ/JT create empty; verify `entity-provision` exists; bump hs-aap-config 0.1.6 | 1 (fixing) |
 | ZTP-022 | 2026-09-21 (l9mxc) | Sovereign console plugins deployed but not visible in OCP console | `hs-ui` created ConsolePlugin CRs + Deployments but never patched `console.operator` `spec.plugins` | Sync-hook Job enables `sovereign-admin-plugin` + `sovereign-tenant-plugin` on cluster console; bump hs-ui 0.1.11 | 1 (fixing) |
+| ZTP-023 | 2026-09-21 (kbnzw) | `hs-samples` OutOfSync; CloudOSO/CloudAWS Missing | Sample CRs set `spec.toolRbac` but CloudOSO/CloudAWS CRDs do not declare that field | Remove toolRbac from unparked CloudOSO/AWS samples (CloudVirt keeps it); bump hs-samples 0.1.5 | 1 (fixing) |
 
 ## Recurrence halt rule
 
