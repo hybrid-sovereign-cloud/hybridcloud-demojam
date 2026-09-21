@@ -39,8 +39,7 @@
     cr_plural: cloudvirts
     cr_name: "{{ cloudvirt_name }}"
     cr_namespace: "{{ cloudvirt_namespace }}"
-    cr_action: ready
-    status_patch:
+    cr_status_body:
       status: ready
       ready: true
       phase: provisioned
