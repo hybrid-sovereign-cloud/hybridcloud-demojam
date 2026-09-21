@@ -1,5 +1,6 @@
 ---
 # AAP job launch / reconcile — anti-loop + 3h stale cancel+relaunch
+# On delete: launch *-teardown and fail (keep finalizer) until deletionComplete.
 - name: Compute now UTC
   ansible.builtin.set_fact:
     now_epoch: "{{ now(utc=true, fmt='%s') | int }}"
@@ -23,10 +24,12 @@
       ansible.builtin.set_fact:
         aap_job_status: "{{ aap_job_get.json.status | default('missing') if aap_job_get.status == 200 else 'missing' }}"
         aap_job_finished: "{{ aap_job_get.json.finished | default('') if aap_job_get.status == 200 else '' }}"
+        aap_job_name: "{{ aap_job_get.json.name | default('') if aap_job_get.status == 200 else '' }}"
 
 - name: Default job status when none
   ansible.builtin.set_fact:
     aap_job_status: "{{ aap_job_status | default('none') }}"
+    aap_job_name: "{{ aap_job_name | default('') }}"
 
 - name: Compute job age seconds
   ansible.builtin.set_fact:
@@ -43,8 +46,9 @@
     job_is_success: "{{ aap_job_status == 'successful' }}"
     job_is_running: "{{ aap_job_status in ['pending', 'waiting', 'running'] }}"
     job_is_failed: "{{ aap_job_status in ['failed', 'error', 'canceled', 'missing'] }}"
+    tracked_is_teardown: "{{ (teardown_template_name in (aap_job_name | default(''))) | bool }}"
 
-- name: Mark ready when AAP job successful (always wins over relaunch)
+- name: Mark ready when AAP provision job successful (always wins over relaunch)
   when:
     - job_is_success | bool
     - not (is_delete | bool)
@@ -59,11 +63,19 @@
     - name: End after ready
       ansible.builtin.meta: end_play
 
+- name: On delete — allow finalizer clear only after deletionComplete
+  when:
+    - is_delete | bool
+    - deletion_complete | bool
+  block:
+    - name: Teardown complete — release finalizer
+      ansible.builtin.meta: end_play
+
 - name: No-op while job running within 3h window
   when:
     - job_is_running | bool
-    - not (is_delete | bool)
     - (job_age_seconds | int) <= (job_stale_seconds | int)
+    - (not (is_delete | bool)) or (tracked_is_teardown | bool)
   block:
     - name: Keep reconciling status while AAP runs
       operator_sdk.util.k8s_status:
@@ -71,33 +83,63 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'Waiting for AAP job ' ~ cur_job_id, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': aap_job_status, 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
-    - name: End while running
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('Waiting for AAP teardown job ', 'Waiting for AAP job ')) ~ cur_job_id, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': aap_job_status, 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
+    - name: End while provision running
       ansible.builtin.meta: end_play
+      when: not (is_delete | bool)
+    - name: Keep finalizer while teardown running
+      ansible.builtin.fail:
+        msg: "Waiting for AAP teardown job {{ cur_job_id }} ({{ aap_job_status }})"
+      when: is_delete | bool
 
 - name: Decide whether to launch
   ansible.builtin.set_fact:
     need_launch: >-
       {{
-        (is_delete | bool) or
-        (job_is_failed | bool) or
-        (aap_job_status == 'none') or
         (
-          job_is_running | bool and
-          (job_age_seconds | int) > (job_stale_seconds | int)
+          (is_delete | bool) and (
+            (aap_job_status == 'none') or
+            (job_is_failed | bool) or
+            (job_is_success | bool and not (tracked_is_teardown | bool)) or
+            (job_is_running | bool and not (tracked_is_teardown | bool)) or
+            (
+              job_is_running | bool and
+              (tracked_is_teardown | bool) and
+              (job_age_seconds | int) > (job_stale_seconds | int)
+            )
+          )
+        )
+        or
+        (
+          (not (is_delete | bool)) and (
+            (job_is_failed | bool) or
+            (aap_job_status == 'none') or
+            (
+              job_is_running | bool and
+              (job_age_seconds | int) > (job_stale_seconds | int)
+            )
+          )
         )
       }}
     need_cancel: >-
       {{
-        job_is_running | bool and
-        (job_age_seconds | int) > (job_stale_seconds | int)
+        cur_job_id | length > 0 and (
+          (
+            job_is_running | bool and
+            (job_age_seconds | int) > (job_stale_seconds | int)
+          )
+          or
+          (
+            (is_delete | bool) and job_is_running | bool and not (tracked_is_teardown | bool)
+          )
+        )
       }}
 
-- name: Cancel stale or failed job before relaunch
+- name: Cancel stale or wrong-type job before relaunch
   when:
     - need_cancel | bool or (need_launch | bool and cur_job_id | length > 0 and (job_is_failed | bool or job_is_running | bool))
     - cur_job_id | length > 0
-    - not (job_is_success | bool)
+    - not (job_is_success | bool and tracked_is_teardown | bool and is_delete | bool)
   ansible.builtin.uri:
     url: "{{ aap_host }}/api/controller/v2/jobs/{{ cur_job_id }}/cancel/"
     method: POST
@@ -108,6 +150,25 @@
     status_code: [200, 202, 400, 404, 405]
   failed_when: false
   no_log: true
+
+- name: When delete teardown already succeeded but deletionComplete missing — wait
+  when:
+    - is_delete | bool
+    - job_is_success | bool
+    - tracked_is_teardown | bool
+    - not (deletion_complete | bool)
+    - not (need_launch | bool)
+  block:
+    - name: Status awaiting deletionComplete
+      operator_sdk.util.k8s_status:
+        api_version: "{{ hs_api_version }}"
+        kind: "{{ hs_kind }}"
+        name: "{{ hs_name }}"
+        namespace: "{{ hs_namespace }}"
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'Teardown job succeeded; waiting for deletionComplete', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started}} }}"
+    - name: Keep finalizer until deletionComplete
+      ansible.builtin.fail:
+        msg: Waiting for status.deletionComplete after teardown job {{ cur_job_id }}
 
 - name: Launch AAP JobTemplate
   when: need_launch | bool
@@ -134,8 +195,13 @@
             name: "{{ hs_name }}"
             namespace: "{{ hs_namespace }}"
             status: "{{ {'phase': 'pending', 'message': 'JobTemplate ' ~ ((is_delete | bool) | ternary(teardown_template_name, job_template_name)) ~ ' not found in AAP', 'observedGeneration': hs_generation | int} }}"
-        - name: End
+        - name: End on missing provision JT
           ansible.builtin.meta: end_play
+          when: not (is_delete | bool)
+        - name: Keep finalizer when teardown JT missing
+          ansible.builtin.fail:
+            msg: "JobTemplate {{ teardown_template_name }} not found in AAP"
+          when: is_delete | bool
 
     - name: Build event note from live CR spec
       ansible.builtin.set_fact:
@@ -168,7 +234,7 @@
                   'cluster': 'local'
                 },
                 'plugin_rbac_keycloak_realm': 'sso',
-                'KEYCLOAK_EXTERNAL_URL': 'https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io'
+                'KEYCLOAK_EXTERNAL_URL': lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://sso.apps.cluster-kbnzw.dyn.redhatworkshops.io', true)
               } | to_json
             }}
         status_code: [201]
@@ -181,7 +247,13 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'AAP job launched', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': jt_launch.json.id | string, 'status': jt_launch.json.status | default('pending'), 'startedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'url': aap_host ~ '/execution/jobs/playbook/' ~ (jt_launch.json.id | string) ~ '/details'}} }}"
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('AAP teardown job launched', 'AAP job launched')), 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': jt_launch.json.id | string, 'status': jt_launch.json.status | default('pending'), 'startedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'url': aap_host ~ '/execution/jobs/playbook/' ~ (jt_launch.json.id | string) ~ '/details'}} }}"
 
-    - name: End after launch
+    - name: End after provision launch
       ansible.builtin.meta: end_play
+      when: not (is_delete | bool)
+
+    - name: Keep finalizer after teardown launch
+      ansible.builtin.fail:
+        msg: "Teardown job {{ jt_launch.json.id }} launched; waiting for deletionComplete"
+      when: is_delete | bool

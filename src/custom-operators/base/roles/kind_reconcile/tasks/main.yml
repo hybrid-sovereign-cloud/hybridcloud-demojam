@@ -1,6 +1,7 @@
 ---
 # Shared reconcile for all hybridsovereign kinds.
 # - Launch AAP JobTemplate on create / spec generation change
+# - On delete: launch *-teardown and BLOCK finalizer until status.deletionComplete
 # - Cancel+relaunch if failed or not completed within 3 hours
 # - Status-only updates must NOT relaunch (observedGeneration + in-window job)
 - name: Resolve kind and job template
@@ -31,7 +32,20 @@
 - name: Read current status safely
   ansible.builtin.set_fact:
     hs_status: "{{ (hs_live.resources | default([{}]))[0].status | default(status | default({})) }}"
-    is_delete: "{{ ansible_operator_meta.deletion_timestamp is defined and ansible_operator_meta.deletion_timestamp | length > 0 }}"
+    # watches use snakeCaseParameters: false → camelCase deletionTimestamp
+    is_delete: >-
+      {{
+        (
+          (ansible_operator_meta.deletionTimestamp | default('') | string | length > 0) or
+          (ansible_operator_meta.deletion_timestamp | default('') | string | length > 0) or
+          (
+            (hs_live.resources | default([])) | length > 0 and
+            (
+              (hs_live.resources[0].metadata.deletionTimestamp | default('') | string | length > 0)
+            )
+          )
+        ) | bool
+      }}
 
 - name: Normalize status fields
   ansible.builtin.set_fact:
@@ -39,6 +53,13 @@
     cur_job_id: "{{ hs_status.aapJob.jobId | default('') | string }}"
     cur_job_started: "{{ hs_status.aapJob.startedAt | default('') | string }}"
     cur_phase: "{{ hs_status.phase | default('') | string }}"
+    deletion_complete: "{{ hs_status.deletionComplete | default(false) | bool }}"
+
+- name: Clear finalizer when EDA teardown reported deletionComplete
+  ansible.builtin.meta: end_play
+  when:
+    - is_delete | bool
+    - deletion_complete | bool
 
 - name: Skip when generation already observed and phase ready
   ansible.builtin.meta: end_play
@@ -62,3 +83,7 @@
         namespace: "{{ hs_namespace }}"
         status: "{{ {'phase': 'pending', 'message': 'Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)', 'observedGeneration': hs_generation | int} }}"
       when: cur_phase != 'pending'
+    - name: Keep finalizer while AAP credentials missing on delete
+      ansible.builtin.fail:
+        msg: Waiting for AAP credentials to run teardown
+      when: is_delete | bool
