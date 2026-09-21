@@ -1,0 +1,24 @@
+apiVersion: hypershift.openshift.io/v1beta1
+kind: NodePool
+metadata:
+  name: "{{ hc_name }}-workers"
+  namespace: "{{ hc_namespace }}"
+spec:
+  clusterName: "{{ hc_name }}"
+  replicas: {{ hc_node_replicas | int }}
+  management:
+    autoRepair: false
+    upgradeType: Replace
+  platform:
+    type: KubeVirt
+    kubevirt:
+      compute:
+        cores: {{ hc_worker_cores | int }}
+        memory: "{{ hc_worker_memory }}"
+      rootVolume:
+        size: "32Gi"
+        type: Persistent
+        persistent:
+          size: "32Gi"
+  release:
+    image: "{{ hc_release_image }}"

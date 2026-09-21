@@ -105,31 +105,125 @@
          (cb_helm_release_failed | bool) or
          (values_diff_result.stdout | default('true') | trim == 'true') }}
 
-- name: Deploy mce-cluster-build chart
-  ansible.builtin.command:
-    argv:
-      - helm
-      - upgrade
-      - "{{ cb_app_name }}"
-      - "oci://{{ oci_registry_host }}/hybrid-sovereign/mce-cluster-build"
-      - --version
-      - "{{ mce_cluster_build_chart_version }}"
-      - --install
-      - --namespace
-      - "{{ cb_cluster_name }}"
-      - --create-namespace
-      - --values
-      - "/tmp/{{ cb_app_name }}-build-values.yaml"
-      - --history-max
-      - "2"
-      - --wait
-      - --timeout
-      - "10m"
-      - --kubeconfig
-      - "/tmp/{{ cb_app_name }}-kubeconfig"
-  register: helm_deploy_result
+- name: Deploy mce-cluster-build chart via in-cluster Helm Job
   when: cb_values_changed | bool
-  changed_when: "'has been upgraded' in helm_deploy_result.stdout or 'Installing it now' in helm_deploy_result.stdout"
+  block:
+    - name: Ensure work namespace for Helm Job
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: sovereign-cloud-jobs
+
+    - name: Create Helm values ConfigMap
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "helm-values-{{ cb_app_name }}"
+            namespace: sovereign-cloud-jobs
+          data:
+            values.yaml: "{{ lookup('file', '/tmp/' + cb_app_name + '-build-values.yaml') }}"
+
+    - name: Create kubeconfig Secret for Helm Job
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "helm-kubeconfig-{{ cb_app_name }}"
+            namespace: sovereign-cloud-jobs
+          type: Opaque
+          stringData:
+            kubeconfig: "{{ lookup('file', '/tmp/' + cb_app_name + '-kubeconfig') }}"
+
+    - name: Run Helm upgrade Job
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "helm-{{ cb_app_name }}"
+            namespace: sovereign-cloud-jobs
+          spec:
+            ttlSecondsAfterFinished: 86400
+            backoffLimit: 1
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: helm
+                    image: alpine/helm:3.14.4
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        set -eux
+                        helm upgrade "{{ cb_app_name }}" \
+                          "oci://{{ oci_registry_host }}/hybrid-sovereign/mce-cluster-build" \
+                          --version "{{ mce_cluster_build_chart_version }}" \
+                          --install \
+                          --namespace "{{ cb_cluster_name }}" \
+                          --create-namespace \
+                          --values /values/values.yaml \
+                          --history-max 2 \
+                          --wait \
+                          --timeout 45m \
+                          --kubeconfig /kube/kubeconfig
+                    volumeMounts:
+                      - name: values
+                        mountPath: /values
+                      - name: kube
+                        mountPath: /kube
+                        readOnly: true
+                volumes:
+                  - name: values
+                    configMap:
+                      name: "helm-values-{{ cb_app_name }}"
+                  - name: kube
+                    secret:
+                      secretName: "helm-kubeconfig-{{ cb_app_name }}"
+
+    - name: Wait for Helm Job to complete
+      kubernetes.core.k8s_info:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        api_version: batch/v1
+        kind: Job
+        name: "helm-{{ cb_app_name }}"
+        namespace: sovereign-cloud-jobs
+      register: helm_job
+      until: >-
+        (helm_job.resources | length > 0) and (
+          (helm_job.resources[0].status.succeeded | default(0) | int) > 0 or
+          (helm_job.resources[0].status.failed | default(0) | int) > 0
+        )
+      retries: 90
+      delay: 30
+
+    - name: Fail if Helm Job failed
+      ansible.builtin.fail:
+        msg: Helm Job helm-{{ cb_app_name }} failed
+      when: (helm_job.resources[0].status.failed | default(0) | int) > 0
 
 - name: Clean up temp values file
   ansible.builtin.file:
