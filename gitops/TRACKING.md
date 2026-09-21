@@ -442,3 +442,8 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Next action | Push wipe fix; `./scripts/ztp-wipe.sh`; monitor |
 | Status | in-progress |
 
+
+### 2026-09-21T04:20:00Z — ZTP-008 wipe auth preservation
+
+Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes builder SA in sovereign-cloud.
+
