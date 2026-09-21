@@ -1,7 +1,10 @@
+# Name MUST be "default" — MultiClusterHub creates OperatorGroup/default in
+# multicluster-engine. A second OG (e.g. named multicluster-engine) causes
+# CSV TooManyOperatorGroups and blocks zero-touch ZTP (ZTP-017).
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
-  name: multicluster-engine
+  name: default
   namespace: multicluster-engine
   labels:
     hybridsovereign.redhat/gitops-owned: "true"

@@ -509,8 +509,10 @@ spec:
       allowEmpty: false
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
       - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
     retry:
       limit: 15
       backoff:
@@ -539,6 +541,7 @@ spec:
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-cloud
+  # CRDs are owned exclusively by hs-crds (wave 38). Do not list them here.
   syncPolicy:
     automated:
       prune: true

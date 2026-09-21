@@ -22,6 +22,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-014 | 2026-09-21 (l9mxc) | MCE `Error` then Progressing; ManagedClusterAddOn CRD Missing then restored | ClusterManager stuck Terminating so CRDs never reinstall | JSON-remove ClusterManager/Klusterlet finalizers; wait until gone | 3 (**CRD restored; MCE Progressing**) |
 | ZTP-015 | 2026-09-21 (l9mxc) | API `dial tcp ...:6443: i/o timeout` during ACM install soak | Control plane unreachable from agent host | Wait for API restore; resume soak | 1 (**API restored**) |
 | ZTP-016 | 2026-09-21 (l9mxc) | `hs-security` Degraded; CSS/PushSecret fail; Vault sealed after outage | `vault-init` Job Completed once; node restart resealed Vault | CronJob `vault-unseal` every 2m; vault-init Sync hook BeforeHookCreation; bump hs-vault 0.1.9 | 1 (fixing) |
+| ZTP-017 | 2026-09-21 (l9mxc) | `hs-mce` CSV `TooManyOperatorGroups`; MCE Progressing forever | `hs-mce` OG named `multicluster-engine` + MulticlusterHub creates OG `default` in same NS | Name MCE OG `default` so MCH adopts; bump hs-mce 0.1.1 | 1 (fixing) |
+| ZTP-018 | 2026-09-21 (l9mxc) | `hs-crds`/`hs-operators` SharedResourceWarning; samples stuck on missing Persona | CRD YAML still had `tracking-id`/`instance` = `hs-operators` after path split | Retarget CRD annotations to `hs-crds`; SSA on hs-crds; operators path has no CRDs | 1 (fixing) |
 
 ## Recurrence halt rule
 
