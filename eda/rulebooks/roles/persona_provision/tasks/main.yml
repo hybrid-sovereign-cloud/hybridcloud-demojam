@@ -29,8 +29,9 @@
       ansible.builtin.set_fact:
         persona_generation: "{{ persona_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
         persona_spec: "{{ persona_cr_lookup.resources[0].spec | default({}) }}"
-        persona_rbac_ref: "{{ persona_cr_lookup.resources[0].spec.rbac | default(persona_spec.rbac | default('')) }}"
-        persona_type: "{{ persona_cr_lookup.resources[0].spec.type | default(persona_spec.type | default('')) }}"
+        # Bracket notation — avoid Jinja eager-eval of persona_spec.rbac when note was {}
+        persona_rbac_ref: "{{ persona_cr_lookup.resources[0].spec['rbac'] | default('') }}"
+        persona_type: "{{ persona_cr_lookup.resources[0].spec['type'] | default('') }}"
 
     - name: Read referenced Rbac CR from services cluster
       kubernetes.core.k8s_info:

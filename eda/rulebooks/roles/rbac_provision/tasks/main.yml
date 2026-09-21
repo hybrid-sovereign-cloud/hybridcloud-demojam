@@ -80,6 +80,11 @@
         rbac_cfg_status: "{{ rbac_cfg_lookup.resources[0].status }}"
         rbac_cfg_spec: "{{ rbac_cfg_lookup.resources[0].spec }}"
 
+    - name: Prefer in-cluster Keycloak Service URL for AAP EE DNS
+      ansible.builtin.set_fact:
+        svc_keycloak_url: "https://keycloak.keycloak.svc:8443"
+        svc_keycloak_url_http_headers: {}
+
     - name: Discover Keycloak external URL from services cluster Route
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
@@ -91,22 +96,7 @@
         label_selectors:
           - "app=keycloak"
       register: kc_route
-
-    - name: Set Keycloak URL from Route
-      ansible.builtin.set_fact:
-        svc_keycloak_url: "https://{{ kc_route.resources[0].spec.host }}"
-      when: kc_route.resources | length > 0
-
-    - name: Fallback to configured Keycloak URL
-      ansible.builtin.set_fact:
-        svc_keycloak_url: >-
-          {{ lookup('env', 'KEYCLOAK_EXTERNAL_URL')
-             | default(plugin_rbac_keycloak_url_default, true) }}
-      when: kc_route.resources | length == 0
-
-    - name: Use Keycloak Route FQDN directly (no IP pin)
-      ansible.builtin.set_fact:
-        svc_keycloak_url_http_headers: {}
+      ignore_errors: true
 
     - name: Load Keycloak admin credentials
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/obtain_keycloak_admin_credentials.yml"

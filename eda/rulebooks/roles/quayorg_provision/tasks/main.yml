@@ -44,9 +44,7 @@
     - name: Load quayorg_spec from live CR
       ansible.builtin.set_fact:
         quayorg_spec: "{{ _quayorg_cr.resources[0].spec | default({}) }}"
-
-    - name: Set generation fact
-      ansible.builtin.set_fact:
+        quayorg_quay_config_name: "{{ _quayorg_cr.resources[0].spec['quayConfig'] | default('') }}"
         quayorg_generation: "{{ _quayorg_cr.resources[0].metadata.generation | default(0) | int }}"
 
     - name: Read QuayConfig
@@ -56,18 +54,18 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: QuayConfig
-        name: "{{ quayorg_spec.quayConfig }}"
+        name: "{{ quayorg_quay_config_name }}"
         namespace: "{{ plugin_quay_config_namespace }}"
       register: _quay_config
 
     - name: Fail if QuayConfig not found
       ansible.builtin.fail:
-        msg: "QuayConfig {{ quayorg_spec.quayConfig }} not found in {{ plugin_quay_config_namespace }}"
+        msg: "QuayConfig {{ quayorg_quay_config_name }} not found in {{ plugin_quay_config_namespace }}"
       when: _quay_config.resources | length == 0
 
     - name: Fail if QuayConfig not ready
       ansible.builtin.fail:
-        msg: "QuayConfig {{ quayorg_spec.quayConfig }} is not ready"
+        msg: "QuayConfig {{ quayorg_quay_config_name }} is not ready"
       when: not (_quay_config.resources[0].status.ready | default(false))
 
     - name: Read entity Namespace

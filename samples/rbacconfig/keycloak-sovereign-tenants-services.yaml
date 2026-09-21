@@ -1,5 +1,6 @@
-# Sample RbacConfig — keycloak-sovereign-tenants-services
-# Source: plugin_rbac/config/samples/rbacconfig-keycloak.yaml
+# Sample RbacConfig — points at the OpenShift lab SSO Keycloak (realm `sso`).
+# The CR name is historical; the Keycloak realm used by operators/playbooks is `sso`
+# (OpenShift-provided, not created by HybridSovereign).
 # Apply manually to services cluster (NOT via ArgoCD):
 #   oc apply -f samples/rbacconfig/keycloak-sovereign-tenants-services.yaml --context=services-admin
 ---

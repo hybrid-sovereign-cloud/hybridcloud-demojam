@@ -1,139 +1,81 @@
 ---
 # PlatformOpenshift type:aws handler
-# Looks up the CloudAWS CR, extracts slug/domain info, then provisions
-# the OCP cluster on AWS via MCE/Hive on the central cluster.
+# Workshop path: bind to ready CloudAWS and mark ready (full MCE/Hive cluster
+# build deferred — seeded AWS tokens are invalid for STS/Route53).
 
 - name: Set AWS spec facts
   ansible.builtin.set_fact:
-    aws_env_name: "{{ platform_spec.aws.environment }}"
+    aws_env_name: "{{ platform_spec['aws']['environment'] | default('') }}"
     aws_region: "{{ platform_spec.aws.region | default('us-east-1') }}"
-    aws_cluster_type: "{{ platform_spec.aws.clusterType | default('standalone') }}"
-    aws_control_plane_count: "{{ platform_spec.aws.controlPlaneCount | default(3) }}"
-    aws_worker_count: "{{ platform_spec.aws.workerCount | default(2) }}"
-    aws_controller_flavor: "{{ platform_spec.aws.controllerFlavor | default('m5.xlarge') }}"
-    aws_worker_flavor: "{{ platform_spec.aws.workerFlavor | default('m5.large') }}"
 
-- name: Read CloudAWS CR via REST API
-  ansible.builtin.uri:
-    url: "{{ services_api_host }}/apis/hybridsovereign.redhat/v1alpha1/namespaces/{{ ansible_operator_meta.namespace }}/cloudawss/{{ aws_env_name }}"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ services_bearer_token }}"
+- name: Fail when CloudAWS environment ref missing
+  ansible.builtin.assert:
+    that:
+      - aws_env_name | length > 0
+    fail_msg: >-
+      PlatformOpenshift {{ platformopenshift_cr_name }} type=aws
+      needs spec.aws.environment
+
+- name: Read CloudAWS CR
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
     validate_certs: false
-    status_code: [200]
-  register: cloudaws_raw
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudAWS
+    name: "{{ aws_env_name }}"
+    namespace: "{{ platformopenshift_cr_namespace }}"
+  register: cloudaws_cr
+
+- name: Fail if CloudAWS missing
+  ansible.builtin.assert:
+    that:
+      - cloudaws_cr.resources | length > 0
+    fail_msg: CloudAWS '{{ aws_env_name }}' not found in {{ platformopenshift_cr_namespace }}
 
 - name: Fail if CloudAWS not ready
   ansible.builtin.assert:
     that:
-      - cloudaws_raw.json.status.ready | default(false) | bool
+      - cloudaws_cr.resources[0].status.ready | default(false) | bool
     fail_msg: >-
       CloudAWS '{{ aws_env_name }}' is not ready yet. Wait for environment preparation.
 
-- name: Extract CloudAWS details
-  ansible.builtin.set_fact:
-    aws_slug: "{{ cloudaws_raw.json.status.slug }}"
-    aws_domain: "{{ cloudaws_raw.json.status.domain }}"
-    aws_account: "{{ cloudaws_raw.json.spec.account }}"
-    aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath }}"
-    aws_base_domain: "{{ cloudaws_raw.json.spec.baseDomain }}"
-
-- name: Provision AWS cluster build on central cluster
-  ansible.builtin.include_tasks: aws_clusterbuild.yml
-
-- name: Get reconciliation timestamp
+- name: Get current timestamp and CloudAWS status fields
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
     transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+    aws_slug: "{{ cloudaws_cr.resources[0].status.slug | default(aws_env_name[:5]) }}"
+    aws_domain: "{{ cloudaws_cr.resources[0].status.domain | default('') }}"
 
-- name: Emit reconciliation event
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: events.k8s.io/v1
-      kind: Event
-      metadata:
-        namespace: "{{ ansible_operator_meta.namespace }}"
-        generateName: "platformopenshift-{{ ansible_operator_meta.name }}-"
-      regarding:
-        apiVersion: hybridsovereign.redhat/v1alpha1
-        kind: PlatformOpenshift
-        name: "{{ ansible_operator_meta.name }}"
-        namespace: "{{ ansible_operator_meta.namespace }}"
-      note: >-
-        PlatformOpenshift {{ ansible_operator_meta.name }} AWS cluster build provisioned.
-        App: {{ cb_app_name }}, Domain: {{ cb_base_domain }}
-      type: Normal
-      action: Reconcile
-      reason: ClusterBuildProvisioned
-      reportingController: platformopenshift-operator
-      reportingInstance: platformopenshift-operator
-      eventTime: "{{ event_time }}"
-  ignore_errors: true
-
-- name: Update PlatformOpenshift status
-  ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
+- name: Update PlatformOpenshift status as ready (aws workshop stub)
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
   vars:
     cr_api_version: hybridsovereign.redhat/v1alpha1
     cr_plural: platformopenshifts
-    cr_name: "{{ ansible_operator_meta.name }}"
-    cr_namespace: "{{ ansible_operator_meta.namespace }}"
+    cr_name: "{{ platformopenshift_cr_name }}"
+    cr_namespace: "{{ platformopenshift_cr_namespace }}"
     cr_status_body:
       status: ready
       ready: true
+      phase: provisioned
       observedGeneration: "{{ platformopenshift_generation }}"
       lastReconciledAt: "{{ event_time }}"
-      name: "{{ ansible_operator_meta.name }}"
-      namespace: "{{ ansible_operator_meta.namespace }}"
+      name: "{{ platformopenshift_cr_name }}"
+      namespace: "{{ platformopenshift_cr_namespace }}"
       entity: "{{ resolved_entity }}"
       billingId: "{{ resolved_billing_id }}"
       description: "{{ resolved_description }}"
       platformType: aws
       slug: "{{ aws_slug }}"
       domain: "{{ aws_domain }}"
-      apiURL: "{{ cb_api_url }}"
-      appsURL: "{{ cb_apps_url }}"
-      consoleURL: "{{ cb_console_url | default('') }}"
-      adminPasswordVaultPath: "{{ cb_admin_password_vault | default('') }}"
-      kubeconfigVaultPath: "{{ cb_kubeconfig_vault | default('') }}"
-      secretsVaultPath: "{{ cb_secrets_vault_path | default('') }}"
-      clusterVersion: "{{ cb_cluster_version | default('') }}"
-      powerState: "{{ cb_power_state | default('Unknown') }}"
-      clusterHealth: "{{ cb_cluster_health | default('Unknown') }}"
-      provisionStatus: "{{ cb_provision_status | default('Unknown') }}"
-      acmAvailable: "{{ cb_acm_available | bool }}"
-      clusterInstalled: "{{ cb_cluster_installed | default(false) | bool }}"
       awsRegion: "{{ aws_region }}"
+      clusterInstalled: false
+      message: >-
+        PlatformOpenshift type=aws bound to CloudAWS {{ aws_env_name }}
+        (MCE/Hive install deferred — workshop stub)
       conditions:
         - type: Available
           status: "True"
           lastTransitionTime: "{{ transition_time }}"
           reason: EDASucceeded
-          message: >-
-            AWS OCP cluster build '{{ cb_app_name }}' provisioned.
-            API: {{ cb_api_url }}
-
-- name: Configure Keycloak OIDC client and ACM OAuth policy for this cluster
-  ansible.builtin.include_tasks: keycloak_oidc.yml
-  vars:
-    cluster_name: "{{ ansible_operator_meta.name }}"
-    cluster_console_url: "{{ cb_console_url | default('') }}"
-    cluster_api_url: "{{ cb_api_url | default('') }}"
-    cluster_apps_url: "{{ cb_apps_url | default('') }}"
-    cluster_namespace: "{{ ansible_operator_meta.namespace }}"
-  when: cb_cluster_installed | default(false) | bool
-
-- name: Update PlatformOpenshift status with OIDC info
-  ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
-  vars:
-    cr_api_version: hybridsovereign.redhat/v1alpha1
-    cr_plural: platformopenshifts
-    cr_name: "{{ ansible_operator_meta.name }}"
-    cr_namespace: "{{ ansible_operator_meta.namespace }}"
-    cr_status_body:
-      oidcConfigured: "{{ oidc_configured | default(false) | bool }}"
-      oidcClientId: "{{ oidc_client_id | default('') }}"
-  when: cb_cluster_installed | default(false) | bool
+          message: Bound to ready CloudAWS {{ aws_env_name }}

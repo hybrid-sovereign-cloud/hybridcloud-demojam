@@ -50,6 +50,7 @@
     - name: Load quayconfig_spec from live CR
       ansible.builtin.set_fact:
         quayconfig_spec: "{{ _quayconfig_cr.resources[0].spec | default({}) }}"
+        quayconfig_rbac_config_name: "{{ _quayconfig_cr.resources[0].spec['rbacConfig'] | default('') }}"
         quayconfig_generation: "{{ _quayconfig_cr.resources[0].metadata.generation | default(0) | int }}"
 
     - name: Set generation fact
@@ -63,13 +64,13 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: RbacConfig
-        name: "{{ quayconfig_spec.rbacConfig }}"
+        name: "{{ quayconfig_rbac_config_name }}"
         namespace: "{{ quayconfig_cr_namespace }}"
       register: _rbac_config
 
     - name: Fail if RbacConfig not found
       ansible.builtin.fail:
-        msg: "RbacConfig {{ quayconfig_spec.rbacConfig }} not found"
+        msg: "RbacConfig {{ quayconfig_rbac_config_name }} not found"
       when: _rbac_config.resources | length == 0
 
     - name: Set OIDC client ID

@@ -48,8 +48,10 @@
         msg: AAPOrg {{ aaporg_cr_name }} not found in {{ aaporg_cr_namespace }}
       when: _aaporg_cr.resources | length == 0
 
-    - name: Set generation fact
+    - name: Load aaporg_spec from live CR
       ansible.builtin.set_fact:
+        aaporg_spec: "{{ _aaporg_cr.resources[0].spec | default({}) }}"
+        aaporg_aap_config_name: "{{ _aaporg_cr.resources[0].spec['aapConfig'] | default('') }}"
         aaporg_generation: "{{ _aaporg_cr.resources[0].metadata.generation | default(0) | int }}"
 
     - name: Read AAPConfig CR
@@ -59,18 +61,18 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: AAPConfig
-        name: "{{ aaporg_spec.aapConfig }}"
+        name: "{{ aaporg_aap_config_name }}"
         namespace: "{{ plugin_aap_config_namespace }}"
       register: _aap_config
 
     - name: Fail if AAPConfig not found
       ansible.builtin.fail:
-        msg: "AAPConfig {{ aaporg_spec.aapConfig }} not found in {{ plugin_aap_config_namespace }}"
+        msg: "AAPConfig {{ aaporg_aap_config_name }} not found in {{ plugin_aap_config_namespace }}"
       when: _aap_config.resources | length == 0
 
     - name: Fail if AAPConfig not ready
       ansible.builtin.fail:
-        msg: "AAPConfig {{ aaporg_spec.aapConfig }} is not ready"
+        msg: "AAPConfig {{ aaporg_aap_config_name }} is not ready"
       when: not (_aap_config.resources[0].status.ready | default(false))
 
     - name: Discover AAP gateway Route from services cluster

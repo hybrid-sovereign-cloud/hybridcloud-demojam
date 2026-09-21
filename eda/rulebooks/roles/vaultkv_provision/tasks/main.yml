@@ -23,6 +23,7 @@
     - name: Load vaultkv_spec from live CR
       ansible.builtin.set_fact:
         vaultkv_spec: "{{ vaultkv_cr.resources[0].spec | default({}) }}"
+        vaultkv_vault_name: "{{ vaultkv_cr.resources[0].spec['vault'] | default('') }}"
 
     - name: Read referenced Vault CR
       kubernetes.core.k8s_info:
@@ -31,7 +32,7 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: Vault
-        name: "{{ vaultkv_spec.vault }}"
+        name: "{{ vaultkv_vault_name }}"
         namespace: "{{ vaultkv_cr_namespace }}"
       register: parent_vault
       retries: 12

@@ -56,9 +56,7 @@
     - name: Load aapconfig_spec from live CR
       ansible.builtin.set_fact:
         aapconfig_spec: "{{ _cr.resources[0].spec | default({}) }}"
-
-    - name: Set generation fact
-      ansible.builtin.set_fact:
+        aapconfig_rbac_config_name: "{{ _cr.resources[0].spec['rbacConfig'] | default('') }}"
         aapconfig_generation: "{{ _cr.resources[0].metadata.generation | default(0) | int }}"
 
     - name: Read RbacConfig for Keycloak settings
@@ -68,13 +66,13 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: RbacConfig
-        name: "{{ aapconfig_spec.rbacConfig }}"
+        name: "{{ aapconfig_rbac_config_name }}"
         namespace: "{{ aapconfig_cr_namespace }}"
       register: _rbac_config
 
     - name: Fail if RbacConfig not found
       ansible.builtin.fail:
-        msg: "RbacConfig {{ aapconfig_spec.rbacConfig }} not found"
+        msg: "RbacConfig {{ aapconfig_rbac_config_name }} not found"
       when: _rbac_config.resources | length == 0
 
     - name: Set Keycloak client ID for this AAPConfig
