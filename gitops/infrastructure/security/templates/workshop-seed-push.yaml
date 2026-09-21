@@ -1,0 +1,219 @@
+# Push Step 0 human-seeded Secrets (sovereign-secrets) into Vault KV.
+# Secret values are NEVER in Git — only PushSecret wiring.
+# Seeds survive wipe (see scripts/ztp-wipe.sh preserve list).
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-aws-credentials-example-admin
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: aws-credentials
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_ACCESS_KEY_ID
+        remoteRef:
+          remoteKey: aws/accounts/example-admin
+          property: AWS_ACCESS_KEY_ID
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_SECRET_ACCESS_KEY
+        remoteRef:
+          remoteKey: aws/accounts/example-admin
+          property: AWS_SECRET_ACCESS_KEY
+    - conversionStrategy: None
+      match:
+        secretKey: ACCOUNT_ID
+        remoteRef:
+          remoteKey: aws/accounts/example-admin
+          property: ACCOUNT_ID
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-aws-credentials-acme-dev
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: aws-credentials
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_ACCESS_KEY_ID
+        remoteRef:
+          remoteKey: aws/accounts/acme-dev
+          property: AWS_ACCESS_KEY_ID
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_SECRET_ACCESS_KEY
+        remoteRef:
+          remoteKey: aws/accounts/acme-dev
+          property: AWS_SECRET_ACCESS_KEY
+    - conversionStrategy: None
+      match:
+        secretKey: ACCOUNT_ID
+        remoteRef:
+          remoteKey: aws/accounts/acme-dev
+          property: ACCOUNT_ID
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-aws-route53
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: aws-credentials
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_ACCESS_KEY_ID
+        remoteRef:
+          remoteKey: aws/accounts/route53
+          property: AWS_ACCESS_KEY_ID
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_SECRET_ACCESS_KEY
+        remoteRef:
+          remoteKey: aws/accounts/route53
+          property: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-oso-route53
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: aws-credentials
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_ACCESS_KEY_ID
+        remoteRef:
+          remoteKey: oso/accounts/route53-openstack
+          property: AWS_ACCESS_KEY_ID
+    - conversionStrategy: None
+      match:
+        secretKey: AWS_SECRET_ACCESS_KEY
+        remoteRef:
+          remoteKey: oso/accounts/route53-openstack
+          property: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-oso-clouds-example-admin
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: oso-clouds
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: clouds.yaml
+        remoteRef:
+          remoteKey: oso/accounts/example-admin
+          property: clouds.yaml
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: push-openshift-kubeadmin-seed
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "45"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: openshift-kubeadmin-seed
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: api_host
+        remoteRef:
+          remoteKey: openshift-services-kubeadmin
+          property: api_host
+    - conversionStrategy: None
+      match:
+        secretKey: username
+        remoteRef:
+          remoteKey: openshift-services-kubeadmin
+          property: username
+    - conversionStrategy: None
+      match:
+        secretKey: password
+        remoteRef:
+          remoteKey: openshift-services-kubeadmin
+          property: password

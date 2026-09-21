@@ -13,4 +13,17 @@ data:
     All generated credentials MUST be written as Secrets in namespace sovereign-secrets.
     PushSecret CRs (External Secrets Operator) backup them to Vault KV paths hybridsovereign/*.
     Never commit secret values to git.
-  status: awaiting-eso-and-vault-init
+
+    Step 0 (manual, pre-Argo / pre-wipe only):
+      Source uncommented exports from ~/.bashrc (ignore # commented lines).
+      Create Secrets in sovereign-secrets (no gitops-owned label):
+        - aws-credentials: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, ACCOUNT_ID
+          (bashrc may use AWS_ACCESSKEY / AWS_SECRET_KEY / AWS_ACCOUNT aliases)
+        - oso-clouds: clouds.yaml (from OSO_CLOUDS file path)
+        - openshift-kubeadmin-seed: api_host, username, password
+      PushSecrets (this chart) map those Secrets to Vault paths used by samples:
+        aws/accounts/example-admin, aws/accounts/acme-dev, aws/accounts/route53,
+        oso/accounts/example-admin, oso/accounts/route53-openstack,
+        openshift-services-kubeadmin.
+      scripts/ztp-wipe.sh PRESERVES these three Secrets across full wipe.
+  status: workshop-seed-push-enabled

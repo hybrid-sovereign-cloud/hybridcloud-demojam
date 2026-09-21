@@ -177,7 +177,11 @@ for ns in "${CLEAN_NS[@]}"; do
     esac
     labeled=$(oc -n "$ns" get "$sec" -o jsonpath='{.metadata.labels.hybridsovereign\.redhat/gitops-owned}' 2>/dev/null || true)
     case "$base" in
-      aap-admin|aap-operator-credentials|vault-root|vault-init|rhbk-admin|rhbk-services-admin|quay-admin-credentials|aap-admin-credentials|openshift-kubeadmin-seed|hs-*)
+      # Step 0 human seeds (bashrc → sovereign-secrets) — survive full wipe
+      openshift-kubeadmin-seed|aws-credentials|oso-clouds)
+        continue
+        ;;
+      aap-admin|aap-operator-credentials|vault-root|vault-init|rhbk-admin|rhbk-services-admin|quay-admin-credentials|aap-admin-credentials|hs-*)
         run oc -n "$ns" delete "$sec" --wait=false 2>/dev/null || true
         ;;
       *)

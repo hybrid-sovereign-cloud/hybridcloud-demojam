@@ -80,13 +80,49 @@ See `gitops/issues.md` for the live wipe-cycle log (ZTP-001…016).
 `gitops/custom-operators/image-wait.yaml` Sync hook blocks Deployments until
 `imagestream/hybridsovereign-ansible-operator:latest` exists.
 
+## Step 0 — Manual secrets (only human / pre-GitOps step)
+
+**Never** commit secret values. **Never** automate `~/.bashrc` into Git.
+When reading bashrc, **ignore all `#` commented lines**.
+
+Required uncommented exports (names; workshop aliases accepted):
+
+| Purpose | Preferred vars | Accepted aliases |
+|---------|----------------|------------------|
+| AWS account | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ACCOUNT_ID` | `AWS_ACCESSKEY`, `AWS_SECRET_KEY`, `AWS_ACCOUNT` |
+| OpenStack | `OSO_CLOUDS` (path to `clouds.yaml` file) | — |
+| Cluster admin seed | `OCP_SERVICES_SERVER`, `OCP_SERVICES_USERNAME`, `OCP_SERVICES_PASSWORD` | — |
+
+Upload into `sovereign-secrets` (do **not** label `gitops-owned`; wipe preserves these names):
+
+```bash
+# aws-credentials → Vault aws/accounts/{example-admin,acme-dev,route53} + oso route53
+oc -n sovereign-secrets create secret generic aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=... \
+  --from-literal=AWS_SECRET_ACCESS_KEY=... \
+  --from-literal=ACCOUNT_ID=...
+
+# oso-clouds → Vault oso/accounts/example-admin
+oc -n sovereign-secrets create secret generic oso-clouds \
+  --from-file=clouds.yaml="$OSO_CLOUDS"
+
+# openshift-kubeadmin-seed → Vault openshift-services-kubeadmin (+ plugin-cred-sync)
+oc -n sovereign-secrets create secret generic openshift-kubeadmin-seed \
+  --from-literal=api_host=api.<cluster-host>:6443 \
+  --from-literal=username=... \
+  --from-literal=password=...
+```
+
+After Vault + ESO are up, `hs-security` PushSecrets sync these into Vault. No mid-rollout password patches.
+
 ## New-cluster checklist
 
-1. Install OpenShift GitOps + instance `openshift-gitops`.
-2. Ensure baseline adoptees (AAP, RHBK, ODF) or disable related `provision.*`.
-3. Root Application → `path: gitops`, `targetRevision: main`, auto-sync.
-4. Prefer `./scripts/ztp-app.sh validate-sequence` on the first cluster.
-5. After all apps Healthy: optional `./scripts/ztp-wipe.sh` soak to prove cold ZTP.
+1. **Step 0** secrets in `sovereign-secrets` (above).
+2. Install OpenShift GitOps + instance `openshift-gitops`.
+3. Ensure baseline adoptees (AAP, RHBK, ODF) or disable related `provision.*`.
+4. Root Application → `path: gitops`, `targetRevision: main`, auto-sync.
+5. Prefer `./scripts/ztp-app.sh validate-sequence` on the first cluster.
+6. Fresh cold start: `./scripts/ztp-wipe.sh` (preserves Step 0 secrets; single field-content trigger).
 
 ## Recovery
 
