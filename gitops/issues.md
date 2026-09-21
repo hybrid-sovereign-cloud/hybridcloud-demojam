@@ -11,7 +11,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-003 | 2026-09-21 (fbwcv) | `field-content` SharedResourceWarning / OutOfSync on `Namespace/external-secrets` | Parent `values.namespaces` + `hs-eso` both owned the NS | NS only in parent; removed from ESO chart | 1 (fixing) |
 | ZTP-004 | 2026-09-21 (fbwcv) | **Cluster break:** OAuth/:443 down; mass OpenShift Project deletion | Wipe used bare plural `projects` from CRD → resolved to `project.project.openshift.io` and deleted platform namespaces | `scripts/ztp-wipe.sh`: **FQ only** `<plural>.hybridsovereign.redhat`; refuse bare names / Project API; protect baseline NS | 1 (halt — rebuild cluster) |
 | ZTP-005 | 2026-09-21 (l9mxc) | `hs-security` Degraded; PostSync `hs-plugin-cred-sync` CrashLoop | Job used PyYAML + curl; `openshift/cli` has neither reliably | Rewrite seed to python3 stdlib (`urllib`/`json`/`re`) only; also seed `aap-admin` for PushSecret | 1 (fixing) |
-| ZTP-006 | 2026-09-21 (l9mxc) | `hs-aap-config` Sync hook `hs-aap-cred-sync` Failed (backoff); no `aap-operator-credentials` | ClusterRole lacked `ingresses.config.openshift.io` + `routes` | Expand ClusterRole | 1 (fixing) |
+| ZTP-006 | 2026-09-21 (l9mxc) | `hs-aap-config` Sync hook `hs-aap-cred-sync` Failed (backoff); no `aap-operator-credentials` | ClusterRole lacked `ingresses.config.openshift.io` + `routes` | Expand ClusterRole | 1 (**verified** after wipe) |
+| ZTP-007 | 2026-09-21 (l9mxc) | `hs-quay` Degraded: Subscription `ResolutionFailed` / CatalogSourcesUnhealthy | Orphan CSV `quay-operator.v3.17.4` in `quay` ns “not referenced by a subscription” after wipe | Wipe deletes quay Subscription/InstallPlan/CSV/QuayRegistry/OBC before re-trigger | 1 (fixing) |
 
 ## Recurrence halt rule
 

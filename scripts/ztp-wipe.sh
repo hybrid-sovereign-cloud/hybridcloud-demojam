@@ -189,6 +189,14 @@ while IFS= read -r r; do
 done < <(oc get consoleplugin -o name 2>/dev/null | grep sovereign || true)
 run oc -n open-cluster-management delete multiclusterhub --all --wait=false 2>/dev/null || true
 
+echo "== F2. Quay/OLM leftovers (orphan CSVs break Subscription resolution) =="
+# ZTP-007: CSV quay-operator.* left Pending/"not referenced by a subscription" → ResolutionFailed
+run oc -n quay delete subscription --all --wait=false 2>/dev/null || true
+run oc -n quay delete installplan --all --wait=false 2>/dev/null || true
+run oc -n quay delete csv --all --wait=false 2>/dev/null || true
+run oc -n quay delete quayregistry --all --wait=false 2>/dev/null || true
+run oc -n quay delete objectbucketclaim --all --wait=false 2>/dev/null || true
+
 echo "== G. Delete hybridsovereign CRDs (FQ CRD names only) =="
 while IFS= read -r crd; do
   [ -n "$crd" ] || continue

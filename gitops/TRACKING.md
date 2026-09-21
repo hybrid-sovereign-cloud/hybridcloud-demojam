@@ -433,3 +433,12 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Note | ZTP-005/006 verified (aap-cred-sync + PushSecrets green). No further wipe for ZTP-001 until this lands and is retested |
 | Status | halted |
 
+
+### 2026-09-21T03:50:00Z — ZTP-007 quay OLM orphan CSV
+
+| Field | Value |
+|-------|-------|
+| Change summary | Wipe clears quay Subscription/IP/CSV; ZTP-001 tracking-id embed already unblocked operators via selfHeal |
+| Next action | Push wipe fix; `./scripts/ztp-wipe.sh`; monitor |
+| Status | in-progress |
+
