@@ -264,15 +264,45 @@ while IFS= read -r r; do
   [ -n "$r" ] || continue
   run oc delete "$r" --wait=false 2>/dev/null || true
 done < <(oc get consoleplugin -o name 2>/dev/null | grep sovereign || true)
-run oc -n open-cluster-management delete multiclusterhub --all --wait=false 2>/dev/null || true
 
-echo "== F2. Quay/OLM leftovers (orphan CSVs break Subscription resolution) =="
-# ZTP-007: CSV quay-operator.* left Pending/"not referenced by a subscription" → ResolutionFailed
-run oc -n quay delete subscription --all --wait=false 2>/dev/null || true
-run oc -n quay delete installplan --all --wait=false 2>/dev/null || true
-run oc -n quay delete csv --all --wait=false 2>/dev/null || true
-run oc -n quay delete quayregistry --all --wait=false 2>/dev/null || true
-run oc -n quay delete objectbucketclaim --all --wait=false 2>/dev/null || true
+echo "== F2. Quay/OLM leftovers (orphan CSVs and stale InstallPlans) =="
+# ZTP-007: orphan CSV → ResolutionFailed
+# ZTP-012: deleting InstallPlans/CSVs without the Subscription leaves
+# status.installPlanRef pointing at a missing plan (UpgradePending forever)
+# and CSV phase stuck Pending/InstallCheckFailed. Delete the Subscription too,
+# then wait until OLM has dropped the CSV/IP objects.
+for ns in quay multicluster-engine open-cluster-management; do
+  oc get ns "$ns" >/dev/null 2>&1 || continue
+  run oc -n "$ns" delete subscription.operators.coreos.com --all --wait=false 2>/dev/null || true
+  run oc -n "$ns" delete installplan.operators.coreos.com --all --wait=false 2>/dev/null || true
+  run oc -n "$ns" delete clusterserviceversion.operators.coreos.com --all --wait=false 2>/dev/null || true
+  run oc -n "$ns" delete operatorgroup.operators.coreos.com --all --wait=false 2>/dev/null || true
+done
+run oc -n quay delete quayregistry.quay.redhat.com --all --wait=false 2>/dev/null || true
+run oc -n quay delete objectbucketclaim.objectbucket.io --all --wait=false 2>/dev/null || true
+run oc -n open-cluster-management delete multiclusterhub.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
+if [ "$DRY_RUN" != 1 ]; then
+  for i in $(seq 1 30); do
+    left=0
+    for ns in quay multicluster-engine open-cluster-management; do
+      n=$(oc get csv,installplan,sub -n "$ns" --no-headers 2>/dev/null | wc -l || true)
+      left=$((left + n))
+    done
+    echo "  olm leftovers=$left t=$i"
+    if [ "$left" = "0" ]; then
+      break
+    fi
+    if [ "$i" -eq 10 ] || [ "$i" -eq 20 ]; then
+      for ns in quay multicluster-engine open-cluster-management; do
+        for csv in $(oc get csv -n "$ns" -o name 2>/dev/null || true); do
+          oc -n "$ns" patch "$csv" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+          oc -n "$ns" delete "$csv" --wait=false 2>/dev/null || true
+        done
+      done
+    fi
+    sleep 5
+  done
+fi
 
 echo "== G. Delete hybridsovereign CRDs (FQ CRD names only) =="
 while IFS= read -r crd; do
