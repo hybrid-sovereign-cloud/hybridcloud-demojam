@@ -6,7 +6,9 @@ cluster:
   createGitopsManifestWorks: false
   createGitopsSyncSet: false
   type: ocp
-  baseDomain: "{{ cb_cluster_domain }}"
+  # Hive CD baseDomain must match install-config baseDomain (slug.parent),
+  # not the full cluster FQDN — Hive joins clusterName + baseDomain.
+  baseDomain: "{{ cb_install_base_domain }}"
   clusterImageSet: "{{ cb_image_set }}"
   controlPlaneCount: {{ cb_control_plane_count }}
   workerCount: {{ cb_worker_count }}

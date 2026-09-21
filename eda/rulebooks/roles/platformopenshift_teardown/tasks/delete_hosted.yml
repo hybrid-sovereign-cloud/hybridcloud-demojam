@@ -1,0 +1,80 @@
+---
+# Tear down Hypershift HostedCluster + NodePool (virt / hosted PlatformOpenshift).
+- name: Set HostedCluster teardown facts
+  ansible.builtin.set_fact:
+    hc_name: "{{ platformopenshift_cr_name }}"
+    hc_namespace: "clusters-{{ platformopenshift_cr_name }}"
+    hc_pull_secret_name: "pullsecret-cluster-{{ platformopenshift_cr_name }}"
+
+- name: Delete NodePool for HostedCluster
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    name: "{{ hc_name }}-workers"
+    namespace: "{{ hc_namespace }}"
+  ignore_errors: true
+
+- name: Delete HostedCluster
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+  ignore_errors: true
+
+- name: Wait for HostedCluster deletion
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+  register: hc_wait
+  until: hc_wait.resources | length == 0
+  retries: 90
+  delay: 20
+  ignore_errors: true
+
+- name: Delete HostedCluster pull secret
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Secret
+    name: "{{ hc_pull_secret_name }}"
+    namespace: "{{ hc_namespace }}"
+  ignore_errors: true
+
+- name: Delete HostedCluster namespace
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ hc_namespace }}"
+  ignore_errors: true
+
+- name: Delete guest VM namespace if still present
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ hc_namespace }}-{{ hc_name }}"
+  ignore_errors: true

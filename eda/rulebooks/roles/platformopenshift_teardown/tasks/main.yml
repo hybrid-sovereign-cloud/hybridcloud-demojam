@@ -37,6 +37,11 @@
 
     - name: Tear down Hive cluster build on central
       ansible.builtin.include_tasks: delete_clusterbuild.yml
+      when: platform_type | default('') not in ['virt', 'hosted']
+
+    - name: Tear down Hypershift HostedCluster (virt/hosted)
+      ansible.builtin.include_tasks: delete_hosted.yml
+      when: platform_type | default('') in ['virt', 'hosted']
 
     - name: Tear down ACM policies and ManagedCluster
       ansible.builtin.include_tasks: delete_acm.yml
