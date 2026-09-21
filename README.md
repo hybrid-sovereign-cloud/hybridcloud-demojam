@@ -6,29 +6,32 @@ Single-cluster Hybrid Sovereign platform delivered **only** via ArgoCD sync of t
 
 Every OpenShift cluster must be a **mirror replica**:
 
-1. **Baseline** (same on all clusters; never uninstall via this repo): AAP Controller, RHBK/Keycloak, ODF/NooBaa, OpenShift GitOps, CNV, cert-manager.
-2. Point ArgoCD at:
+1. **Day 0 (manual):** uncommented bashrc → Secrets in `sovereign-secrets` ([workshop Day 0](architecture/docs/workshop/00-day0-secrets.md)).
+2. **Baseline** (same on all clusters; never uninstall via this repo): AAP Controller, RHBK/Keycloak, ODF/NooBaa, OpenShift GitOps, CNV, cert-manager.
+3. Point ArgoCD at:
    - **repo:** `https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam`
    - **path:** `gitops`
    - **revision:** `main`
-3. Sync. The `gitops/` Helm chart creates namespaces, AppProject, and child Applications that install Quay, Vault, ESO, Gitea, ACM/MCE, operators, UI, samples, and AAP JobTemplates.
+4. Sync once (root app). After that: **Git only** — no mid-rollout Argo syncs, no workload `oc apply`.
 
-**Non-negotiable:** No workload `oc apply`. All installs come from the `gitops/` sync.
+**Non-negotiable:** Zero hardcoded cluster URLs/IPs in Git. Credentials only via Vault. Guardrails: [architecture/docs/workshop/01-ztp-guardrails.md](architecture/docs/workshop/01-ztp-guardrails.md).
 
 ## Architecture (current)
 
-- **Entity operator:** singleton in `sovereign-cloud` only; spawns per-kind tenant operators in each `entity-*` namespace.
-- **Operators → AAP:** each kind operator launches AAP JobTemplates; on fail or job not completed in 3h → cancel and relaunch. Status updates must not create infinite reconcile loops.
+- **Entity operator:** singleton in `sovereign-cloud`; per-kind operators (cluster-wide watch) for tenant/platform kinds.
+- **Operators → AAP:** each kind launches JobTemplates; fail or >3h → cancel+relaunch; status must not loop.
 - **No EDA / Kafka / AMQ / MTC / MTV** in the active path.
-- **Images:** OpenShift BuildConfigs → ImageStreams (no `quay.signal9.gg`).
-- **Quay:** provisioned on ODF S3 for `QuayConfig` / `QuayOrg`.
-- **Secrets:** `sovereign-secrets` + PushSecret → Vault.
-- **Parked samples (not applied):** CloudAWS, CloudOSO, PlatformOpenshift, OpenStackMigration.
+- **Images:** OpenShift BuildConfigs → ImageStreams (no external Quay hardcoding).
+- **Secrets:** `sovereign-secrets` + PushSecret → Vault (`hs-security`).
+- **Cloud samples (unparked):** CloudAWS, CloudOSO, CloudVirt + PlatformOpenshift `openstack|aws|virt|hosted`.
+- **Still parked:** OpenStackMigration.
 
 ## Tracking & docs
 
-- Live change log / resume sheet: [`gitops/TRACKING.md`](gitops/TRACKING.md)
-- Install notes: [`docs/gitops-install.md`](docs/gitops-install.md)
+- ZTP contract: [`gitops/ZTP.md`](gitops/ZTP.md)
+- Issues / recurrence halt: [`gitops/issues.md`](gitops/issues.md)
+- Workshop: [`architecture/docs/workshop/`](architecture/docs/workshop/)
+- EVPN design (OSO+Virt): [`architecture/docs/technical/58-hybridvpc-evpn-oso-virt.md`](architecture/docs/technical/58-hybridvpc-evpn-oso-virt.md)
 - Obsolete material: [`obsolete/`](obsolete/)
 
 ## Local development

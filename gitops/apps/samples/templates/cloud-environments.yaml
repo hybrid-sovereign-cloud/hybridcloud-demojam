@@ -1,6 +1,7 @@
 # Unparked CloudOSO + CloudAWS + CloudVirt sample CRs (GitOps).
 # Credentials via vaultPath only (Step 0 → sovereign-secrets → PushSecret → Vault).
 # baseDomain uses non-cluster placeholders (no apps./api. hardcoding).
+# Note: CloudOSO/CloudAWS CRDs do not declare toolRbac yet — omit until CRD extended.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudOSO
@@ -19,13 +20,6 @@ spec:
   projectDomain: example_domain
   externalNetwork: ext-net
   route53VaultPath: oso/accounts/route53-openstack
-  toolRbac:
-    projectAdminRbac:
-      - acme-platform-admins
-    projectMemberRbac:
-      - acme-infra-team
-    projectViewerRbac:
-      - acme-viewers
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudAWS
@@ -42,13 +36,6 @@ spec:
   account: "000000000000"
   vaultPath: aws/accounts/example-admin
   baseDomain: sandbox.example.com
-  toolRbac:
-    accountAdminRbac:
-      - acme-platform-admins
-    accountPoweruserRbac:
-      - acme-infra-team
-    accountViewerRbac:
-      - acme-viewers
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
