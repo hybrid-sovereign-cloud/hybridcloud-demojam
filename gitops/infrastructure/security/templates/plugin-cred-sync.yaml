@@ -1,5 +1,6 @@
 # Sync plugin admin credentials + seed Vault KV (hybridsovereign) after wipe/re-init.
 # No secret values in Git — sources are in-cluster Secrets / field-content helm values / SA token.
+# Image: openshift/cli — python3 stdlib only (no PyYAML, no curl dependency).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -34,19 +35,16 @@ spec:
               set -euo pipefail
               oc get ns sovereign-cloud-plugins >/dev/null
 
-              # --- Discover cluster domain for routes ---
               APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)
               if [ -z "$APPS_DOMAIN" ]; then
                 echo "FATAL: cannot discover apps domain from ingresses.config.openshift.io/cluster" >&2
                 exit 1
               fi
               KC_URL="https://sso.${APPS_DOMAIN}"
-              # Prefer live Keycloak route host when present
               if oc -n keycloak get route keycloak >/dev/null 2>&1; then
                 KC_URL="https://$(oc -n keycloak get route keycloak -o jsonpath='{.spec.host}')"
               fi
 
-              # RHBK / Keycloak
               KC_USER=$(oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d)
               KC_PASS=$(oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d)
               oc create secret generic rhbk-services-admin -n sovereign-cloud-plugins \
@@ -57,37 +55,67 @@ spec:
                 --dry-run=client -o yaml | oc apply -f -
               echo "synced rhbk-services-admin"
 
-              # AAP
+              # AAP — prefer operator secrets, then sovereign-secrets, then helm values (stdlib parse)
+              AAP_USER=admin
+              AAP_PASS=""
+              AAP_URL=""
+              if oc -n aap get route aap >/dev/null 2>&1; then
+                AAP_URL="https://$(oc -n aap get route aap -o jsonpath='{.spec.host}')"
+              else
+                AAP_URL="https://aap-aap.${APPS_DOMAIN}"
+              fi
               if oc get secret aap-admin-credentials -n aap >/dev/null 2>&1; then
                 AAP_USER=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.username}' | base64 -d)
                 AAP_PASS=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.password}' | base64 -d)
-                AAP_URL=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.url}' | base64 -d)
+                U=$(oc get secret aap-admin-credentials -n aap -o jsonpath='{.data.url}' | base64 -d || true)
+                [ -n "$U" ] && AAP_URL="$U"
+              elif oc get secret aap-admin -n sovereign-secrets >/dev/null 2>&1; then
+                AAP_PASS=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.password}' | base64 -d || true)
+                H=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.host}' | base64 -d || true)
+                [ -n "$H" ] && AAP_URL="$H"
               else
-                AAP_USER=admin
-                AAP_PASS=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
-                AAP_URL=$(oc get secret aap-admin -n sovereign-secrets -o jsonpath='{.data.host}' 2>/dev/null | base64 -d || true)
-                [ -n "$AAP_URL" ] || AAP_URL="https://aap-aap.${APPS_DOMAIN}"
-                # Fall back to field-content helm values for password
-                if [ -z "$AAP_PASS" ] && oc -n openshift-gitops get application.argoproj.io field-content >/dev/null 2>&1; then
-                  eval "$(oc -n openshift-gitops get application.argoproj.io field-content -o json | python3 -c '
-              import json,sys,yaml,shlex
-              app=json.load(sys.stdin)
-              vals=yaml.safe_load((app.get("spec") or {}).get("source",{}).get("helm",{}).get("values") or "{}") or {}
-              aap=vals.get("aap") or {}
-              if aap.get("adminPassword"): print("AAP_PASS="+shlex.quote(aap["adminPassword"]))
-              if aap.get("adminUser"): print("AAP_USER="+shlex.quote(aap["adminUser"]))
-              if aap.get("url"): print("AAP_URL="+shlex.quote(aap["url"]))
-              ')"
-                fi
+                for s in aap-admin-password aap-controller-admin-password; do
+                  if oc get secret "$s" -n aap >/dev/null 2>&1; then
+                    AAP_PASS=$(oc get secret "$s" -n aap -o jsonpath='{.data.password}' | base64 -d)
+                    break
+                  fi
+                done
               fi
+              if [ -z "$AAP_PASS" ] && oc -n openshift-gitops get application.argoproj.io field-content >/dev/null 2>&1; then
+                oc -n openshift-gitops get application.argoproj.io field-content -o json > /tmp/field-content.json
+                eval "$(python3 <<'PY'
+              import json,re,shlex
+              app=json.load(open("/tmp/field-content.json"))
+              raw=(app.get("spec") or {}).get("source",{}).get("helm",{}).get("values") or ""
+              def pick(*keys):
+                  for k in keys:
+                      m=re.search(r"(?:^|\n)\s*%s\s*:\s*[\"']?([^\n\"']+)" % re.escape(k), raw)
+                      if m:
+                          return m.group(1).strip()
+                  return ""
+              pw=pick("adminPassword")
+              user=pick("adminUser","adminUsername")
+              url=pick("url")
+              if pw: print("AAP_PASS="+shlex.quote(pw))
+              if user: print("AAP_USER="+shlex.quote(user))
+              if url and url.startswith("http"): print("AAP_URL="+shlex.quote(url))
+              PY
+              )"
+              fi
+              [ -n "$AAP_PASS" ] || { echo "FATAL: no AAP admin password found" >&2; exit 1; }
               oc create secret generic aap-admin-credentials -n sovereign-cloud-plugins \
                 --from-literal=username="$AAP_USER" \
                 --from-literal=password="$AAP_PASS" \
                 --from-literal=url="$AAP_URL" \
                 --dry-run=client -o yaml | oc apply -f -
-              echo "synced aap-admin-credentials"
+              # Also ensure PushSecret source exists
+              oc create secret generic aap-admin -n sovereign-secrets \
+                --from-literal=host="$AAP_URL" \
+                --from-literal=username="$AAP_USER" \
+                --from-literal=password="$AAP_PASS" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "synced aap-admin-credentials + aap-admin"
 
-              # Quay
               QUAY_URL="https://quay-quay-quay.${APPS_DOMAIN}"
               if oc -n quay get route quay-quay >/dev/null 2>&1; then
                 QUAY_URL="https://$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}')"
@@ -111,7 +139,6 @@ spec:
                 --dry-run=client -o yaml | oc apply -f -
               echo "plugin credential sync complete"
 
-              # --- Seed Vault KV (hybridsovereign) for AAP EDA jobs ---
               echo "Waiting for vault-init..."
               for i in $(seq 1 60); do
                 oc -n vault get secret vault-init >/dev/null 2>&1 && break
@@ -121,62 +148,107 @@ spec:
               VAULT_TOKEN=$(oc -n vault get secret vault-init -o jsonpath='{.data.rootToken}' | base64 -d)
               [ -n "$VAULT_TOKEN" ] || { echo "vault-init missing; skip KV seed"; exit 0; }
 
-              if ! curl -sf -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/sys/mounts/hybridsovereign" >/dev/null 2>&1; then
-                curl -sf -H "X-Vault-Token: $VAULT_TOKEN" -H 'Content-Type: application/json' \
-                  --data '{"type":"kv","options":{"version":"2"}}' \
-                  "$VAULT_ADDR/v1/sys/mounts/hybridsovereign" || true
-              fi
+              export KC_USER KC_PASS KC_URL AAP_USER AAP_PASS AAP_URL QUAY_PASS QUAY_URL
+              python3 - <<'PY'
+              import json, os, re, shlex, subprocess, urllib.error, urllib.request
 
-              API=$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}')
-              OCP_USER=admin
-              PASS=""
-              SA_TOK=$(oc -n openshift-config get secret cluster-admin-token -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
-              if oc -n sovereign-secrets get secret openshift-kubeadmin-seed >/dev/null 2>&1; then
-                API=$(oc -n sovereign-secrets get secret openshift-kubeadmin-seed -o jsonpath='{.data.api_host}' | base64 -d)
-                OCP_USER=$(oc -n sovereign-secrets get secret openshift-kubeadmin-seed -o jsonpath='{.data.username}' | base64 -d)
-                PASS=$(oc -n sovereign-secrets get secret openshift-kubeadmin-seed -o jsonpath='{.data.password}' | base64 -d)
-              elif oc -n openshift-gitops get application.argoproj.io field-content >/dev/null 2>&1; then
-                eval "$(oc -n openshift-gitops get application.argoproj.io field-content -o json | python3 -c '
-              import json,sys,yaml,shlex
-              app=json.load(sys.stdin)
-              vals=yaml.safe_load((app.get("spec") or {}).get("source",{}).get("helm",{}).get("values") or "{}") or {}
-              ocp=vals.get("openshift") or {}
-              dep=vals.get("deployer") or {}
-              if dep.get("apiUrl"): print("API="+shlex.quote(dep["apiUrl"]))
-              if ocp.get("adminUsername"): print("OCP_USER="+shlex.quote(ocp["adminUsername"]))
-              if ocp.get("adminPassword"): print("PASS="+shlex.quote(ocp["adminPassword"]))
-              ')"
-              fi
-              export API OCP_USER PASS SA_TOK
-              if [ -n "${SA_TOK:-}" ] || [ -n "${PASS:-}" ]; then
-                python3 - <<'PY'
-              import json, os, urllib.request
-              addr, tok = os.environ["VAULT_ADDR"], os.environ["VAULT_TOKEN"]
-              data = {"api_host": os.environ["API"], "username": os.environ.get("OCP_USER","admin"), "password": os.environ.get("PASS","")}
-              if os.environ.get("SA_TOK"): data["token"] = os.environ["SA_TOK"]
-              body = json.dumps({"data": data}).encode()
-              for path in ("openshift-services-kubeadmin", "openshift-central-kubeadmin"):
-                req = urllib.request.Request(f"{addr}/v1/hybridsovereign/data/{path}", data=body,
-                  headers={"X-Vault-Token": tok, "Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req) as r:
-                  print("seeded", path, r.status)
+              addr = os.environ["VAULT_ADDR"]
+              tok = os.environ["VAULT_TOKEN"]
+
+              def vault(method, path, payload=None):
+                  data = None if payload is None else json.dumps(payload).encode()
+                  req = urllib.request.Request(
+                      f"{addr}/v1/{path}",
+                      data=data,
+                      headers={"X-Vault-Token": tok, "Content-Type": "application/json"},
+                      method=method,
+                  )
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          return r.status, r.read()
+                  except urllib.error.HTTPError as e:
+                      return e.code, e.read()
+
+              st, _ = vault("GET", "sys/mounts/hybridsovereign")
+              if st == 404:
+                  vault("POST", "sys/mounts/hybridsovereign", {"type": "kv", "options": {"version": "2"}})
+                  print("enabled kv mount hybridsovereign")
+              elif st >= 400:
+                  print(f"WARN: mounts check status={st}")
+
+              def put_kv(path, data):
+                  st, body = vault("POST", f"hybridsovereign/data/{path}", {"data": data})
+                  print(f"seeded {path} {st}")
+                  if st >= 400:
+                      raise SystemExit(f"vault put {path} failed: {body[:200]}")
+
+              api = subprocess.check_output(
+                  ["oc", "get", "infrastructure", "cluster", "-o", "jsonpath={.status.apiServerURL}"],
+                  text=True,
+              ).strip()
+              ocp_user = "admin"
+              password = ""
+              sa_tok = ""
+              try:
+                  sa_tok = subprocess.check_output(
+                      ["oc", "-n", "openshift-config", "get", "secret", "cluster-admin-token",
+                       "-o", "jsonpath={.data.token}"],
+                      text=True, stderr=subprocess.DEVNULL,
+                  ).strip()
+                  if sa_tok:
+                      sa_tok = subprocess.check_output(["base64", "-d"], input=sa_tok, text=True)
+              except Exception:
+                  sa_tok = ""
+
+              if subprocess.call(["oc", "-n", "sovereign-secrets", "get", "secret", "openshift-kubeadmin-seed"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+                  def secret_field(f):
+                      b = subprocess.check_output(
+                          ["oc", "-n", "sovereign-secrets", "get", "secret", "openshift-kubeadmin-seed",
+                           "-o", f"jsonpath={{.data.{f}}}"], text=True)
+                      return subprocess.check_output(["base64", "-d"], input=b, text=True)
+                  api = secret_field("api_host")
+                  ocp_user = secret_field("username")
+                  password = secret_field("password")
+              elif subprocess.call(
+                  ["oc", "-n", "openshift-gitops", "get", "application.argoproj.io", "field-content"],
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+              ) == 0:
+                  raw = subprocess.check_output(
+                      ["oc", "-n", "openshift-gitops", "get", "application.argoproj.io", "field-content", "-o", "json"],
+                      text=True,
+                  )
+                  app = json.loads(raw)
+                  vals = (app.get("spec") or {}).get("source", {}).get("helm", {}).get("values") or ""
+                  def pick(*keys):
+                      for k in keys:
+                          m = re.search(r"(?:^|\n)\s*" + re.escape(k) + r"\s*:\s*[\"']?([^\n\"']+)", vals)
+                          if m:
+                              return m.group(1).strip()
+                      return ""
+                  password = pick("adminPassword") or password
+                  ocp_user = pick("adminUsername", "adminUser") or ocp_user
+                  api = pick("apiUrl", "consoleUrl") or api
+
+              if sa_tok or password:
+                  data = {"api_host": api, "username": ocp_user, "password": password}
+                  if sa_tok:
+                      data["token"] = sa_tok
+                  put_kv("openshift-services-kubeadmin", data)
+                  put_kv("openshift-central-kubeadmin", data)
+              else:
+                  print("WARN: no openshift token/password; skip openshift-*-kubeadmin seed")
+
+              def user_put(path, user, pw, url):
+                  if not user or not pw:
+                      return
+                  put_kv(path, {"username": user, "password": pw, "url": url})
+
+              user_put("rhbk-services-admin", os.environ["KC_USER"], os.environ["KC_PASS"], os.environ["KC_URL"])
+              user_put("aap-admin", os.environ["AAP_USER"], os.environ["AAP_PASS"], os.environ["AAP_URL"])
+              user_put("quay-admin", "quayadmin", os.environ["QUAY_PASS"], os.environ["QUAY_URL"])
+              print("vault KV platform seed complete")
               PY
-              else
-                echo "WARN: no openshift token/password; skip openshift-*-kubeadmin seed"
-              fi
-
-              vault_put() {
-                local PATH="$1" U="$2" P="$3" URl="$4"
-                [ -n "$U" ] && [ -n "$P" ] || return 0
-                curl -sf -H "X-Vault-Token: $VAULT_TOKEN" -H 'Content-Type: application/json' \
-                  --data "{\"data\":{\"username\":\"$U\",\"password\":\"$P\",\"url\":\"$URl\"}}" \
-                  "$VAULT_ADDR/v1/hybridsovereign/data/$PATH" >/dev/null
-                echo "seeded vault $PATH"
-              }
-              vault_put rhbk-services-admin "$KC_USER" "$KC_PASS" "$KC_URL"
-              vault_put aap-admin "$AAP_USER" "$AAP_PASS" "$AAP_URL"
-              vault_put quay-admin quayadmin "$QUAY_PASS" "$QUAY_URL"
-              echo "vault KV platform seed complete"
 ---
 apiVersion: v1
 kind: ServiceAccount

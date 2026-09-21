@@ -413,3 +413,13 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 | Next action | Rebuild cluster; use only `./scripts/ztp-wipe.sh` for future wipes |
 | Status | halted pending new cluster |
 
+
+### 2026-09-21T03:30:00Z — ZTP-005/006 fix (cluster-l9mxc)
+
+| Field | Value |
+|-------|-------|
+| Change summary | plugin-cred-sync: no PyYAML/curl; aap-cred-sync RBAC for ingresses+routes; seed aap-admin for PushSecret |
+| Paths touched | `gitops/infrastructure/security/*`, `gitops/infrastructure/aap/*`, `gitops/issues.md` |
+| Next action | Push; `./scripts/ztp-wipe.sh`; monitor-only |
+| Status | in-progress |
+
