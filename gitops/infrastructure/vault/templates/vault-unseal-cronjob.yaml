@@ -1,0 +1,54 @@
+# Re-unseal after node/API restarts (ZTP-016). vault-init Job only runs once.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-unseal
+  namespace: vault
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "21"
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            hybridsovereign.redhat/gitops-owned: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: vault-init
+          containers:
+            - name: unseal
+              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+              env:
+                - name: VAULT_ADDR
+                  value: http://vault.vault.svc:8200
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  set -euo pipefail
+                  STATUS=$(curl -sf "$VAULT_ADDR/v1/sys/seal-status" || true)
+                  [ -n "$STATUS" ] || { echo "vault unreachable"; exit 0; }
+                  SEALED=$(echo "$STATUS" | grep -o '"sealed":[^,]*' | head -1 | cut -d: -f2)
+                  if [ "$SEALED" != "true" ]; then
+                    echo "vault already unsealed"
+                    exit 0
+                  fi
+                  if ! oc get secret vault-init -n vault >/dev/null 2>&1; then
+                    echo "vault-init secret missing; skip"
+                    exit 0
+                  fi
+                  UNSEAL=$(oc get secret vault-init -n vault -o jsonpath='{.data.unsealKey}' | base64 -d)
+                  [ -n "$UNSEAL" ]
+                  curl -sf -X PUT "$VAULT_ADDR/v1/sys/unseal" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"key\":\"$UNSEAL\"}" >/dev/null
+                  echo "vault unsealed"

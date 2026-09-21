@@ -20,7 +20,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-012 | 2026-09-21 (l9mxc) | `hs-quay` `UpgradePending`; MCE CSV `Pending` | Wipe deleted InstallPlans the Subscriptions still referenced | Delete Subscription+IP+CSV; ignore copied ESO/GitOps CSVs | 1 (**quay + MCE CSV Succeeded**) |
 | ZTP-013 | 2026-09-21 (l9mxc) | `hs-acm` stuck Progressing: MultiClusterHub `Uninstalling` / "Pending deletion" | MCE cannot delete ManagedCluster (dead ocm-webhook); merge-patch empty finalizers no-op | Wipe deletes OCM webhooks; JSON-remove finalizers on ManagedCluster→MCE→MCH | 2 (**MCH created fresh**) |
 | ZTP-014 | 2026-09-21 (l9mxc) | MCE `Error` then Progressing; ManagedClusterAddOn CRD Missing then restored | ClusterManager stuck Terminating so CRDs never reinstall | JSON-remove ClusterManager/Klusterlet finalizers; wait until gone | 3 (**CRD restored; MCE Progressing**) |
-| ZTP-015 | 2026-09-21 (l9mxc) | API `dial tcp ...:6443: i/o timeout` during ACM install soak | Control plane unreachable from agent host | **HALT** — cannot monitor/wipe; need cluster API restored | 1 (**HALTED**) |
+| ZTP-015 | 2026-09-21 (l9mxc) | API `dial tcp ...:6443: i/o timeout` during ACM install soak | Control plane unreachable from agent host | Wait for API restore; resume soak | 1 (**API restored**) |
+| ZTP-016 | 2026-09-21 (l9mxc) | `hs-security` Degraded; CSS/PushSecret fail; Vault sealed after outage | `vault-init` Job Completed once; node restart resealed Vault | CronJob `vault-unseal` every 2m; vault-init Sync hook BeforeHookCreation; bump hs-vault 0.1.9 | 1 (fixing) |
 
 ## Recurrence halt rule
 
