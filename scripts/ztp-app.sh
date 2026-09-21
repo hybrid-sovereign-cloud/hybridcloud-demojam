@@ -96,21 +96,13 @@ cleanup_app() {
   path=$(echo "$row" | awk -F'|' '{print $3}')
   echo "== cleanup $app (path=$path) =="
 
-  # Cascade-delete Application resources (Argo finalizer)
+  # Delete Application WITHOUT cascade finalizer so parent Namespaces survive.
   if oc -n "$NS_ARGO" get application.argoproj.io "$app" >/dev/null 2>&1; then
     oc -n "$NS_ARGO" patch application.argoproj.io "$app" --type=json \
       -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
-    # Prefer cascade via finalizer: restore then delete with cascade
-    oc -n "$NS_ARGO" patch application.argoproj.io "$app" --type=merge \
-      -p='{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}' 2>/dev/null || true
     oc -n "$NS_ARGO" delete application.argoproj.io "$app" --wait=false 2>/dev/null || true
-    for i in $(seq 1 60); do
+    for i in $(seq 1 30); do
       oc -n "$NS_ARGO" get application.argoproj.io "$app" >/dev/null 2>&1 || break
-      # If stuck Terminating, strip finalizer
-      if [ "$i" -eq 30 ] || [ "$i" -eq 50 ]; then
-        oc -n "$NS_ARGO" patch application.argoproj.io "$app" --type=json \
-          -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
-      fi
       sleep 2
     done
   fi

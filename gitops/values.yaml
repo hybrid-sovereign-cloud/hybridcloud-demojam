@@ -72,3 +72,5 @@ namespaces:
   - gitea
   - openshift-acm  # ACM hub when provisioned
   - external-secrets  # ESO operand controllers (OpenShift ESO)
+  - multicluster-engine  # MCE (hs-mce); never prune
+  - open-cluster-management  # ACM hub (hs-acm); never prune
