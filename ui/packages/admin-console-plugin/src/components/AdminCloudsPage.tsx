@@ -15,8 +15,10 @@ const AdminCloudsPage: React.FC = () => {
           title={t('nav.cloudEnvironments')}
           subtitle={t('pages.cloudEnvironmentsSubtitle')}
           secondaryKind="CloudAWS"
+          tertiaryKind="CloudVirt"
           listPath="/hybridsovereign/clouds/cloudoso"
           secondaryListPath="/hybridsovereign/clouds/cloudaws"
+          tertiaryListPath="/hybridsovereign/clouds/cloudvirt"
         />
       </div>
     </PageSection>

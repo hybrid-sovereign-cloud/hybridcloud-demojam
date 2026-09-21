@@ -47,6 +47,7 @@ const KIND_PATH: Partial<Record<HybridSovereignKind, string>> = {
   Assignment: '/assignments',
   CloudOSO: '/cloudoso',
   CloudAWS: '/cloudaws',
+  CloudVirt: '/cloudvirt',
   OpenStackMigration: '/migrations',
   Persona: '/personas',
   Rbac: '/rbac',

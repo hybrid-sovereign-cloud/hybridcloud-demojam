@@ -35,12 +35,23 @@
   {
     "type": "console.navigation/href",
     "properties": {
+      "id": "hybridsovereign-tenant-cloudvirt",
+      "section": "hybridsovereign-tenancy-read-section",
+      "perspective": "hybridsovereign",
+      "name": "Cloud Virt",
+      "href": "/hybridsovereign/tenant/cloudvirt",
+      "insertAfter": "hybridsovereign-tenant-cloudaws"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
       "id": "hybridsovereign-tenant-migrations",
       "section": "hybridsovereign-tenancy-read-section",
       "perspective": "hybridsovereign",
       "name": "Migrate to OpenStack",
       "href": "/hybridsovereign/tenant/migrations",
-      "insertAfter": "hybridsovereign-tenant-cloudaws"
+      "insertAfter": "hybridsovereign-tenant-cloudvirt"
     }
   },
   {
@@ -296,6 +307,26 @@
       "path": "/hybridsovereign/tenant/cloudaws/:name",
       "component": {
         "$codeRef": "TenantCloudAWSDetailPage"
+      }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/hybridsovereign/tenant/cloudvirt",
+      "component": {
+        "$codeRef": "TenantCloudVirtPage"
+      }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": false,
+      "path": "/hybridsovereign/tenant/cloudvirt/:name",
+      "component": {
+        "$codeRef": "TenantCloudVirtDetailPage"
       }
     }
   },

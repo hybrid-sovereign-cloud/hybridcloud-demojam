@@ -108,6 +108,7 @@ export function EntityTopology({
   const platforms = useK8sResourceList<K8sResource>('PlatformOpenshift', listOpts);
   const cloudOso = useK8sResourceList<K8sResource>('CloudOSO', listOpts);
   const cloudAws = useK8sResourceList<K8sResource>('CloudAWS', listOpts);
+  const cloudVirt = useK8sResourceList<K8sResource>('CloudVirt', listOpts);
 
   const permNs = ns || 'sovereign-cloud';
   const teamPerm = useCanListKind(permNs, 'Team', { enabled: filterByPermissions });
@@ -116,6 +117,7 @@ export function EntityTopology({
   const platformPerm = useCanListKind(permNs, 'PlatformOpenshift', { enabled: filterByPermissions });
   const cloudOsoPerm = useCanListKind(permNs, 'CloudOSO', { enabled: filterByPermissions });
   const cloudAwsPerm = useCanListKind(permNs, 'CloudAWS', { enabled: filterByPermissions });
+  const cloudVirtPerm = useCanListKind(permNs, 'CloudVirt', { enabled: filterByPermissions });
 
   const [zoom, setZoom] = useState(1);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -163,6 +165,7 @@ export function EntityTopology({
     const cloudNodes = [
       ...(allow(cloudOsoPerm.allowed) ? cloudOso.items.map((i) => toNode(i, 'CloudOSO')) : []),
       ...(allow(cloudAwsPerm.allowed) ? cloudAws.items.map((i) => toNode(i, 'CloudAWS')) : []),
+      ...(allow(cloudVirtPerm.allowed) ? cloudVirt.items.map((i) => toNode(i, 'CloudVirt')) : []),
     ];
 
     // Build edges ONLY from real CR references (no mesh heuristics)
@@ -214,17 +217,22 @@ export function EntityTopology({
       }
     }
 
-    // Platform → CloudOSO/CloudAWS when platform.spec.cloudRef matches
+    // Platform → CloudOSO/CloudAWS/CloudVirt when platform.spec.cloudRef matches
     for (const p of platforms.items) {
-      const cloudRef = (p.spec as { cloudRef?: string } | undefined)?.cloudRef;
+      const cloudRef = (p.spec as { cloudRef?: string; virt?: { environment?: string }; hosted?: { environment?: string } } | undefined)?.cloudRef
+        || (p.spec as { virt?: { environment?: string } } | undefined)?.virt?.environment
+        || (p.spec as { hosted?: { environment?: string } } | undefined)?.hosted?.environment;
       if (!cloudRef) continue;
       const cloud =
+        cloudVirt.items.find((c) => c.metadata.name === cloudRef) ||
         cloudOso.items.find((c) => c.metadata.name === cloudRef) ||
         cloudAws.items.find((c) => c.metadata.name === cloudRef);
       if (cloud) {
-        const kind: HybridSovereignKind = cloudAws.items.some((c) => c.metadata.name === cloud.metadata.name)
-          ? 'CloudAWS'
-          : 'CloudOSO';
+        const kind: HybridSovereignKind = cloudVirt.items.some((c) => c.metadata.name === cloud.metadata.name)
+          ? 'CloudVirt'
+          : cloudAws.items.some((c) => c.metadata.name === cloud.metadata.name)
+            ? 'CloudAWS'
+            : 'CloudOSO';
         edgePairs.push({
           fromKind: kind,
           fromName: cloud.metadata.name,
@@ -344,6 +352,7 @@ export function EntityTopology({
     platforms.items,
     cloudOso.items,
     cloudAws.items,
+    cloudVirt.items,
     filterByPermissions,
     teamPerm.allowed,
     projectPerm.allowed,
@@ -351,6 +360,7 @@ export function EntityTopology({
     platformPerm.allowed,
     cloudOsoPerm.allowed,
     cloudAwsPerm.allowed,
+    cloudVirtPerm.allowed,
   ]);
 
   const loading =
@@ -360,7 +370,8 @@ export function EntityTopology({
     assignments.loading ||
     platforms.loading ||
     cloudOso.loading ||
-    cloudAws.loading;
+    cloudAws.loading ||
+    cloudVirt.loading;
 
   const listError =
     entities.error ||
@@ -369,7 +380,8 @@ export function EntityTopology({
     assignments.error ||
     platforms.error ||
     cloudOso.error ||
-    cloudAws.error;
+    cloudAws.error ||
+    cloudVirt.error;
 
   if (loading && graph.nodes.length === 0) {
     return <Spinner aria-label="Loading topology" />;

@@ -1,6 +1,6 @@
 {
   "name": "@hybridsovereign/admin-console-plugin",
-  "version": "1.2.27",
+  "version": "1.2.28",
   "private": true,
   "description": "OpenShift Console dynamic plugin for Hybrid Sovereign admin views",
   "main": "dist/plugin-entry.js",
@@ -11,7 +11,7 @@
   },
   "consolePlugin": {
     "name": "sovereign-admin-plugin",
-    "version": "1.2.27",
+    "version": "1.2.28",
     "displayName": "Sovereign Cloud",
     "description": "Sovereign Cloud admin perspective \u2014 Entities, Personas, Services, Operators",
     "exposedModules": {
@@ -33,6 +33,7 @@
       "AdminAssignmentDetailPage": "./src/components/AdminAssignmentDetailPage.tsx",
       "AdminCloudOSODetailPage": "./src/components/AdminCloudOSODetailPage.tsx",
       "AdminCloudAWSDetailPage": "./src/components/AdminCloudAWSDetailPage.tsx",
+      "AdminCloudVirtDetailPage": "./src/components/AdminCloudVirtDetailPage.tsx",
       "AdminRbacDetailPage": "./src/components/AdminRbacDetailPage.tsx",
       "AdminAAPOrgDetailPage": "./src/components/AdminAAPOrgDetailPage.tsx",
       "AdminAAPConfigDetailPage": "./src/components/AdminAAPConfigDetailPage.tsx",

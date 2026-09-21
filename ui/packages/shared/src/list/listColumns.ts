@@ -328,6 +328,30 @@ const KIND_EXTRA_COLUMNS: Partial<Record<HybridSovereignKind, ListColumnDef[]>> 
       render: (i) => asString(specOf(i).landingzone) || '—',
     },
   ],
+  CloudVirt: [
+    {
+      id: 'baseDomain',
+      labelKey: 'list.baseDomain',
+      sortable: true,
+      getSortValue: (i) => asString(specOf(i).baseDomain),
+      getSearchText: (i) => asString(specOf(i).baseDomain),
+      render: (i) => asString(specOf(i).baseDomain) || '—',
+    },
+    {
+      id: 'storageClass',
+      labelKey: 'list.storageClass',
+      sortable: true,
+      getSortValue: (i) => asString(specOf(i).storageClass),
+      render: (i) => asString(specOf(i).storageClass) || '—',
+    },
+    {
+      id: 'enableVRF',
+      labelKey: 'list.enableVRF',
+      sortable: true,
+      getSortValue: (i) => String(specOf(i).enableVRF ?? false),
+      render: (i) => (specOf(i).enableVRF ? 'yes' : 'no'),
+    },
+  ],
   OpenStackMigration: [
     {
       id: 'source',

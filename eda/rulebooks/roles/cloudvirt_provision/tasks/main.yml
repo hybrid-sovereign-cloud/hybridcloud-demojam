@@ -1,35 +1,53 @@
 ---
-# CloudVirt provision — mark ready after validating CR shape (CNV prep stub).
-# Full CNV environment prep lands in a later iteration; this unblocks JT + operator soak.
-- name: Set CloudVirt facts
+# CloudVirt provision — mark ready after validating CR (CNV prep stub).
+# Avoids operator_sdk collection (not in AAP EE); uses shared vault + status helpers.
+- name: Resolve services cluster connection
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
+
+- name: Set CloudVirt facts from extra_vars / operator meta
   ansible.builtin.set_fact:
-    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default('') }}"
-    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default('entity-acme-corp') }}"
+    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default(cr_name) | default('') }}"
+    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default(cr_namespace) | default('entity-acme-corp') }}"
+
+- name: Fail when CloudVirt name missing
+  ansible.builtin.assert:
+    that:
+      - cloudvirt_name | length > 0
+    fail_msg: CloudVirt name not provided to provision playbook
 
 - name: Read CloudVirt CR
   kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     api_version: hybridsovereign.redhat/v1alpha1
     kind: CloudVirt
     name: "{{ cloudvirt_name }}"
     namespace: "{{ cloudvirt_namespace }}"
   register: cloudvirt_cr
-  when: cloudvirt_name | length > 0
 
-- name: Mark CloudVirt ready (stub)
-  when: cloudvirt_name | length > 0
-  operator_sdk.util.k8s_status:
-    api_version: hybridsovereign.redhat/v1alpha1
-    kind: CloudVirt
-    name: "{{ cloudvirt_name }}"
-    namespace: "{{ cloudvirt_namespace }}"
-    status:
+- name: Fail if CloudVirt CR missing
+  ansible.builtin.assert:
+    that:
+      - cloudvirt_cr.resources | length > 0
+    fail_msg: "CloudVirt {{ cloudvirt_namespace }}/{{ cloudvirt_name }} not found"
+
+- name: Patch CloudVirt ready status
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: cloudvirts
+    cr_name: "{{ cloudvirt_name }}"
+    cr_namespace: "{{ cloudvirt_namespace }}"
+    cr_action: ready
+    status_patch:
       status: ready
       ready: true
+      phase: provisioned
       message: CloudVirt environment stub ready (CNV prep deferred)
       slug: "{{ cloudvirt_name[:5] }}"
-      domain: "{{ (cloudvirt_cr.resources[0].spec.baseDomain | default('virt.example.com')) if cloudvirt_cr.resources | default([]) else 'virt.example.com' }}"
-  ignore_errors: true
+      domain: "{{ cloudvirt_cr.resources[0].spec.baseDomain | default('virt.example.com') }}"
 
 - name: CloudVirt provision complete
   ansible.builtin.debug:
-    msg: "cloudvirt provision stub complete for {{ cloudvirt_name }}"
+    msg: "cloudvirt provision stub complete for {{ cloudvirt_namespace }}/{{ cloudvirt_name }}"

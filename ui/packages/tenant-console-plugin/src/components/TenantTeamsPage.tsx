@@ -35,6 +35,7 @@ const KIND_META: Partial<
   PlatformOpenshift: { path: 'platforms' },
   CloudOSO: { path: 'cloudoso', form: 'cloudoso' },
   CloudAWS: { path: 'cloudaws', form: 'cloudaws' },
+  CloudVirt: { path: 'cloudvirt', form: 'cloudvirt' },
   OpenStackMigration: { path: 'migrations', form: 'migration' },
   Assignment: { path: 'assignments', form: 'assignment' },
   Vault: { path: 'vaults', form: 'vault' },

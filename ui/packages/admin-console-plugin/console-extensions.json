@@ -442,6 +442,16 @@
   {
     "type": "console.page/route",
     "properties": {
+      "path": "/hybridsovereign/clouds/cloudvirt/:namespace/:name",
+      "component": {
+        "$codeRef": "AdminCloudVirtDetailPage"
+      },
+      "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
       "path": "/hybridsovereign/assignments",
       "component": {
         "$codeRef": "AdminAssignmentsPage"

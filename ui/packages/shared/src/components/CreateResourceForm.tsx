@@ -23,6 +23,7 @@ export type SelfServiceFormType =
   | 'assignment'
   | 'cloudoso'
   | 'cloudaws'
+  | 'cloudvirt'
   | 'platformopenshift'
   | 'migration'
   | 'persona'
@@ -53,6 +54,7 @@ const FORM_TITLES: Record<SelfServiceFormType, string> = {
   assignment: 'Create Assignment',
   cloudoso: 'Request CloudOSO Environment',
   cloudaws: 'Request Cloud AWS Account',
+  cloudvirt: 'Request Cloud Virt Environment',
   platformopenshift: 'Create Platform Openshift',
   migration: 'Migrate to OpenStack',
   persona: 'Create Persona',
@@ -76,6 +78,7 @@ const FORM_KINDS: Record<SelfServiceFormType, HybridSovereignKind> = {
   assignment: 'Assignment',
   cloudoso: 'CloudOSO',
   cloudaws: 'CloudAWS',
+  cloudvirt: 'CloudVirt',
   platformopenshift: 'PlatformOpenshift',
   migration: 'OpenStackMigration',
   persona: 'Persona',
@@ -108,6 +111,8 @@ const PERSONA_TYPES = [
   'cloudOSOView',
   'cloudAWSAdmin',
   'cloudAWSView',
+  'cloudVirtAdmin',
+  'cloudVirtView',
   'BobsTeam',
 ];
 
@@ -156,6 +161,7 @@ export function CreateResourceForm({
   const [projectRef, setProjectRef] = useState('');
   const [platformRef, setPlatformRef] = useState('');
   const [cloudAwsRef, setCloudAwsRef] = useState('');
+  const [cloudVirtRef, setCloudVirtRef] = useState('');
   const [argoEnabled, setArgoEnabled] = useState(true);
   const [rbacRef, setRbacRef] = useState('');
   const [personaType, setPersonaType] = useState('entityAdmin');
@@ -199,6 +205,9 @@ export function CreateResourceForm({
   const [awsAccount, setAwsAccount] = useState('');
   const [awsVaultPath, setAwsVaultPath] = useState('');
   const [awsBaseDomain, setAwsBaseDomain] = useState('');
+  const [virtVaultPath, setVirtVaultPath] = useState('');
+  const [virtBaseDomain, setVirtBaseDomain] = useState('');
+  const [virtStorageClass, setVirtStorageClass] = useState('ocs-storagecluster-ceph-rbd');
   const [platformType, setPlatformType] = useState('openstack');
   const [platformEnv, setPlatformEnv] = useState('');
   const [cpCount, setCpCount] = useState('3');
@@ -236,6 +245,10 @@ export function CreateResourceForm({
   const cloudAwss = useK8sResourceList<K8sResource>('CloudAWS', {
     namespace: entityNs,
     enabled: type === 'assignment' || type === 'platformopenshift',
+  });
+  const cloudVirts = useK8sResourceList<K8sResource>('CloudVirt', {
+    namespace: entityNs,
+    enabled: type === 'platformopenshift',
   });
   const vaults = useK8sResourceList<K8sResource>('Vault', {
     namespace: entityNs,
@@ -350,6 +363,12 @@ export function CreateResourceForm({
           baseDomain: awsBaseDomain || baseDomain,
           landingzone,
         };
+      case 'cloudvirt':
+        return {
+          vaultPath: virtVaultPath || vaultPath,
+          baseDomain: virtBaseDomain || baseDomain,
+          storageClass: virtStorageClass || undefined,
+        };
       case 'platformopenshift': {
         const rbacList = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
         if (platformType === 'aws') {
@@ -362,6 +381,22 @@ export function CreateResourceForm({
               controlPlaneCount: Number(cpCount) || 3,
               workerCount: Number(workerCount) || 2,
             },
+            ...(rbacList.length
+              ? { toolRbac: { clusterAdminRbac: rbacList }, clusterViewerRbac: rbacList }
+              : {}),
+          };
+        }
+        if (platformType === 'virt' || platformType === 'hosted') {
+          const envName = platformEnv || cloudVirtRef;
+          const size = {
+            environment: envName,
+            controlPlaneCount: Number(cpCount) || 3,
+            workerCount: Number(workerCount) || 2,
+          };
+          return {
+            type: platformType,
+            ...(platformType === 'hosted' ? { hosted: { environment: envName } } : { virt: size }),
+            cloudRef: envName,
             ...(rbacList.length
               ? { toolRbac: { clusterAdminRbac: rbacList }, clusterViewerRbac: rbacList }
               : {}),
@@ -475,7 +510,8 @@ export function CreateResourceForm({
     if (type === 'assignment' && !teamRef) return false;
     if (type === 'cloudoso' && (!osoProject || !vaultPath || !baseDomain || !projectDomain || !externalNetwork || !route53VaultPath)) return false;
     if (type === 'cloudaws' && (!awsAccount || !awsVaultPath || !(awsBaseDomain || baseDomain))) return false;
-    if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef)) return false;
+    if (type === 'cloudvirt' && (!(virtVaultPath || vaultPath) || !(virtBaseDomain || baseDomain))) return false;
+    if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef || cloudVirtRef)) return false;
     if (type === 'persona' && (!rbacRef || !personaType)) return false;
     if (type === 'vaultkv' && !vaultRef) return false;
     if (type === 'migration' && (!vmName || !cloudosoRef)) return false;
@@ -656,6 +692,20 @@ export function CreateResourceForm({
                 </>
               )}
 
+              {type === 'cloudvirt' && (
+                <>
+                  <FormGroup label="Vault path" fieldId="virt-vault" isRequired>
+                    <TextInput id="virt-vault" value={virtVaultPath} onChange={(_e, v) => setVirtVaultPath(v)} isRequired />
+                  </FormGroup>
+                  <FormGroup label="Base domain" fieldId="virt-base" isRequired>
+                    <TextInput id="virt-base" value={virtBaseDomain} onChange={(_e, v) => setVirtBaseDomain(v)} isRequired />
+                  </FormGroup>
+                  <FormGroup label="Storage class" fieldId="virt-sc">
+                    <TextInput id="virt-sc" value={virtStorageClass} onChange={(_e, v) => setVirtStorageClass(v)} />
+                  </FormGroup>
+                </>
+              )}
+
               {type === 'platformopenshift' && (
                 <>
                   <RefSelect
@@ -666,19 +716,41 @@ export function CreateResourceForm({
                     options={[
                       { value: 'openstack', label: 'OpenStack' },
                       { value: 'aws', label: 'AWS' },
+                      { value: 'virt', label: 'Virt (CNV)' },
+                      { value: 'hosted', label: 'Hosted (Hypershift)' },
                     ]}
                     isRequired
                   />
                   <RefSelect
                     id="platform-env"
-                    label={platformType === 'aws' ? 'CloudAWS environment' : 'CloudOSO environment'}
-                    value={platformEnv || (platformType === 'aws' ? cloudAwsRef : cloudosoRef)}
+                    label={
+                      platformType === 'aws'
+                        ? 'CloudAWS environment'
+                        : platformType === 'virt' || platformType === 'hosted'
+                          ? 'CloudVirt environment'
+                          : 'CloudOSO environment'
+                    }
+                    value={
+                      platformEnv ||
+                      (platformType === 'aws'
+                        ? cloudAwsRef
+                        : platformType === 'virt' || platformType === 'hosted'
+                          ? cloudVirtRef
+                          : cloudosoRef)
+                    }
                     onChange={(v) => {
                       setPlatformEnv(v);
                       if (platformType === 'aws') setCloudAwsRef(v);
+                      else if (platformType === 'virt' || platformType === 'hosted') setCloudVirtRef(v);
                       else setCloudosoRef(v);
                     }}
-                    options={names(platformType === 'aws' ? cloudAwss.items : cloudosos.items)}
+                    options={names(
+                      platformType === 'aws'
+                        ? cloudAwss.items
+                        : platformType === 'virt' || platformType === 'hosted'
+                          ? cloudVirts.items
+                          : cloudosos.items,
+                    )}
                     isRequired
                   />
                   <FormGroup label="Control plane count" fieldId="cp-count">
@@ -849,6 +921,7 @@ export function CreateResourceForm({
                     options={[
                       { value: 'CloudAWS', label: 'CloudAWS' },
                       { value: 'CloudOSO', label: 'CloudOSO' },
+                      { value: 'CloudVirt', label: 'CloudVirt' },
                       { value: 'PlatformOpenshift', label: 'PlatformOpenshift' },
                     ]}
                     isRequired

@@ -1,6 +1,6 @@
 {
   "name": "@hybridsovereign/tenant-console-plugin",
-  "version": "1.3.22",
+  "version": "1.3.23",
   "private": true,
   "description": "OpenShift Console dynamic plugin for Hybrid Sovereign tenant views",
   "main": "dist/plugin-entry.js",
@@ -11,7 +11,7 @@
   },
   "consolePlugin": {
     "name": "sovereign-tenant-plugin",
-    "version": "1.3.22",
+    "version": "1.3.23",
     "displayName": "Sovereign Cloud Tenancy",
     "description": "Tenant pages in the Sovereign Cloud perspective",
     "exposedModules": {
@@ -22,6 +22,7 @@
       "TenantAssignmentsPage": "./src/components/TenantAssignmentsPage.tsx",
       "TenantCloudOSOPage": "./src/components/TenantCloudOSOPage.tsx",
       "TenantCloudAWSPage": "./src/components/TenantCloudAWSPage.tsx",
+      "TenantCloudVirtPage": "./src/components/TenantCloudVirtPage.tsx",
       "TenantMigrationsPage": "./src/components/TenantMigrationsPage.tsx",
       "TenantVaultsPage": "./src/components/TenantVaultsPage.tsx",
       "TenantVaultKVsPage": "./src/components/TenantVaultKVsPage.tsx",
@@ -34,6 +35,7 @@
       "TenantAssignmentDetailPage": "./src/components/TenantAssignmentDetailPage.tsx",
       "TenantCloudOSODetailPage": "./src/components/TenantCloudOSODetailPage.tsx",
       "TenantCloudAWSDetailPage": "./src/components/TenantCloudAWSDetailPage.tsx",
+      "TenantCloudVirtDetailPage": "./src/components/TenantCloudVirtDetailPage.tsx",
       "TenantMigrationDetailPage": "./src/components/TenantMigrationDetailPage.tsx",
       "TenantVaultDetailPage": "./src/components/TenantVaultDetailPage.tsx",
       "TenantVaultKVDetailPage": "./src/components/TenantVaultKVDetailPage.tsx",

@@ -31,6 +31,11 @@ export const AdminCloudAWSDetailPage = makeAdminDetailPage(
   'Cloud Environments',
   '/hybridsovereign/clouds',
 );
+export const AdminCloudVirtDetailPage = makeAdminDetailPage(
+  'CloudVirt',
+  'Cloud Environments',
+  '/hybridsovereign/clouds',
+);
 export const AdminRbacDetailPage = makeAdminDetailPage('Rbac', 'Operators', '/hybridsovereign/operators');
 export const AdminRbacConfigDetailPage = makeAdminDetailPage(
   'RbacConfig',

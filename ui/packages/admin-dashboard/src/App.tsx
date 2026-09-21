@@ -334,8 +334,10 @@ function AdminLayout(): React.ReactElement {
                   title={t('nav.cloudEnvironments')}
                   subtitle={t('pages.cloudEnvironmentsSubtitle')}
                   secondaryKind="CloudAWS"
+                  tertiaryKind="CloudVirt"
                   listPath="/clouds/cloudoso"
                   secondaryListPath="/clouds/cloudaws"
+                  tertiaryListPath="/clouds/cloudvirt"
                 />
               }
             />
@@ -349,6 +351,12 @@ function AdminLayout(): React.ReactElement {
               path="/clouds/cloudaws/:namespace/:name"
               element={
                 <AdminResourceDetailPage kind="CloudAWS" title={t('nav.cloudEnvironments')} listPath="/clouds" />
+              }
+            />
+            <Route
+              path="/clouds/cloudvirt/:namespace/:name"
+              element={
+                <AdminResourceDetailPage kind="CloudVirt" title={t('nav.cloudEnvironments')} listPath="/clouds" />
               }
             />
             <Route

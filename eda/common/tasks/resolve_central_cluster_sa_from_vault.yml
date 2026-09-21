@@ -1,16 +1,40 @@
 ---
 # Load long-lived central cluster SA token from Vault (aap-central-cluster-sa).
-# Sets: central_api_host, central_bearer_token
+# Falls back to openshift-central-kubeadmin token (single-cluster ZTP workshop).
+# Sets: central_api_host, central_bearer_token (always with https:// scheme on host).
 
-- name: Read central cluster SA credentials from Vault
-  ansible.builtin.include_tasks: vault_kv_read.yml
-  vars:
-    vault_kv_path: aap-central-cluster-sa
+- name: Try aap-central-cluster-sa from Vault
+  block:
+    - name: Read central cluster SA credentials from Vault
+      ansible.builtin.include_tasks: vault_kv_read.yml
+      vars:
+        vault_kv_path: aap-central-cluster-sa
 
-- name: Set central cluster API connection facts from Vault SA
+    - name: Set central cluster API connection facts from Vault SA
+      ansible.builtin.set_fact:
+        _central_host_raw: "{{ vault_kv_data.host | default(vault_kv_data.api_server | default(vault_kv_data.api_host | default(''))) }}"
+        central_bearer_token: "{{ vault_kv_data.bearer_token | default(vault_kv_data.token | default('')) }}"
+      no_log: true
+  rescue:
+    - name: Fall back to openshift-central-kubeadmin for SA fields
+      ansible.builtin.include_tasks: vault_kv_read.yml
+      vars:
+        vault_kv_path: openshift-central-kubeadmin
+
+    - name: Set central connection from kubeadmin KV (token preferred)
+      ansible.builtin.set_fact:
+        _central_host_raw: "{{ vault_kv_data.api_host | default(vault_kv_data.host | default('')) }}"
+        central_bearer_token: "{{ vault_kv_data.token | default(vault_kv_data.bearer_token | default('')) }}"
+      no_log: true
+
+- name: Normalize central API host to https://
   ansible.builtin.set_fact:
-    central_api_host: "{{ vault_kv_data.host | default(vault_kv_data.api_server | default(vault_kv_data.api_host)) }}"
-    central_bearer_token: "{{ vault_kv_data.bearer_token | default(vault_kv_data.token) }}"
+    central_api_host: >-
+      {{
+        _central_host_raw
+        if (_central_host_raw | regex_search('^https?://'))
+        else ('https://' ~ (_central_host_raw | regex_replace('^//', '')))
+      }}
   no_log: true
 
 - name: Validate central cluster SA credentials are present
@@ -21,5 +45,5 @@
       - central_bearer_token is defined
       - central_bearer_token | length > 0
     fail_msg: >-
-      aap-central-cluster-sa in Vault is missing host/bearer_token (or token/api_server aliases).
-      Re-run the push-aap-central-cluster-sa job or use resolve_central_cluster_connection.yml.
+      Neither aap-central-cluster-sa nor openshift-central-kubeadmin in Vault has
+      host + token. Re-run hs-plugin-cred-sync or seed cluster-admin token into Vault.

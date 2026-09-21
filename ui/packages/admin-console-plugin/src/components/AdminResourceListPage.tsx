@@ -29,8 +29,10 @@ export interface AdminResourceListPageProps {
   title: string;
   subtitle?: string;
   secondaryKind?: HybridSovereignKind;
+  tertiaryKind?: HybridSovereignKind;
   listPath: string;
   secondaryListPath?: string;
+  tertiaryListPath?: string;
   createPath?: string;
   enabled?: boolean;
   hideHeader?: boolean;
@@ -41,8 +43,10 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
   title,
   subtitle,
   secondaryKind,
+  tertiaryKind,
   listPath,
   secondaryListPath,
+  tertiaryListPath,
   createPath,
   enabled = true,
   hideHeader = false,
@@ -58,6 +62,9 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
   });
   const secondary = useK8sResourceList<K8sResource>(secondaryKind ?? kind, {
     enabled: enabled && !!secondaryKind,
+  });
+  const tertiary = useK8sResourceList<K8sResource>(tertiaryKind ?? kind, {
+    enabled: enabled && !!tertiaryKind,
   });
 
   const primaryFiltered = React.useMemo(
@@ -75,12 +82,21 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
     );
   }, [secondary.items, secondaryKind, search, statusFilter]);
 
+  const tertiaryFiltered = React.useMemo(() => {
+    if (!tertiaryKind) return [];
+    return filterResourcesByQuery(tertiary.items, tertiaryKind, search, true).filter((i) =>
+      matchesStatus(i, statusFilter),
+    );
+  }, [tertiary.items, tertiaryKind, search, statusFilter]);
+
   const refresh = () => {
     primary.refresh();
     if (secondaryKind) secondary.refresh();
+    if (tertiaryKind) tertiary.refresh();
   };
 
   const secondaryPath = secondaryListPath ?? listPath;
+  const tertiaryPath = tertiaryListPath ?? listPath;
 
   return (
     <PageSection className="sc-console-page">
@@ -134,6 +150,23 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
               showNamespace
               linkMode="anchor"
               detailHref={(item) => consoleAdminDetailHref(secondaryPath, secondaryKind, item)}
+            />
+          </div>
+        )}
+        {tertiaryKind && (
+          <div style={{ marginTop: '1rem' }}>
+            <PageHeader
+              title={t(`kinds.${tertiaryKind}`, { defaultValue: tertiaryKind })}
+              showLanguageToggle={false}
+            />
+            <ResourceListTable
+              kind={tertiaryKind}
+              items={tertiaryFiltered}
+              loading={tertiary.loading}
+              error={tertiary.error}
+              showNamespace
+              linkMode="anchor"
+              detailHref={(item) => consoleAdminDetailHref(tertiaryPath, tertiaryKind, item)}
             />
           </div>
         )}

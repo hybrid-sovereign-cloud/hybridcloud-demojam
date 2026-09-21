@@ -38,6 +38,7 @@ export const KIND_VISUALS: Record<string, KindVisual> = {
   PlatformOpenshift: { icon: ClusterIcon, label: 'Platform Openshift' },
   CloudOSO: { icon: LayerGroupIcon, label: 'Cloud OSO' },
   CloudAWS: { icon: AwsIcon, label: 'Cloud AWS' },
+  CloudVirt: { icon: ServerIcon, label: 'Cloud Virt' },
   Cloud: { icon: CloudIcon, label: 'Cloud' },
   Assignment: { icon: ProjectDiagramIcon, label: 'Assignment' },
   Persona: { icon: UserEditIcon, label: 'Persona' },

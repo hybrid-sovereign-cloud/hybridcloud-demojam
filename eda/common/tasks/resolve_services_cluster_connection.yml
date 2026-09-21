@@ -14,15 +14,20 @@
       openshift-services-kubeadmin password in Vault looks like a bcrypt hash.
       Re-seed Vault with the plaintext kubeadmin password (OCP_SERVICES_KUBEADMIN_PASSWORD).
 
-- name: Set services API host from Vault
+- name: Set services API host from Vault (always https scheme)
   ansible.builtin.set_fact:
-    services_api_host: "{{ vault_kv_data.api_host }}"
+    services_api_host: >-
+      {{
+        vault_kv_data.api_host
+        if (vault_kv_data.api_host | regex_search('^https?://'))
+        else ('https://' ~ (vault_kv_data.api_host | regex_replace('^//', '')))
+      }}
   no_log: true
 
 - name: Obtain services cluster API bearer token via kubeadmin OAuth
   ansible.builtin.include_tasks: obtain_openshift_access_token.yml
   vars:
-    ocp_api_host: "{{ vault_kv_data.api_host }}"
+    ocp_api_host: "{{ services_api_host }}"
     ocp_username: "{{ vault_kv_data.username }}"
     ocp_password: "{{ vault_kv_data.password }}"
 

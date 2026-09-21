@@ -58,6 +58,7 @@ const DASHBOARD_LIST_PATH: Partial<Record<HybridSovereignKind, string>> = {
   PlatformOpenshift: '/api/platformopenshifts',
   CloudOSO: '/api/cloudosos',
   CloudAWS: '/api/cloudawss',
+  CloudVirt: '/api/cloudvirts',
   OpenStackMigration: '/api/openstackmigrations',
   Persona: '/api/personas',
   Rbac: '/api/rbacs',
@@ -161,6 +162,7 @@ const UPDATE_METHOD: Partial<Record<HybridSovereignKind, 'PUT' | 'PATCH'>> = {
   PlatformOpenshift: 'PATCH',
   CloudOSO: 'PATCH',
   CloudAWS: 'PATCH',
+  CloudVirt: 'PATCH',
   Persona: 'PATCH',
 };
 

@@ -28,6 +28,7 @@ import {
   ClusterIcon,
   LayerGroupIcon,
   AwsIcon,
+  ServerIcon,
   TopologyIcon,
   OutlinedBellIcon,
   QuestionCircleIcon,
@@ -88,6 +89,7 @@ const NAV: NavEntry[] = [
   },
   { type: 'link', path: '/cloudoso', labelKey: 'nav.cloudOso', icon: LayerGroupIcon, kind: 'CloudOSO', form: 'cloudoso' },
   { type: 'link', path: '/cloudaws', labelKey: 'nav.cloudAws', icon: AwsIcon, kind: 'CloudAWS', form: 'cloudaws' },
+  { type: 'link', path: '/cloudvirt', labelKey: 'nav.cloudVirt', icon: ServerIcon, kind: 'CloudVirt', form: 'cloudvirt' },
   {
     type: 'link',
     path: '/migrations',

@@ -232,11 +232,21 @@ spec:
                   api = pick("apiUrl", "consoleUrl") or api
 
               if sa_tok or password:
-                  data = {"api_host": api, "username": ocp_user, "password": password}
+                  # Normalize api_host so AAP jobs never see scheme-less hosts
+                  api_norm = api.strip()
+                  if api_norm and not api_norm.startswith(("http://", "https://")):
+                      api_norm = "https://" + api_norm.lstrip("/")
+                  data = {"api_host": api_norm, "username": ocp_user, "password": password}
                   if sa_tok:
                       data["token"] = sa_tok
                   put_kv("openshift-services-kubeadmin", data)
                   put_kv("openshift-central-kubeadmin", data)
+                  # PlatformOpenshift provision expects aap-central-cluster-sa (host + bearer_token)
+                  if sa_tok:
+                      put_kv(
+                          "aap-central-cluster-sa",
+                          {"host": api_norm, "api_host": api_norm, "bearer_token": sa_tok, "token": sa_tok},
+                      )
               else:
                   print("WARN: no openshift token/password; skip openshift-*-kubeadmin seed")
 

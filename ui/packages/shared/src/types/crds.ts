@@ -105,7 +105,7 @@ export interface PlatformOpenshiftOpenstackSpec {
 }
 
 export interface PlatformOpenshiftSpec {
-  type: 'openstack' | 'aws' | 'vmware';
+  type: 'openstack' | 'aws' | 'virt' | 'hosted' | 'vmware';
   openstack?: PlatformOpenshiftOpenstackSpec;
   cloudRef?: string;
 }
@@ -138,6 +138,25 @@ export interface CloudAWSSpec {
 }
 
 export type CloudAWS = K8sResource<CloudAWSSpec>;
+
+/** CloudVirt — OpenShift Virtualization (CNV) environment */
+export interface CloudVirtToolRbac {
+  environmentAdminRbac?: string[];
+  environmentPoweruserRbac?: string[];
+  environmentViewerRbac?: string[];
+}
+
+export interface CloudVirtSpec {
+  vaultPath?: string;
+  baseDomain?: string;
+  storageClass?: string;
+  networkAttachment?: string;
+  enableVRF?: boolean;
+  vrfId?: string;
+  toolRbac?: CloudVirtToolRbac;
+}
+
+export type CloudVirt = K8sResource<CloudVirtSpec>;
 
 /** OpenStackMigration — VMware to CloudOSO migration */
 export interface OpenStackMigrationSpec {
@@ -312,6 +331,7 @@ export type HybridSovereignKind =
   | 'PlatformOpenshift'
   | 'CloudOSO'
   | 'CloudAWS'
+  | 'CloudVirt'
   | 'OpenStackMigration'
   | 'Rbac'
   | 'RbacConfig'
@@ -338,6 +358,7 @@ export const KIND_PLURALS: Record<HybridSovereignKind, string> = {
   PlatformOpenshift: 'platformopenshifts',
   CloudOSO: 'cloudosos',
   CloudAWS: 'cloudawss',
+  CloudVirt: 'cloudvirts',
   OpenStackMigration: 'openstackmigrations',
   Rbac: 'rbacs',
   RbacConfig: 'rbacconfigs',
@@ -363,6 +384,7 @@ export const TENANT_OVERVIEW_KINDS: HybridSovereignKind[] = [
   'Assignment',
   'CloudOSO',
   'CloudAWS',
+  'CloudVirt',
   'OpenStackMigration',
   'Persona',
   'Rbac',
@@ -383,6 +405,7 @@ export type HybridSovereignResource =
   | PlatformOpenshift
   | CloudOSO
   | CloudAWS
+  | CloudVirt
   | OpenStackMigration
   | Rbac
   | RbacConfig

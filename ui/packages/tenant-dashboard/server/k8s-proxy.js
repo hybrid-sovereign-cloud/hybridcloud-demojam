@@ -77,6 +77,7 @@ const KIND_PLURALS = {
   PlatformOpenshift: "platformopenshifts",
   CloudOSO: "cloudosos",
   CloudAWS: "cloudawss",
+  CloudVirt: "cloudvirts",
   OpenStackMigration: "openstackmigrations",
   Rbac: "rbacs",
   RbacConfig: "rbacconfigs",
@@ -150,6 +151,10 @@ export function createK8sHandlers(apiServer) {
   const MTV_CATALOG_PATH = "/api/v1/namespaces/sovereign-cloud/configmaps/mtv-migration-catalog";
   function cloudawssCollectionPath(namespace) {
     return `/apis/hybridsovereign.redhat/v1alpha1/namespaces/${encodeURIComponent(namespace)}/cloudawss`;
+  }
+
+  function cloudvirtsCollectionPath(namespace) {
+    return `/apis/hybridsovereign.redhat/v1alpha1/namespaces/${encodeURIComponent(namespace)}/cloudvirts`;
   }
   function personasCollectionPath(namespace) {
     return `/apis/hybridsovereign.redhat/v1alpha1/namespaces/${encodeURIComponent(namespace)}/personas`;
@@ -1319,6 +1324,125 @@ export function createK8sHandlers(apiServer) {
       }
     },
 
+
+    async listCloudVirts(req, res) {
+      const token = userAccessToken(req);
+      if (!token) return res.status(401).json({ message: "Unauthorized" });
+      const namespace = req.query.namespace;
+      if (!namespace || !NS_PATTERN.test(namespace)) {
+        return res.status(400).json({ message: "namespace query parameter required" });
+      }
+      try {
+        const resp = await k8sRequest(apiServer, cloudvirtsCollectionPath(namespace), "GET", token);
+        if (resp.status === 403) return res.status(403).json({ message: "Forbidden" });
+        if (resp.status >= 400) return res.status(502).json({ message: "Failed to list CloudVirts" });
+        res.json(resp.body?.items || []);
+      } catch (err) {
+        console.error("CloudVirt list error:", err.message);
+        res.status(502).json({ message: "Failed to communicate with cluster API" });
+      }
+    },
+
+    async createCloudVirt(req, res) {
+      const token = userAccessToken(req);
+      if (!token) return res.status(401).json({ message: "Unauthorized" });
+      const { name, namespace, spec } = req.body || {};
+      if (!name || !namespace) return res.status(400).json({ message: "name and namespace required" });
+      if (!NAME_PATTERN.test(name)) return res.status(400).json({ message: "Invalid name" });
+      if (!NS_PATTERN.test(namespace)) return res.status(400).json({ message: "Invalid namespace" });
+      if (!spec?.vaultPath || !spec?.baseDomain) {
+        return res.status(400).json({ message: "spec.vaultPath and spec.baseDomain are required" });
+      }
+      const cloudvirt = {
+        apiVersion: "hybridsovereign.redhat/v1alpha1",
+        kind: "CloudVirt",
+        metadata: { name, namespace },
+        spec: {
+          vaultPath: spec.vaultPath,
+          baseDomain: spec.baseDomain,
+          ...(spec?.storageClass ? { storageClass: spec.storageClass } : {}),
+          ...(spec?.networkAttachment ? { networkAttachment: spec.networkAttachment } : {}),
+          ...(spec?.enableVRF != null ? { enableVRF: !!spec.enableVRF } : {}),
+          ...(spec?.vrfId ? { vrfId: spec.vrfId } : {}),
+        },
+      };
+      try {
+        const resp = await k8sRequest(apiServer, cloudvirtsCollectionPath(namespace), "POST", token, cloudvirt);
+        if (resp.status === 409) return res.status(409).json({ message: `CloudVirt '${name}' already exists` });
+        if (resp.status === 403) return res.status(403).json({ message: "Forbidden" });
+        if (resp.status >= 400) {
+          return res.status(502).json({ message: resp.body?.message || "Failed to create CloudVirt" });
+        }
+        res.status(201).json(resp.body);
+      } catch (err) {
+        console.error("CloudVirt create error:", err.message);
+        res.status(502).json({ message: "Failed to communicate with cluster API" });
+      }
+    },
+
+    async getCloudVirt(req, res) {
+      const token = userAccessToken(req);
+      if (!token) return res.status(401).json({ message: "Unauthorized" });
+      const { name } = req.params;
+      const namespace = req.query.namespace;
+      if (!name || !NAME_PATTERN.test(name)) return res.status(400).json({ message: "Invalid name" });
+      if (!namespace || !NS_PATTERN.test(namespace)) return res.status(400).json({ message: "Invalid namespace" });
+      try {
+        const urlPath = `${cloudvirtsCollectionPath(namespace)}/${encodeURIComponent(name)}`;
+        const resp = await k8sRequest(apiServer, urlPath, "GET", token);
+        if (resp.status === 404) return res.status(404).json({ message: "Not found" });
+        if (resp.status === 403) return res.status(403).json({ message: "Forbidden" });
+        if (resp.status >= 400) return res.status(502).json({ message: "Failed to get CloudVirt" });
+        res.json(resp.body);
+      } catch (err) {
+        console.error("CloudVirt get error:", err.message);
+        res.status(502).json({ message: "Failed to communicate with cluster API" });
+      }
+    },
+
+    async patchCloudVirt(req, res) {
+      const token = userAccessToken(req);
+      if (!token) return res.status(401).json({ message: "Unauthorized" });
+      const { name } = req.params;
+      const namespace = req.query.namespace;
+      const { spec } = req.body || {};
+      if (!name || !NAME_PATTERN.test(name)) return res.status(400).json({ message: "Invalid name" });
+      if (!namespace || !NS_PATTERN.test(namespace)) return res.status(400).json({ message: "Invalid namespace" });
+      if (!spec) return res.status(400).json({ message: "spec is required" });
+      try {
+        const urlPath = `${cloudvirtsCollectionPath(namespace)}/${encodeURIComponent(name)}`;
+        const patch = [{ op: "replace", path: "/spec", value: spec }];
+        const resp = await k8sRequest(apiServer, urlPath, "PATCH", token, patch, "application/json-patch+json");
+        if (resp.status === 404) return res.status(404).json({ message: "Not found" });
+        if (resp.status === 403) return res.status(403).json({ message: "Forbidden" });
+        if (resp.status >= 400) return res.status(502).json({ message: resp.body?.message || "Failed to patch CloudVirt" });
+        res.json(resp.body);
+      } catch (err) {
+        console.error("CloudVirt patch error:", err.message);
+        res.status(502).json({ message: "Failed to communicate with cluster API" });
+      }
+    },
+
+    async deleteCloudVirt(req, res) {
+      const token = userAccessToken(req);
+      if (!token) return res.status(401).json({ message: "Unauthorized" });
+      const { name } = req.params;
+      const namespace = req.query.namespace;
+      if (!name || !NAME_PATTERN.test(name)) return res.status(400).json({ message: "Invalid name" });
+      if (!namespace || !NS_PATTERN.test(namespace)) return res.status(400).json({ message: "Invalid namespace" });
+      try {
+        const urlPath = `${cloudvirtsCollectionPath(namespace)}/${encodeURIComponent(name)}`;
+        const resp = await k8sRequest(apiServer, urlPath, "DELETE", token);
+        if (resp.status === 404) return res.status(404).json({ message: "Not found" });
+        if (resp.status === 403) return res.status(403).json({ message: "Forbidden" });
+        if (resp.status >= 400) return res.status(502).json({ message: "Failed to delete CloudVirt" });
+        res.json({ message: `CloudVirt '${name}' deleted` });
+      } catch (err) {
+        console.error("CloudVirt delete error:", err.message);
+        res.status(502).json({ message: "Failed to communicate with cluster API" });
+      }
+    },
+
     async createVault(req, res) {
       const token = userAccessToken(req);
       if (!token) return res.status(401).json({ message: "Unauthorized" });
@@ -2129,6 +2253,7 @@ export function createK8sHandlers(apiServer) {
       const RESOURCE_TYPES = [
         { resource: "cloudosos",           group: "hybridsovereign.redhat" },
         { resource: "cloudawss",           group: "hybridsovereign.redhat" },
+        { resource: "cloudvirts",          group: "hybridsovereign.redhat" },
         { resource: "platformopenshifts",  group: "hybridsovereign.redhat" },
         { resource: "vaultkvs",            group: "hybridsovereign.redhat" },
         { resource: "vaults",              group: "hybridsovereign.redhat" },

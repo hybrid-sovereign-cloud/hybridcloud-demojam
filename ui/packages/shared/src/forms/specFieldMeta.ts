@@ -138,6 +138,16 @@ export const KIND_SPEC_META: Partial<Record<HybridSovereignKind, KindSpecMeta>> 
       { path: 'landingzone', labelKey: 'fields.landingzone', widget: 'text' },
     ],
   },
+  CloudVirt: {
+    fields: [
+      { path: 'vaultPath', labelKey: 'fields.vaultPath', widget: 'text' },
+      { path: 'baseDomain', labelKey: 'fields.baseDomain', widget: 'text' },
+      { path: 'storageClass', labelKey: 'fields.storageClass', widget: 'text' },
+      { path: 'networkAttachment', labelKey: 'fields.networkAttachment', widget: 'text' },
+      { path: 'enableVRF', labelKey: 'fields.enableVRF', widget: 'boolean' },
+      { path: 'vrfId', labelKey: 'fields.vrfId', widget: 'text' },
+    ],
+  },
   OpenStackMigration: {
     fields: [
       { path: 'source', labelKey: 'fields.source', widget: 'text', immutable: true },

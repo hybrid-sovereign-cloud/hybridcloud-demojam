@@ -24,6 +24,7 @@ const LIST_PATH: Record<string, string> = {
   assignment: '/hybridsovereign/tenant/assignments',
   cloudoso: '/hybridsovereign/tenant/cloudoso',
   cloudaws: '/hybridsovereign/tenant/cloudaws',
+  cloudvirt: '/hybridsovereign/tenant/cloudvirt',
   platformopenshift: '/hybridsovereign/tenant/platforms',
   migration: '/hybridsovereign/tenant/migrations',
   persona: '/hybridsovereign/tenant/personas',

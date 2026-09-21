@@ -24,6 +24,7 @@ const OVERVIEW_KINDS: HybridSovereignKind[] = [
   'PlatformOpenshift',
   'CloudOSO',
   'CloudAWS',
+  'CloudVirt',
   'HybridFabric',
   'CloudGateway',
   'TransportLink',

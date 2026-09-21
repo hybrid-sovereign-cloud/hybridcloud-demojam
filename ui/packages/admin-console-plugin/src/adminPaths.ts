@@ -11,6 +11,7 @@ export const ADMIN_LIST_PATH: Partial<Record<HybridSovereignKind, string>> = {
   PlatformOpenshift: `${PREFIX}/platforms`,
   CloudOSO: `${PREFIX}/clouds/cloudoso`,
   CloudAWS: `${PREFIX}/clouds/cloudaws`,
+  CloudVirt: `${PREFIX}/clouds/cloudvirt`,
   Persona: `${PREFIX}/personas`,
   Rbac: `${PREFIX}/operators/rbacs`,
   RbacConfig: `${PREFIX}/operators/rbacconfigs`,

@@ -1,23 +1,30 @@
 ---
+- name: Resolve services cluster connection
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
+
 - name: Set CloudVirt teardown facts
   ansible.builtin.set_fact:
-    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default('') }}"
-    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default('entity-acme-corp') }}"
+    cloudvirt_name: "{{ ansible_operator_meta.name | default(cloudvirt_cr_name) | default(cr_name) | default('') }}"
+    cloudvirt_namespace: "{{ ansible_operator_meta.namespace | default(cloudvirt_cr_namespace) | default(cr_namespace) | default('entity-acme-corp') }}"
 
-- name: Mark CloudVirt deletionComplete
-  when: cloudvirt_name | length > 0
-  operator_sdk.util.k8s_status:
-    api_version: hybridsovereign.redhat/v1alpha1
-    kind: CloudVirt
-    name: "{{ cloudvirt_name }}"
-    namespace: "{{ cloudvirt_namespace }}"
-    status:
+- name: Skip when name missing
+  ansible.builtin.meta: end_play
+  when: cloudvirt_name | length == 0
+
+- name: Patch CloudVirt deletionComplete
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: cloudvirts
+    cr_name: "{{ cloudvirt_name }}"
+    cr_namespace: "{{ cloudvirt_namespace }}"
+    cr_action: failed
+    status_patch:
       status: deleted
       ready: false
       deletionComplete: true
       message: CloudVirt teardown stub complete
-  ignore_errors: true
 
 - name: CloudVirt teardown complete
   ansible.builtin.debug:
-    msg: "cloudvirt teardown stub complete for {{ cloudvirt_name }}"
+    msg: "cloudvirt teardown stub complete for {{ cloudvirt_namespace }}/{{ cloudvirt_name }}"

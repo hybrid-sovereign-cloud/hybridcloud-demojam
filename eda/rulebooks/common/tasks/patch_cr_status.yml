@@ -7,7 +7,9 @@
       import json, requests, urllib3, sys, datetime, os, traceback
       urllib3.disable_warnings()
       try:
-          api_host = os.environ["CR_API_HOST"]
+          api_host = os.environ["CR_API_HOST"].strip()
+          if api_host and not api_host.startswith(("http://", "https://")):
+              api_host = "https://" + api_host.lstrip("/")
           token = os.environ["CR_TOKEN"]
           cr_api = os.environ["CR_API_VERSION"]
           cr_ns = os.environ["CR_NAMESPACE"]
