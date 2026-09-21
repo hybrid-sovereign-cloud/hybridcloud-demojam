@@ -19,7 +19,8 @@ Track recurring failures across wipe→rollout cycles. If the **same issue** rea
 | ZTP-011 | 2026-09-21 (l9mxc) | All BuildConfigs `PushImageToRegistryFailed`; registry `invalid token` / SA UID mismatch | Builder dockercfg secret predates recreated SA | Wipe deletes builder SA and dockercfg; waits for a newer secret | 1 (**builds Complete**) |
 | ZTP-012 | 2026-09-21 (l9mxc) | `hs-quay` `UpgradePending`; MCE CSV `Pending` | Wipe deleted InstallPlans the Subscriptions still referenced | Delete Subscription+IP+CSV; ignore copied ESO/GitOps CSVs | 1 (**quay + MCE CSV Succeeded**) |
 | ZTP-013 | 2026-09-21 (l9mxc) | `hs-acm` stuck Progressing: MultiClusterHub `Uninstalling` / "Pending deletion" | MCE cannot delete ManagedCluster (dead ocm-webhook); merge-patch empty finalizers no-op | Wipe deletes OCM webhooks; JSON-remove finalizers on ManagedCluster→MCE→MCH | 2 (**MCH created fresh**) |
-| ZTP-014 | 2026-09-21 (l9mxc) | MCE `Error`; ManagedClusterAddOn CRD Missing; MCH Installing | ClusterManager stuck Terminating (since 05:57Z) so CRDs never reinstall | JSON-remove ClusterManager/Klusterlet finalizers; wait until gone before sync | 3 (fixing — last attempt) |
+| ZTP-014 | 2026-09-21 (l9mxc) | MCE `Error` then Progressing; ManagedClusterAddOn CRD Missing then restored | ClusterManager stuck Terminating so CRDs never reinstall | JSON-remove ClusterManager/Klusterlet finalizers; wait until gone | 3 (**CRD restored; MCE Progressing**) |
+| ZTP-015 | 2026-09-21 (l9mxc) | API `dial tcp ...:6443: i/o timeout` during ACM install soak | Control plane unreachable from agent host | **HALT** — cannot monitor/wipe; need cluster API restored | 1 (**HALTED**) |
 
 ## Recurrence halt rule
 
