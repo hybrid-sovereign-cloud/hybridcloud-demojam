@@ -282,23 +282,58 @@ run oc -n quay delete quayregistry.quay.redhat.com --all --wait=false 2>/dev/nul
 run oc -n quay delete objectbucketclaim.objectbucket.io --all --wait=false 2>/dev/null || true
 run oc -n open-cluster-management delete multiclusterhub.operator.open-cluster-management.io --all --wait=false 2>/dev/null || true
 if [ "$DRY_RUN" != 1 ]; then
-  for i in $(seq 1 30); do
+  for i in $(seq 1 24); do
     left=0
     for ns in quay multicluster-engine open-cluster-management; do
-      n=$(oc get csv,installplan,sub -n "$ns" --no-headers 2>/dev/null | wc -l || true)
-      left=$((left + n))
+      # Copied global-operator CSVs (ESO/GitOps) are not ours — ignore them
+      n=$(oc get sub,installplan -n "$ns" --no-headers 2>/dev/null | wc -l || true)
+      csvn=$(oc get csv -n "$ns" -o name 2>/dev/null | grep -vE 'openshift-external-secrets-operator|openshift-gitops-operator' | wc -l || true)
+      left=$((left + n + csvn))
     done
     echo "  olm leftovers=$left t=$i"
     if [ "$left" = "0" ]; then
       break
     fi
-    if [ "$i" -eq 10 ] || [ "$i" -eq 20 ]; then
+    if [ "$i" -eq 8 ] || [ "$i" -eq 16 ]; then
       for ns in quay multicluster-engine open-cluster-management; do
-        for csv in $(oc get csv -n "$ns" -o name 2>/dev/null || true); do
+        for csv in $(oc get csv -n "$ns" -o name 2>/dev/null | grep -vE 'openshift-external-secrets-operator|openshift-gitops-operator' || true); do
           oc -n "$ns" patch "$csv" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
           oc -n "$ns" delete "$csv" --wait=false 2>/dev/null || true
         done
       done
+    fi
+    sleep 5
+  done
+fi
+
+echo "== F3. Release stuck ACM/MCE uninstall (ZTP-013) =="
+# MCE finalize deletes ManagedCluster local-cluster via ocm-validating-webhook.
+# After a partial wipe that webhook Service is gone, so uninstall loops forever
+# and the next MultiClusterHub stays Pending deletion.
+if oc get validatingwebhookconfiguration ocm-validating-webhook >/dev/null 2>&1; then
+  if ! oc get svc -n multicluster-engine ocm-webhook >/dev/null 2>&1; then
+    echo "  ocm-webhook service missing; removing dead validating webhook"
+    run oc delete validatingwebhookconfiguration ocm-validating-webhook --wait=false 2>/dev/null || true
+    run oc delete mutatingwebhookconfiguration ocm-mutating-webhook --wait=false 2>/dev/null || true
+  fi
+fi
+if [ "$DRY_RUN" != 1 ]; then
+  for i in $(seq 1 36); do
+    mch_phase=$(oc get multiclusterhub -n open-cluster-management -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
+    mce_phase=$(oc get multiclusterengine -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
+    echo "  mch=${mch_phase:-gone} mce=${mce_phase:-gone} t=$i"
+    if [ -z "$mch_phase" ] && [ -z "$mce_phase" ]; then
+      break
+    fi
+    if [ "$i" -eq 18 ] || [ "$i" -eq 30 ]; then
+      # Last resort: drop finalizers on objects that have been Terminating > this wipe
+      for obj in $(oc get multiclusterengine -o name 2>/dev/null || true); do
+        oc patch "$obj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+      done
+      for obj in $(oc get multiclusterhub -n open-cluster-management -o name 2>/dev/null || true); do
+        oc -n open-cluster-management patch "$obj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+      done
+      oc delete managedcluster local-cluster --wait=false 2>/dev/null || true
     fi
     sleep 5
   done
