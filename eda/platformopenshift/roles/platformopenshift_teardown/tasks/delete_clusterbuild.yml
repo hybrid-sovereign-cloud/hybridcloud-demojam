@@ -50,6 +50,9 @@
 
 - name: Delete ClusterDeployment if still present
   kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     state: absent
     api_version: hive.openshift.io/v1
     kind: ClusterDeployment
@@ -59,18 +62,24 @@
 
 - name: Wait for ClusterDeployment deletion
   kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     api_version: hive.openshift.io/v1
     kind: ClusterDeployment
     name: "{{ platformopenshift_cr_name }}"
     namespace: "{{ platformopenshift_cr_name }}"
   register: cd_wait
-  until: cd_wait.resources | length == 0
+  until: (cd_wait.resources | default([]) | length) == 0
   retries: 120
   delay: 15
   ignore_errors: true
 
 - name: Delete cluster namespace on central
   kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     state: absent
     api_version: v1
     kind: Namespace

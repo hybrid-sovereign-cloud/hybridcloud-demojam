@@ -33,19 +33,7 @@
   ansible.builtin.set_fact:
     hs_status: "{{ (hs_live.resources | default([{}]))[0].status | default(status | default({})) }}"
     # watches use snakeCaseParameters: false → camelCase deletionTimestamp
-    is_delete: >-
-      {{
-        (
-          (ansible_operator_meta.deletionTimestamp | default('') | string | length > 0) or
-          (ansible_operator_meta.deletion_timestamp | default('') | string | length > 0) or
-          (
-            (hs_live.resources | default([])) | length > 0 and
-            (
-              (hs_live.resources[0].metadata.deletionTimestamp | default('') | string | length > 0)
-            )
-          )
-        ) | bool
-      }}
+    is_delete: "{{ ((ansible_operator_meta.deletionTimestamp | default(ansible_operator_meta.deletion_timestamp | default((hs_live.resources | default([{}]))[0].metadata.deletionTimestamp | default('')) | default('')) | string | length) > 0) | bool }}"
 
 - name: Normalize status fields
   ansible.builtin.set_fact:
