@@ -11,7 +11,7 @@
     cb_app_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_domain: >-
-      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)))
+      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
     cb_image_set: "{{ platform_spec.openstack.ocpImageSet | default(default_ocp_image_set) }}"

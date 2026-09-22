@@ -12,10 +12,10 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
-    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)) }}"
+    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)) }}"
     ep_parent_zone_id: >-
       {{ oso_spec.designateZoneId | default('')
-         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)))
+         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)))
          else '' }}
 
 - name: Create temporary ExternalSecret for OpenStack admin credentials
@@ -82,7 +82,7 @@
 - name: Derive domain names
   ansible.builtin.set_fact:
     ep_cluster_domain: >-
-      {{ (cloudoso_cr_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)))
+      {{ (cloudoso_cr_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
          if (use_designate_dns | default(false) | bool)
          else (ep_slug ~ '.' ~ ep_base_domain) }}
 
@@ -359,7 +359,7 @@
       clouds:
         openstack:
           auth:
-            auth_url: "{{ app_cred_data.auth_url | default('https://identity.atuin.' ~ (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true))) }}"
+            auth_url: "{{ app_cred_data.auth_url | default('https://identity.atuin.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true))) }}"
             application_credential_id: "{{ app_cred_data.id }}"
             application_credential_secret: "{{ app_cred_data.secret }}"
           region_name: "{{ ep_region_name }}"

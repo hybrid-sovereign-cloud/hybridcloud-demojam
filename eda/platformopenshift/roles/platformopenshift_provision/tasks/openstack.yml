@@ -43,7 +43,7 @@
     cb_api_vip: "{{ cloudoso_cr.resources[0].status.apiVIP | default('') }}"
     cb_ingress_vip: "{{ cloudoso_cr.resources[0].status.ingressVIP | default('') }}"
     cb_external_network: "{{ oso_external_network }}"
-    use_designate_dns: "{{ cloudoso_cr.resources[0].spec.baseDomain | default('') == (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)) }}"
+    use_designate_dns: "{{ cloudoso_cr.resources[0].spec.baseDomain | default('') == (lookup('env', 'BASE_DOMAIN') | default('', true)) }}"
     designate_zone_id: "{{ cloudoso_cr.resources[0].spec.designateZoneId | default('895a1406-9ad2-4372-80f9-4e23fe1fd9ef') }}"
     designate_project_id: "{{ cloudoso_cr.resources[0].status.projectId | default(cloudoso_cr.resources[0].spec.designateProjectId | default('')) }}"
     designate_project_name: "{{ cloudoso_cr.resources[0].status.projectName | default('') }}"
@@ -55,7 +55,7 @@
     cb_app_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_domain: >-
-      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)))
+      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
 

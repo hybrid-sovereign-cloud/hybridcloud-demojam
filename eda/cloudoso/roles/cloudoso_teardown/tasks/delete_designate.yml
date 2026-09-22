@@ -61,7 +61,7 @@
     auth['project_name'] = '{{ ep_project }}'
     auth['project_domain_name'] = '{{ ep_project_domain }}'
     conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3')
-    zone_name = '{{ oso_spec.designateZoneName | default((lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true)) ~ '.') }}'
+    zone_name = '{{ oso_spec.designateZoneName | default((lookup('env', 'BASE_DOMAIN') | default('', true)) ~ '.') }}'
     zone = conn.dns.find_zone(zone_name)
     if not zone:
         raise SystemExit(0)
