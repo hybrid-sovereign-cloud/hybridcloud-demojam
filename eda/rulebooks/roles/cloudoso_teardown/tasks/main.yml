@@ -46,7 +46,7 @@
     - name: Set CloudOSO teardown derived facts
       ansible.builtin.set_fact:
         ep_project: "{{ entity_name }}_{{ cloudoso_cr_name }}"
-        ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true) }}"
+        ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('', true), true) }}"
         ep_route53_vault_path: "{{ oso_spec.route53VaultPath | default('oso/accounts/route53-openstack') }}"
         ep_vault_path: "{{ oso_spec.vaultPath | default('oso/accounts/shc_admin') }}"
         ep_project_domain: "{{ oso_spec.projectDomain | default(default_project_domain) }}"
@@ -61,7 +61,7 @@
         oso_domain: ""
         entity_name: "{{ cloudoso_cr_namespace | regex_replace('^entity-', '') }}"
         ep_project: "{{ (cloudoso_cr_namespace | regex_replace('^entity-', '')) }}_{{ cloudoso_cr_name }}"
-        ep_base_domain: {{ lookup('env', 'LAB_DOMAIN') }}
+        ep_base_domain: "{{ lookup('env', 'LAB_DOMAIN') | default('', true) }}"
         ep_route53_vault_path: oso/accounts/route53-openstack
         ep_vault_path: oso/accounts/shc_admin
         ep_project_domain: shc_domain
@@ -73,11 +73,17 @@
 
     - name: Tear down Route53 slug records
       ansible.builtin.include_tasks: delete_route53.yml
-      when: oso_domain | length > 0 and oso_spec.baseDomain | default(lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true), true) != (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true))
+      when: >-
+        oso_domain | length > 0
+        and (lookup('env', 'BASE_DOMAIN') | default('', true) | length) > 0
+        and (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('', true), true))
+           != (lookup('env', 'BASE_DOMAIN') | default('', true))
 
     - name: Tear down Designate DNS records
       ansible.builtin.include_tasks: delete_designate.yml
-      when: oso_spec.baseDomain | default('') == (lookup('env', 'BASE_DOMAIN') | default('signal9.gg', true))
+      when: >-
+        (lookup('env', 'BASE_DOMAIN') | default('', true) | length) > 0
+        and (oso_spec.baseDomain | default('')) == (lookup('env', 'BASE_DOMAIN') | default('', true))
 
     - name: Get deletion reconcile timestamp
       ansible.builtin.set_fact:

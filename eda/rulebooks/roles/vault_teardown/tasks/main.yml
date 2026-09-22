@@ -122,7 +122,7 @@
               {{
                 ('https://' + kc_route_fin.resources[0].spec.host)
                 if (kc_route_fin.resources | length > 0)
-                else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io', true)
+                else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true)
               }}
 
         - name: Get Keycloak admin token

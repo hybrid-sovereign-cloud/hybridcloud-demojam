@@ -1,4 +1,5 @@
 ---
 plugin_rbac_operator_namespace: sovereign-cloud-plugins
 plugin_rbac_keycloak_realm: sso
-plugin_rbac_keycloak_url_default: "https://sso.apps.cluster-kbnzw.dyn.redhatworkshops.io"
+# Empty = discover from KEYCLOAK_EXTERNAL_URL / in-cluster service (ZTP-safe)
+plugin_rbac_keycloak_url_default: ""

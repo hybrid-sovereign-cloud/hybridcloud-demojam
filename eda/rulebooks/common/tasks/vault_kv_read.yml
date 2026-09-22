@@ -13,7 +13,7 @@
 - name: Read {{ vault_kv_path }} from Vault KV
   ansible.builtin.uri:
     url: >-
-      {{ lookup('env', 'VAULT_ADDR') | default('https://vault-vault.apps.cluster-qvhzm.dyn.redhatworkshops.io', true) }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ vault_kv_path }}
+      {{ lookup('env', 'VAULT_ADDR') | default('', true) }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ vault_kv_path }}
     method: GET
     headers:
       X-Vault-Token: "{{ lookup('env', 'VAULT_TOKEN') }}"

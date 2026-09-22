@@ -27,7 +27,7 @@
           {{
             ('https://' + kc_route.resources[0].spec.host)
             if (kc_route.resources | length > 0)
-            else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://sso.apps.cluster-qvhzm.dyn.redhatworkshops.io', true)
+            else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true)
           }}
 
     - name: Run Keycloak admin cleanup when spec is available

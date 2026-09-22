@@ -234,7 +234,7 @@
                   'cluster': 'local'
                 },
                 'plugin_rbac_keycloak_realm': 'sso',
-                'KEYCLOAK_EXTERNAL_URL': lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('https://sso.apps.cluster-kbnzw.dyn.redhatworkshops.io', true)
+                'KEYCLOAK_EXTERNAL_URL': lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true)
               } | to_json
             }}
         status_code: [201]
