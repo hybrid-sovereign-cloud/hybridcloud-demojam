@@ -32,7 +32,7 @@ provision:
   builds: true
   operators: true
   ui: true
-  samples: true
+  samples: false  # disabled — do not install workshop sample CRs via ArgoCD
   aapConfig: true  # JobTemplates / org config only (not AAP instance)
 
 # Hard bans
@@ -41,9 +41,9 @@ eda: false
 mtc: false
 mtv: false
 
-# Sample filters
+# Sample filters (only used when provision.samples is true)
 samples:
-  deployAllExceptParked: true
+  deployAllExceptParked: false
   parkedKinds:
     - CloudAWS
     - CloudOSO
