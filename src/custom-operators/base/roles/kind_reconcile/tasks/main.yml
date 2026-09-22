@@ -43,11 +43,28 @@
     cur_phase: "{{ hs_status.phase | default('') | string }}"
     deletion_complete: "{{ hs_status.deletionComplete | default(false) | bool }}"
 
-- name: Clear finalizer when EDA teardown reported deletionComplete
-  ansible.builtin.meta: end_play
+# ansible-operator only drops the watches finalizer after a successful finalizer
+# playbook. meta:end_play alone has raced with status patches and left CRs stuck
+# with deletionComplete=true. Explicitly clear hybridsovereign finalizers.
+- name: Clear finalizers when EDA teardown reported deletionComplete
   when:
     - is_delete | bool
     - deletion_complete | bool
+  block:
+    - name: Remove hybridsovereign finalizers from deleting CR
+      kubernetes.core.k8s:
+        state: present
+        api_version: "{{ hs_api_version }}"
+        kind: "{{ hs_kind }}"
+        name: "{{ hs_name }}"
+        namespace: "{{ hs_namespace }}"
+        definition:
+          metadata:
+            finalizers: []
+      failed_when: false
+
+    - name: End play after finalizer clear
+      ansible.builtin.meta: end_play
 
 - name: Skip when generation already observed and phase ready
   ansible.builtin.meta: end_play
