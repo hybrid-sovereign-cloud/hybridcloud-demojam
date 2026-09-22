@@ -13,6 +13,8 @@ Child Applications — ZTP wave order (parent sync waits for prior wave Healthy)
  35  hs-aap-config
  38  hs-crds             — hybridsovereign CRDs only
  40  hs-operators        — Deployments + image-wait (needs CRDs + image)
+ 42  hs-platform-configs — always-on RbacConfig / AAPConfig / QuayConfig
+ 46  hs-platform-smoke   — always-on ACME Entity + dummy tool CRs
  50  hs-ui
  60  hs-samples          — gated by provision.samples (default: false)
 
@@ -554,6 +556,121 @@ spec:
     server: {{ $server | quote }}
     namespace: sovereign-cloud
   # CRDs are owned exclusively by hs-crds (wave 38). Do not list them here.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
+{{- if (default true .Values.provision.platformConfigs) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-platform-configs
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/instance: field-content
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "42"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/apps/platform-configs
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud-plugins
+  ignoreDifferences:
+    - group: hybridsovereign.redhat
+      kind: "*"
+      jqPathExpressions:
+        - .metadata.annotations["force-reconcile"]
+        - .metadata.annotations["fix422"]
+        - .metadata.annotations["live"]
+        - .metadata.annotations["markready"]
+        - .metadata.annotations["poll"]
+        - .metadata.annotations["requeue"]
+        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+        - .status
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
+{{- if (default true .Values.provision.platformSmoke) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-platform-smoke
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/instance: field-content
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "46"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/apps/platform-smoke
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud
+  ignoreDifferences:
+    - group: hybridsovereign.redhat
+      kind: "*"
+      jqPathExpressions:
+        - .metadata.annotations["force-reconcile"]
+        - .metadata.annotations["fix422"]
+        - .metadata.annotations["live"]
+        - .metadata.annotations["markready"]
+        - .metadata.annotations["poll"]
+        - .metadata.annotations["requeue"]
+        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+        - .status
+    - group: ""
+      kind: Namespace
+      jsonPointers:
+        - /metadata/annotations
+        - /metadata/labels
   syncPolicy:
     automated:
       prune: true

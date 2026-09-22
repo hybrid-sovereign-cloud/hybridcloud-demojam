@@ -1,61 +1,5 @@
-# Additional non-parked ACME samples: tool Rbacs, Vault/VaultKV, AAPOrg/QuayOrg, HybridNetwork, UI health for dashboards.
-# NetworkPlacement omitted — requires parked CloudAWS/CloudOSO/PlatformOpenshift backends.
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-aap-admins
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: AAP organization administrators
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-aap-executors
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: AAP job executors
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-devops
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: DevOps engineers
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-quay-admins
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: Quay registry administrators
+# Additional ACME samples that depend on always-on platform-smoke (Entity + core Rbacs + AAP/Quay orgs).
+# Vault/VaultKV, HybridNetwork, extra Personas — not platform configs or smoke Entity.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Rbac
@@ -70,34 +14,6 @@ metadata:
 spec:
   config: keycloak-sovereign-tenants-services
   description: Vault administrators
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-developers
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: Application developers
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: Rbac
-metadata:
-  name: acme-operators
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  config: keycloak-sovereign-tenants-services
-  description: Platform operators
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Vault
@@ -130,44 +46,6 @@ spec:
   vaultReaderRbac:
     - acme-developers
     - acme-operators
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: AAPOrg
-metadata:
-  name: acme-automation
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "13"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  aapConfig: aap-sovereign-services
-  aapAdminRbac:
-    - acme-aap-admins
-    - acme-devops
-  aapJobExecutorRbac:
-    - acme-aap-executors
-    - acme-operators
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: QuayOrg
-metadata:
-  name: acme-registry
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "13"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  quayConfig: quay-sovereign-services
-  quayAdminRbac:
-    - acme-quay-admins
-  quayCreatorRbac:
-    - acme-developers
-  quayMemberRbac:
-    - acme-viewers
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridNetwork

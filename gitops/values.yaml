@@ -31,6 +31,8 @@ provision:
   mce: true
   builds: true
   operators: true
+  platformConfigs: true  # always-on RbacConfig / AAPConfig / QuayConfig
+  platformSmoke: true    # always-on ACME Entity + dummy AAP/Quay/Rbac CRs
   ui: true
   samples: false  # disabled — do not install workshop sample CRs via ArgoCD
   aapConfig: true  # JobTemplates / org config only (not AAP instance)

@@ -1,0 +1,33 @@
+# Always-on dummy Rbacs for ACME smoke (exercise RbacConfig → Keycloak path).
+{{- $ns := "entity-acme-corp" }}
+{{- $cfg := "keycloak-sovereign-tenants-services" }}
+{{- $rbacs := list
+  (dict "name" "acme-platform-admins" "desc" "Platform administrators with full entity-level access")
+  (dict "name" "acme-entity-admins" "desc" "Full entity administrators for ACME Corp")
+  (dict "name" "acme-auditors" "desc" "Auditors and compliance observers")
+  (dict "name" "acme-viewers" "desc" "Read-only observers")
+  (dict "name" "acme-infra-team" "desc" "Infrastructure engineers managing cloud environments")
+  (dict "name" "acme-devs" "desc" "Application developers with deploy access")
+  (dict "name" "acme-aap-admins" "desc" "AAP organization administrators")
+  (dict "name" "acme-aap-executors" "desc" "AAP job executors")
+  (dict "name" "acme-devops" "desc" "DevOps engineers")
+  (dict "name" "acme-quay-admins" "desc" "Quay registry administrators")
+  (dict "name" "acme-developers" "desc" "Application developers")
+  (dict "name" "acme-operators" "desc" "Platform operators")
+}}
+{{- range $rbacs }}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: {{ .name }}
+  namespace: {{ $ns }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+spec:
+  config: {{ $cfg }}
+  description: {{ .desc | quote }}
+{{- end }}

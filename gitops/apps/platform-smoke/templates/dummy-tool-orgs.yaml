@@ -1,0 +1,40 @@
+# Always-on dummy AAPOrg / QuayOrg — exercise AAPConfig and QuayConfig end-to-end.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: AAPOrg
+metadata:
+  name: acme-automation
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+spec:
+  aapConfig: aap-sovereign-services
+  description: Smoke automation organization for ACME Corp
+  aapAdminRbac:
+    - acme-aap-admins
+    - acme-devops
+  aapJobExecutorRbac:
+    - acme-aap-executors
+    - acme-operators
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: QuayOrg
+metadata:
+  name: acme-registry
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+spec:
+  quayConfig: quay-sovereign-services
+  quayAdminRbac:
+    - acme-quay-admins
+  quayCreatorRbac:
+    - acme-developers
+  quayMemberRbac:
+    - acme-viewers

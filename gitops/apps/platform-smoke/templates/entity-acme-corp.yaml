@@ -1,14 +1,29 @@
+# Always-on ACME smoke Entity (not a sample). Validates entity + namespace operator path.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Entity
 metadata:
   name: acme-corp
   namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
 spec:
   description: >-
-    ACME Corporation — primary demojam tenant (non-parked sample).
+    ACME Corporation — always-on smoke tenant for platform config validation.
   billingID: ACME-2024-001
   websiteLink: https://acme-corp.example.com
   namespaceRbac:
