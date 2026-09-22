@@ -4,7 +4,7 @@ SHELL := /bin/bash
 NPM := npm
 REGISTRY ?= $(OCI_HOST)/hybrid-sovereign
 ADMIN_DASH_TAG ?= 2.0.19
-TENANT_DASH_TAG ?= 5.0.18
+TENANT_DASH_TAG ?= 5.0.19
 ADMIN_PLUGIN_TAG ?= 1.2.28
 TENANT_PLUGIN_TAG ?= 1.3.23
 
