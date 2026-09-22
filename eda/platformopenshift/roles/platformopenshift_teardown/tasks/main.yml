@@ -35,9 +35,9 @@
         po_status_domain: ""
       when: po_cr.resources | length == 0
 
-    - name: Tear down Hive cluster build on central
+    - name: Tear down Hive cluster build on central (AWS only)
       ansible.builtin.include_tasks: delete_clusterbuild.yml
-      when: platform_type | default('') not in ['virt', 'hosted']
+      when: platform_type | default('') == 'aws'
 
     - name: Tear down Hypershift HostedCluster (virt/hosted)
       ansible.builtin.include_tasks: delete_hosted.yml
