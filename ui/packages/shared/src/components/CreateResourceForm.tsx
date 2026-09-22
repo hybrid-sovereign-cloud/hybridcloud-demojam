@@ -263,7 +263,7 @@ export function CreateResourceForm({
     enabled: (type === 'persona' || type === 'vaultkv' || type === 'aaporg' || type === 'quayorg' || type === 'assignment' || type === 'hybridnetwork' || type === 'platformopenshift') && !!entityNs,
   });
   const rbacConfigs = useK8sResourceList<K8sResource>('RbacConfig', {
-    enabled: type === 'team' || type === 'rbac' || type === 'vault',
+    enabled: type === 'rbac' || type === 'vault',
   });
   const aapConfigs = useK8sResourceList<K8sResource>('AAPConfig', { enabled: type === 'aaporg' });
   const quayConfigs = useK8sResourceList<K8sResource>('QuayConfig', { enabled: type === 'quayorg' });
@@ -281,7 +281,7 @@ export function CreateResourceForm({
     if (type === 'persona' && !namespace && !entityName && entities.items[0]) {
       setEntityName(entities.items[0].metadata.name);
     }
-    if (type === 'team' || type === 'rbac' || type === 'vault') {
+    if (type === 'rbac' || type === 'vault') {
       if (!rbacConfig && rbacConfigs.items[0]) setRbacConfig(rbacConfigs.items[0].metadata.name);
     }
     if (type === 'aaporg' && !aapConfig && aapConfigs.items[0]) setAapConfig(aapConfigs.items[0].metadata.name);
@@ -515,7 +515,7 @@ export function CreateResourceForm({
     if (type === 'persona' && (!rbacRef || !personaType)) return false;
     if (type === 'vaultkv' && !vaultRef) return false;
     if (type === 'migration' && (!vmName || !cloudosoRef)) return false;
-    if ((type === 'team' || type === 'vault' || type === 'rbac') && !rbacConfig) return false;
+    if ((type === 'vault' || type === 'rbac') && !rbacConfig) return false;
     if (type === 'aaporg' && !aapConfig) return false;
     if (type === 'quayorg' && !quayConfig) return false;
     if (type === 'networkplacement' && (!networkRef || !backendName || !prefixes.trim())) return false;

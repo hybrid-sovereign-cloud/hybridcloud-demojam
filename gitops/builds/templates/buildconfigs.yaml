@@ -92,6 +92,8 @@ spec:
       buildArgs:
         - name: APP_PACKAGE
           value: admin-dashboard
+        - name: REBUILD_ID
+          value: "team-submit-fix-20260922"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
@@ -124,7 +126,7 @@ spec:
         - name: APP_PACKAGE
           value: tenant-dashboard
         - name: REBUILD_ID
-          value: "cloudvirt-overview-fix-20260922"
+          value: "team-submit-fix-20260922"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
