@@ -1,0 +1,4 @@
+# Workshop seed PushSecrets need human-created Secrets in sovereign-secrets
+# (aws-credentials, oso-clouds, openshift-kubeadmin-seed). Off by default so
+# ZTP auto-provisioning stays Healthy; enable after Step 0 seeds exist.
+workshopSeeds: false

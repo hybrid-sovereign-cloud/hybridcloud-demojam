@@ -4,6 +4,7 @@ metadata:
   name: hybridsovereign
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:

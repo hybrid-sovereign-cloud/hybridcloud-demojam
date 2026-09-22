@@ -1,4 +1,9 @@
 {{- if .Values.provision.namespaces }}
+{{- /*
+  Operator-owned namespaces: only stamp gitops-owned. Setting part-of/managed-by
+  fights ESO/MCE/ACM controllers (SSA label conflicts → field-content OutOfSync).
+*/ -}}
+{{- $operatorOwned := list "external-secrets" "multicluster-engine" "open-cluster-management" "openshift-acm" }}
 {{- range .Values.namespaces }}
 ---
 apiVersion: v1
@@ -6,9 +11,12 @@ kind: Namespace
 metadata:
   name: {{ . }}
   labels:
+    app.kubernetes.io/instance: field-content
+    hybridsovereign.redhat/gitops-owned: "true"
+    {{- if not (has . $operatorOwned) }}
     app.kubernetes.io/part-of: {{ $.Values.global.partOf }}
     app.kubernetes.io/managed-by: argocd
-    hybridsovereign.redhat/gitops-owned: "true"
+    {{- end }}
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     # Never prune platform namespaces — child-app ownership drift must not delete them.

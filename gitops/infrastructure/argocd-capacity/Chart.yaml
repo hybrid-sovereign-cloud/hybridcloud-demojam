@@ -2,5 +2,5 @@ apiVersion: v2
 name: hs-argocd-capacity
 description: Phase-1 ArgoCD capacity tune for zero-touch GitOps (adopted OpenShift GitOps)
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "1.0.0"

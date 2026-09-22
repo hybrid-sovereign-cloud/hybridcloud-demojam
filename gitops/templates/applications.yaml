@@ -33,6 +33,7 @@ metadata:
   name: hs-argocd-capacity
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -75,6 +76,7 @@ metadata:
   name: hs-eso
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -117,6 +119,7 @@ metadata:
   name: hs-builds
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -159,6 +162,7 @@ metadata:
   name: hs-vault
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -200,6 +204,7 @@ metadata:
   name: hs-security
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -250,6 +255,7 @@ metadata:
   name: hs-mce
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -292,6 +298,7 @@ metadata:
   name: hs-acm
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -340,6 +347,7 @@ metadata:
   name: hs-quay
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -389,6 +397,7 @@ metadata:
   name: hs-gitea
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -438,6 +447,7 @@ metadata:
   name: hs-aap-config
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -480,6 +490,7 @@ metadata:
   name: hs-crds
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -526,6 +537,7 @@ metadata:
   name: hs-operators
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -569,6 +581,7 @@ metadata:
   name: hs-ui
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -611,6 +624,7 @@ metadata:
   name: hs-samples
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/instance: field-content
     app.kubernetes.io/part-of: {{ $partOf }}
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:

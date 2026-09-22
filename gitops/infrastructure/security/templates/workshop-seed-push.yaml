@@ -1,6 +1,8 @@
 # Push Step 0 human-seeded Secrets (sovereign-secrets) into Vault KV.
 # Secret values are NEVER in Git — only PushSecret wiring.
 # Seeds survive wipe (see scripts/ztp-wipe.sh preserve list).
+# Gated: default off — missing source Secrets degrade hs-security on fresh ZTP.
+{{- if .Values.workshopSeeds }}
 ---
 apiVersion: external-secrets.io/v1alpha1
 kind: PushSecret
@@ -217,3 +219,4 @@ spec:
         remoteRef:
           remoteKey: openshift-services-kubeadmin
           property: password
+{{- end }}

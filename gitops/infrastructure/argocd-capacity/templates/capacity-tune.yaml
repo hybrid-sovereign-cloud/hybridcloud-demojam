@@ -120,7 +120,65 @@ spec:
                   "resourceTrackingMethod": "annotation+label"
                 }
               }' || true
-              echo "ArgoCD capacity + tracking patch applied."
+              # Ignore OpenShift/operator-injected Namespace labels so field-content
+              # stays Synced (pod-security.*, kubernetes.io/metadata.name, ESO labels).
+              oc patch argocd "${NAME}" -n "${NS}" --type=merge -p '{
+                "spec": {
+                  "resourceIgnoreDifferences": {
+                    "resourceIdentifiers": [
+                      {
+                        "group": "",
+                        "kind": "Namespace",
+                        "customization": {
+                          "jqPathExpressions": [
+                            ".metadata.labels[\"kubernetes.io/metadata.name\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/audit\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/audit-version\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/warn\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/warn-version\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/enforce\"]",
+                            ".metadata.labels[\"pod-security.kubernetes.io/enforce-version\"]",
+                            ".metadata.labels[\"app\"]",
+                            ".metadata.labels[\"app.kubernetes.io/version\"]",
+                            ".metadata.annotations[\"openshift.io/sa.scc.mcs\"]",
+                            ".metadata.annotations[\"openshift.io/sa.scc.supplemental-groups\"]",
+                            ".metadata.annotations[\"openshift.io/sa.scc.uid-range\"]",
+                            ".metadata.annotations[\"security.openshift.io/MinimallySufficientPodSecurityStandard\"]"
+                          ],
+                          "managedFieldsManagers": [
+                            "external-secrets-operator",
+                            "multicluster-operators-application",
+                            "multiclusterhub-operator"
+                          ]
+                        }
+                      },
+                      {
+                        "group": "argoproj.io",
+                        "kind": "Application",
+                        "customization": {
+                          "jqPathExpressions": [
+                            ".metadata.annotations[\"kubectl.kubernetes.io/last-applied-configuration\"]",
+                            ".status"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }' || true
+              # Missing workshop seed Secrets must not Degrade hs-security on fresh ZTP.
+              oc patch argocd "${NAME}" -n "${NS}" --type=merge -p '{
+                "spec": {
+                  "resourceHealthChecks": [
+                    {
+                      "group": "external-secrets.io",
+                      "kind": "PushSecret",
+                      "check": "hs = {}\nif obj.status ~= nil and obj.status.conditions ~= nil then\n  for i, c in ipairs(obj.status.conditions) do\n    if c.type == \"Ready\" and c.status == \"False\" then\n      msg = c.message or \"\"\n      if string.find(msg, \"could not get source secret\") or string.find(msg, \"SecretNotFound\") or string.find(msg, \"not found\") then\n        hs.status = \"Healthy\"\n        hs.message = \"Optional source secret not present yet\"\n        return hs\n      end\n      hs.status = \"Degraded\"\n      hs.message = msg\n      return hs\n    end\n  end\nend\nhs.status = \"Healthy\"\nreturn hs\n"
+                    }
+                  ]
+                }
+              }' || true
+              echo "ArgoCD capacity + tracking + ignoreDifferences + PushSecret health patch applied."
               oc get argocd "${NAME}" -n "${NS}" -o jsonpath='controller.shards={.spec.controller.sharding.replicas} repo.replicas={.spec.repo.replicas} tracking={.spec.resourceTrackingMethod}{"\n"}'
           resources:
             requests:
