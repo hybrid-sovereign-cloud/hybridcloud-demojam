@@ -2,7 +2,7 @@
 keycloak_central_url: ""
 keycloak_services_url: ""
 keycloak_central_realm: "sovereign-central"
-keycloak_services_realm: "sovereign-tenants"
+keycloak_services_realm: "sso"
 keycloak_central_admin_user: "admin"
 keycloak_central_admin_password: ""
 keycloak_services_admin_user: "admin"
@@ -20,7 +20,7 @@ keycloak_test_users:
     password: "SovereignTest123!"
     groups:
       - "sovereign-admin"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-eng-admin"
     email: "acme-platform-eng-admin@example.com"
@@ -29,7 +29,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-engineering-admins"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-eng-editor"
     email: "acme-platform-eng-editor@example.com"
@@ -38,7 +38,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-engineering-editors"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-eng-viewer"
     email: "acme-platform-eng-viewer@example.com"
@@ -47,7 +47,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-engineering-viewers"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-ops-admin"
     email: "acme-platform-ops-admin@example.com"
@@ -56,7 +56,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-ops-admins"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-ops-editor"
     email: "acme-platform-ops-editor@example.com"
@@ -65,7 +65,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-ops-editors"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-platform-ops-viewer"
     email: "acme-platform-ops-viewer@example.com"
@@ -74,7 +74,7 @@ keycloak_test_users:
     password: "AcmeTest123!"
     groups:
       - "acme-corp-platform-ops-viewers"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "acme-infra-admin"
     email: "acme-infra-admin@example.com"
@@ -84,7 +84,7 @@ keycloak_test_users:
     groups:
       - "acme-corp-infra-admins"
   # ── Assignment RBAC test users (ocp-ses10 assignment validation) ─────────────
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "test-assignment-admin"
     email: "test-assignment-admin@example.com"
@@ -93,7 +93,7 @@ keycloak_test_users:
     password: "AssignmentTest123!"
     groups:
       - "acme-corp-assignment-admins"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "test-assignment-developer"
     email: "test-assignment-developer@example.com"
@@ -102,7 +102,7 @@ keycloak_test_users:
     password: "AssignmentTest123!"
     groups:
       - "acme-corp-developers"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "test-assignment-viewer"
     email: "test-assignment-viewer@example.com"
@@ -111,7 +111,7 @@ keycloak_test_users:
     password: "AssignmentTest123!"
     groups:
       - "acme-corp-platform-viewers"
-  - realm: "sovereign-tenants"
+  - realm: "sso"
     keycloak_url_key: services
     username: "test-assignment-ops"
     email: "test-assignment-ops@example.com"

@@ -30,7 +30,7 @@ metadata:
   namespace: sovereign-cloud-plugins
 spec:
   keycloakUrl: "https://rhbk-services.apps.services.lab.example.com"
-  realm: "sovereign-tenants"
+  realm: "sso"
   adminSecretName: "rhbk-services-admin"   # ExternalSecret from Vault
   adminSecretNamespace: "sovereign-cloud-plugins"
 ```
@@ -69,7 +69,7 @@ oc get namespace entity-acme-corp -o jsonpath='{.metadata.labels}'
 
 # Keycloak connectivity
 oc exec -n sovereign-cloud-plugins deploy/plugin-rbac -- \
-  curl -sk https://rhbk-services.apps.services.lab.example.com/realms/sovereign-tenants \
+  curl -sk https://rhbk-services.apps.services.lab.example.com/realms/sso \
   | jq .realm
 ```
 

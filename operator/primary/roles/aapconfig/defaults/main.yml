@@ -1,6 +1,6 @@
 aapconfig_secret: "{{ ansible_operator_meta.namespace }}"
 keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.rhbk.svc:8080', true) }}"
-keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sovereign-tenants', true) }}"
+keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sso', true) }}"
 aap_controller_url: "{{ lookup('env', 'AAP_CONTROLLER_URL') }}"
 aap_controller_internal_url: "{{ lookup('env', 'AAP_CONTROLLER_INTERNAL_URL') | default('http://sovereign-aap-controller-service.aap.svc:80', true) }}"
 aap_gateway_url: "{{ lookup('env', 'AAP_GATEWAY_URL') }}"

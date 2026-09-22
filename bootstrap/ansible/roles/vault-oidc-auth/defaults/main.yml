@@ -13,7 +13,7 @@ vault_oidc_mount: "oidc"
 
 # Services keycloak OIDC settings
 keycloak_services_url: ""
-keycloak_services_realm: "sovereign-tenants"
+keycloak_services_realm: "sso"
 keycloak_services_admin_user: "admin"
 keycloak_services_admin_password: ""
 

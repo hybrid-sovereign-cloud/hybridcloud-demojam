@@ -8,7 +8,7 @@
     keycloak_central_url: "{{ lookup('env', 'KEYCLOAK_CENTRAL_URL') }}"
     keycloak_services_url: "{{ lookup('env', 'KEYCLOAK_SERVICES_URL') }}"
     keycloak_central_realm: "{{ lookup('env', 'KEYCLOAK_CENTRAL_REALM') | default('master', true) }}"
-    keycloak_services_realm: "{{ lookup('env', 'KEYCLOAK_SERVICES_REALM') | default('sovereign-tenants', true) }}"
+    keycloak_services_realm: "{{ lookup('env', 'KEYCLOAK_SERVICES_REALM') | default('sso', true) }}"
     vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
     keycloak_central_vault_path: "{{ lookup('env', 'KEYCLOAK_CENTRAL_VAULT_PATH') | default('rhbk-central-admin', true) }}"

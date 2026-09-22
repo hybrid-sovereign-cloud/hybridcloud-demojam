@@ -1,7 +1,7 @@
 ---
-- name: Check sovereign-tenants OIDC discovery endpoint
+- name: Check sso OIDC discovery endpoint
   ansible.builtin.uri:
-    url: "https://sso-rhbk-services.apps.services.{{ lookup('env', 'LAB_DOMAIN') }}/realms/sovereign-tenants/.well-known/openid-configuration"
+    url: "https://sso-rhbk-services.apps.services.{{ lookup('env', 'LAB_DOMAIN') }}/realms/sso/.well-known/openid-configuration"
     method: GET
     validate_certs: false
     status_code: [200, 301, 302, 401, 403, 503]

@@ -1,4 +1,4 @@
 keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.rhbk.svc:8080', true) }}"
-keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sovereign-tenants', true) }}"
+keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sso', true) }}"
 quay_url: "{{ lookup('env', 'QUAY_URL') }}"
 quay_internal_url: "{{ lookup('env', 'QUAY_INTERNAL_URL') | default('http://svc-sovereign-registry-quay-app.quay-enterprise.svc:443', true) }}"

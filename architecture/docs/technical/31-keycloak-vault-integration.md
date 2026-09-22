@@ -14,7 +14,7 @@ flowchart TB
     end
     subgraph services [Services Cluster]
         VS[vault-services]
-        KC_S[services-keycloak\nrealm: sovereign-tenants]
+        KC_S[services-keycloak\nrealm: sso]
         VS -->|OIDC auth| KC_S
         SA2[sovereign-admin group] -->|full access| VS
     end
@@ -39,7 +39,7 @@ flowchart TB
 | Parameter | Value |
 |-----------|-------|
 | Auth mount | `oidc` |
-| OIDC discovery URL | `https://rhbk-services.apps.services.lab.example.com/realms/sovereign-tenants` |
+| OIDC discovery URL | `https://rhbk-services.apps.services.lab.example.com/realms/sso` |
 | Client ID | `vault` |
 | Client secret | Vault KV `central/data/vault-services-client` → `client_secret` |
 | Admin group | `sovereign-admin` |

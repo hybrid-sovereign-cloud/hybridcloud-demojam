@@ -12,7 +12,7 @@
     keycloak_central_url: "{{ lookup('env', 'KEYCLOAK_CENTRAL_URL') }}"
     keycloak_services_url: "{{ lookup('env', 'KEYCLOAK_SERVICES_URL') | default('', true) }}"
     keycloak_central_realm: "{{ lookup('env', 'KEYCLOAK_CENTRAL_REALM') | default('sovereign-central', true) }}"
-    keycloak_services_realm: "{{ lookup('env', 'KEYCLOAK_SERVICES_REALM') | default('sovereign-tenants', true) }}"
+    keycloak_services_realm: "{{ lookup('env', 'KEYCLOAK_SERVICES_REALM') | default('sso', true) }}"
     keycloak_services_admin_secret_name: "{{ lookup('env', 'KEYCLOAK_SERVICES_ADMIN_SECRET') | default('rhbk-services-admin', true) }}"
     keycloak_services_admin_secret_ns: "{{ lookup('env', 'KEYCLOAK_SERVICES_ADMIN_SECRET_NS') | default('sovereign-cloud-jobs', true) }}"
 

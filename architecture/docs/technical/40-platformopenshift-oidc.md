@@ -71,7 +71,7 @@ spec:
           name: [name]
           email: [email]
           groups: [groups]
-        issuer: "https://rhbk-services.apps.services.lab.example.com/realms/sovereign-tenants"
+        issuer: "https://rhbk-services.apps.services.lab.example.com/realms/sso"
 ```
 
 The OIDC client secret is also pushed as a Kubernetes `Secret` named `openid-client-secret-keycloak` in `openshift-config` namespace via the ACM ConfigurationPolicy.

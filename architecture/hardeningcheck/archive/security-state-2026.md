@@ -228,7 +228,7 @@ All plugin operators + event-forwarder: Running.
 - **Before**: Both clusters used `https://login.home.example.com/realms/Signal9-RHT` (external Signal9 RHBK)
 - **After**:
   - Central cluster → `rhbk-central.apps.central.lab.example.com/realms/sovereign-central` (client: `openshift-central`)
-  - Services cluster → `rhbk-services.apps.services.lab.example.com/realms/sovereign-tenants` (client: `openshift-services`)
+  - Services cluster → `rhbk-services.apps.services.lab.example.com/realms/sso` (client: `openshift-services`)
 - **Remediation**: 
   1. `job-keycloak-oauth` (ArgoCD Sync hook) updated both OAuth cluster CRs via `keycloak-oauth.yml` playbook
   2. Added `oauth.yaml` template to `sovereign-namespaces` chart v0.2.7 to manage `OAuth cluster` CR as a self-healing ArgoCD resource

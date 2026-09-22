@@ -185,7 +185,7 @@
       ansible.builtin.set_fact:
         kc_services_token: "{{ kc_services_token_result.json.access_token }}"
 
-    - name: Check if vault client exists in sovereign-tenants realm
+    - name: Check if vault client exists in sso realm
       ansible.builtin.uri:
         url: "{{ keycloak_services_url }}/admin/realms/{{ keycloak_services_realm }}/clients?clientId={{ vault_services_client_id }}"
         method: GET
@@ -198,7 +198,7 @@
       delay: 5
       until: vault_services_client_check.status | default(0) == 200
 
-    - name: Create vault client in sovereign-tenants realm if not present
+    - name: Create vault client in sso realm if not present
       ansible.builtin.uri:
         url: "{{ keycloak_services_url }}/admin/realms/{{ keycloak_services_realm }}/clients"
         method: POST

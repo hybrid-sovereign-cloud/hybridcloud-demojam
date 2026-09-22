@@ -1,4 +1,4 @@
 ---
 plugin_rbac_operator_namespace: sovereign-cloud-plugins
 plugin_rbac_keycloak_internal_url: "http://sovereign-keycloak-services-service.rhbk.svc:8080"
-plugin_rbac_keycloak_realm: sovereign-tenants
+plugin_rbac_keycloak_realm: sso
