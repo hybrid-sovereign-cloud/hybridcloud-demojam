@@ -1,57 +1,9 @@
 ---
-- name: Read Vault root token for Helm kubeconfig
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: v1
-    kind: Secret
-    name: "{{ vault_init_secret_name }}"
-    namespace: "{{ vault_init_secret_namespace }}"
-  register: vault_init_secret_info
+# AWS Hive / mce-cluster-build teardown on the hub (services cluster).
+# Prefer direct ClusterDeployment delete via services API — AAP runners often
+# lack a local kubeconfig and may not have Vault root for Helm kubeconfig.
 
-- name: Set Vault root token
-  ansible.builtin.set_fact:
-    vault_root_token: "{{ vault_init_secret_info.resources[0].data.root_token | b64decode }}"
-    cb_app_name: "{{ platformopenshift_cr_name }}"
-  no_log: true
-
-- name: Write central cluster kubeconfig for Helm
-  ansible.builtin.include_tasks: ../platformopenshift_provision/tasks/write_central_helm_kubeconfig.yml
-
-- name: Check for existing Helm release
-  ansible.builtin.command:
-    argv:
-      - helm
-      - status
-      - "{{ platformopenshift_cr_name }}"
-      - --namespace
-      - "{{ platformopenshift_cr_name }}"
-      - --kubeconfig
-      - "/tmp/{{ platformopenshift_cr_name }}-kubeconfig"
-  register: helm_status
-  failed_when: false
-  changed_when: false
-
-- name: Uninstall mce-cluster-build Helm release
-  ansible.builtin.command:
-    argv:
-      - helm
-      - uninstall
-      - "{{ platformopenshift_cr_name }}"
-      - --namespace
-      - "{{ platformopenshift_cr_name }}"
-      - --wait
-      - --timeout
-      - "30m"
-      - --kubeconfig
-      - "/tmp/{{ platformopenshift_cr_name }}-kubeconfig"
-  register: helm_uninstall
-  when: helm_status.rc == 0
-  failed_when: false
-  changed_when: helm_uninstall.rc == 0
-
-- name: Delete ClusterDeployment if still present
+- name: Delete ClusterDeployment to trigger Hive deprovision
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -63,7 +15,7 @@
     namespace: "{{ platformopenshift_cr_name }}"
   ignore_errors: true
 
-- name: Wait for ClusterDeployment deletion
+- name: Wait for ClusterDeployment deletion (Hive deprovision)
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -78,7 +30,89 @@
   delay: 15
   ignore_errors: true
 
-- name: Delete cluster namespace on central
+- name: Best-effort Helm uninstall via staged Job (optional)
+  block:
+    - name: Ensure work namespace for Helm Job
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: sovereign-cloud-jobs
+
+    - name: Delete previous uninstall Job if present
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: batch/v1
+        kind: Job
+        name: "helm-uninstall-{{ platformopenshift_cr_name }}"
+        namespace: sovereign-cloud-jobs
+        delete_options:
+          propagationPolicy: Background
+
+    - name: Run Helm uninstall Job when kubeconfig secret exists
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "helm-uninstall-{{ platformopenshift_cr_name }}"
+            namespace: sovereign-cloud-jobs
+          spec:
+            ttlSecondsAfterFinished: 3600
+            backoffLimit: 1
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: helm
+                    image: alpine/helm:3.14.4
+                    env:
+                      - name: HELM_CACHE_HOME
+                        value: /tmp/helm-cache
+                      - name: HELM_CONFIG_HOME
+                        value: /tmp/helm-config
+                      - name: HELM_DATA_HOME
+                        value: /tmp/helm-data
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -eux
+                        mkdir -p /tmp/helm-cache /tmp/helm-config /tmp/helm-data
+                        if [ -f /kube/kubeconfig ]; then
+                          helm uninstall "{{ platformopenshift_cr_name }}" \
+                            --namespace "{{ platformopenshift_cr_name }}" \
+                            --wait --timeout 30m \
+                            --kubeconfig /kube/kubeconfig || true
+                        else
+                          echo "no kubeconfig; skip helm uninstall"
+                        fi
+                    volumeMounts:
+                      - name: kube
+                        mountPath: /kube
+                        readOnly: true
+                volumes:
+                  - name: kube
+                    secret:
+                      secretName: "helm-kubeconfig-{{ platformopenshift_cr_name }}"
+                      optional: true
+  rescue:
+    - name: Ignore Helm uninstall Job failures
+      ansible.builtin.debug:
+        msg: "Helm uninstall Job skipped or failed for {{ platformopenshift_cr_name }}"
+
+- name: Delete cluster namespace on hub
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
