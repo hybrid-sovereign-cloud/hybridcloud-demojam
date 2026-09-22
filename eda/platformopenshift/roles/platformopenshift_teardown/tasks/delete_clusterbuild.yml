@@ -2,6 +2,83 @@
 # AWS Hive / mce-cluster-build teardown on the hub (services cluster).
 # Prefer direct ClusterDeployment delete via services API — AAP runners often
 # lack a local kubeconfig and may not have Vault root for Helm kubeconfig.
+#
+# Hive deprovision requires valid AWS provider-creds. Mint/lab keys rotate;
+# force-refresh the ExternalSecret from Vault before delete, and retry
+# ClusterDeprovision when AuthenticationFailure is stuck.
+
+- name: Annotate provider-creds ExternalSecret to force Vault refresh
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: patched
+    kind: ExternalSecret
+    api_version: external-secrets.io/v1
+    name: "{{ platformopenshift_cr_name }}-provider-creds"
+    namespace: "{{ platformopenshift_cr_name }}"
+    definition:
+      metadata:
+        annotations:
+          hybridsovereign.redhat/teardown-refresh: "{{ lookup('pipe', 'date +%s') }}"
+  ignore_errors: true
+
+- name: Confirm provider-creds secret exists
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Secret
+    name: "{{ platformopenshift_cr_name }}-provider-creds"
+    namespace: "{{ platformopenshift_cr_name }}"
+  register: provider_creds_secret
+  until: provider_creds_secret.resources | default([]) | length > 0
+  retries: 12
+  delay: 5
+  ignore_errors: true
+
+- name: Delete stuck ClusterDeprovision on AuthenticationFailure
+  block:
+    - name: Read existing ClusterDeprovision
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hive.openshift.io/v1
+        kind: ClusterDeprovision
+        name: "{{ platformopenshift_cr_name }}"
+        namespace: "{{ platformopenshift_cr_name }}"
+      register: cdeprov
+
+    - name: Detect AuthenticationFailure on ClusterDeprovision
+      ansible.builtin.set_fact:
+        cdeprov_auth_failed: >-
+          {{
+            cdeprov.resources | default([]) | length > 0 and
+            (
+              cdeprov.resources[0].status.conditions | default([])
+              | selectattr('type', 'equalto', 'AuthenticationFailure')
+              | selectattr('status', 'equalto', 'True')
+              | list | length > 0
+            )
+          }}
+
+    - name: Delete ClusterDeprovision to force Hive credential re-check
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: hive.openshift.io/v1
+        kind: ClusterDeprovision
+        name: "{{ platformopenshift_cr_name }}"
+        namespace: "{{ platformopenshift_cr_name }}"
+      when: cdeprov_auth_failed | bool
+  rescue:
+    - name: Ignore ClusterDeprovision retry prep failures
+      ansible.builtin.debug:
+        msg: "ClusterDeprovision auth-retry skipped for {{ platformopenshift_cr_name }}"
 
 - name: Delete ClusterDeployment to trigger Hive deprovision
   kubernetes.core.k8s:
@@ -26,8 +103,8 @@
     namespace: "{{ platformopenshift_cr_name }}"
   register: cd_wait
   until: (cd_wait.resources | default([]) | length) == 0
-  retries: 120
-  delay: 15
+  retries: 180
+  delay: 20
   ignore_errors: true
 
 - name: Best-effort Helm uninstall via staged Job (optional)

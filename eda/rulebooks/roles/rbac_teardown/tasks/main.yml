@@ -66,29 +66,12 @@
         - rbac_cfg_final.resources | length > 0
         - rbac_cfg_final.resources[0].spec.secret is defined
       block:
-        - name: Discover Keycloak external URL from services cluster Route
-          kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            api_version: route.openshift.io/v1
-            kind: Route
-            namespace: keycloak
-            label_selectors:
-              - "app=keycloak"
-          register: kc_route_final
-
-        - name: Set Keycloak URL from Route
+        # Prefer in-cluster Keycloak (same as rbac_provision). AAP EE pods often
+        # cannot resolve the external *.apps route DNS.
+        - name: Set Keycloak URL to in-cluster service
           ansible.builtin.set_fact:
-            svc_keycloak_url: "https://{{ kc_route_final.resources[0].spec.host }}"
-          when: kc_route_final.resources | length > 0
-
-        - name: Fallback to configured Keycloak URL
-          ansible.builtin.set_fact:
-            svc_keycloak_url: >-
-              {{ lookup('env', 'KEYCLOAK_EXTERNAL_URL')
-                 | default(plugin_rbac_keycloak_url_default, true) }}
-          when: kc_route_final.resources | length == 0
+            svc_keycloak_url: "https://keycloak.keycloak.svc:8443"
+            svc_keycloak_url_http_headers: {}
 
         - name: Load Keycloak admin credentials
           ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/obtain_keycloak_admin_credentials.yml"
