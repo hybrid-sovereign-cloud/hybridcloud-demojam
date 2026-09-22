@@ -93,6 +93,45 @@
     name: "{{ platformopenshift_cr_name }}"
   register: mc_wait
   until: (mc_wait.resources | default([]) | length) == 0
-  retries: 60
+  retries: 36
   delay: 10
+  ignore_errors: true
+
+# Detached clusters (HC already gone) leave ManagedCluster finalizers stuck.
+- name: Strip ManagedCluster finalizers when deletion is stuck
+  when: (mc_wait.resources | default([]) | length) > 0
+  kubernetes.core.k8s_json_patch:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ platformopenshift_cr_name }}"
+    patch:
+      - op: replace
+        path: /metadata/finalizers
+        value: []
+  ignore_errors: true
+
+- name: Re-delete ManagedCluster after finalizer strip
+  when: (mc_wait.resources | default([]) | length) > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ platformopenshift_cr_name }}"
+  ignore_errors: true
+
+- name: Delete leftover cluster namespace on hub
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ platformopenshift_cr_name }}"
   ignore_errors: true
