@@ -106,6 +106,9 @@ spec:
             - /bin/bash
             - -ec
             - |
+              set -euo pipefail
+              # emptyDir persists across init restarts; remove stale 0444 file first
+              rm -f /etc/proxy/secrets/session_secret
               printf '%s' "$(openssl rand -hex 16)" > /etc/proxy/secrets/session_secret
               chmod 0444 /etc/proxy/secrets/session_secret
           volumeMounts:
@@ -264,6 +267,9 @@ spec:
             - /bin/bash
             - -ec
             - |
+              set -euo pipefail
+              # emptyDir persists across init restarts; remove stale 0444 file first
+              rm -f /etc/proxy/secrets/session_secret
               printf '%s' "$(openssl rand -hex 16)" > /etc/proxy/secrets/session_secret
               chmod 0444 /etc/proxy/secrets/session_secret
           volumeMounts:

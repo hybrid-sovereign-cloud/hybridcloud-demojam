@@ -1,6 +1,9 @@
 ---
 - name: Create temporary ExternalSecret for OpenStack admin credentials (designate)
   kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     state: present
     definition:
       apiVersion: external-secrets.io/v1
@@ -24,6 +27,9 @@
 
 - name: Wait for OpenStack credentials (designate teardown)
   kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     api_version: v1
     kind: Secret
     name: "eda-cloudoso-teardown-{{ cloudoso_cr_name }}-designate"
@@ -75,6 +81,9 @@
 
 - name: Remove temporary designate credentials secret
   kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
     state: absent
     api_version: v1
     kind: Secret
