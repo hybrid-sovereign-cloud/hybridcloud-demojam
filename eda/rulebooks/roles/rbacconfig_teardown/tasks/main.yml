@@ -9,7 +9,20 @@
     - name: Resolve services cluster API connection
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
 
-    - name: Discover Keycloak external URL
+    - name: Discover Keycloak external URL via Route (no hardcoded DNS)
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: keycloak
+        namespace: keycloak
+      register: kc_route_named
+      failed_when: false
+
+    - name: Discover Keycloak Route by listing namespace (fallback)
+      when: (kc_route_named.resources | default([]) | length) == 0
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
         api_key: "{{ services_bearer_token }}"
@@ -17,17 +30,20 @@
         api_version: route.openshift.io/v1
         kind: Route
         namespace: keycloak
-        label_selectors:
-          - "app=keycloak"
-      register: kc_route
+      register: kc_route_list
+      failed_when: false
 
-    - name: Set Keycloak URL
+    - name: Set Keycloak URL (route host, else in-cluster service, else env)
       ansible.builtin.set_fact:
         plugin_rbac_keycloak_url: >-
           {{
-            ('https://' + kc_route.resources[0].spec.host)
-            if (kc_route.resources | length > 0)
-            else lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true)
+            ('https://' ~ ((kc_route_named.resources | default([])) + (kc_route_list.resources | default([])))[0].spec.host)
+            if ((((kc_route_named.resources | default([])) + (kc_route_list.resources | default([]))) | length) > 0)
+            else (
+              (lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true))
+              if (lookup('env', 'KEYCLOAK_EXTERNAL_URL') | default('', true) | length) > 0
+              else 'https://keycloak.keycloak.svc:8443'
+            )
           }}
 
     - name: Run Keycloak admin cleanup when spec is available
