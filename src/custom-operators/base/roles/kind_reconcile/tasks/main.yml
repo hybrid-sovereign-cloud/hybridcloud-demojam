@@ -45,22 +45,23 @@
 
 # ansible-operator only drops the watches finalizer after a successful finalizer
 # playbook. meta:end_play alone has raced with status patches and left CRs stuck
-# with deletionComplete=true. Explicitly clear hybridsovereign finalizers.
+# with deletionComplete=true. Explicitly clear hybridsovereign finalizers via
+# JSON patch (strategic merge ignores empty finalizers lists).
 - name: Clear finalizers when EDA teardown reported deletionComplete
   when:
     - is_delete | bool
     - deletion_complete | bool
   block:
     - name: Remove hybridsovereign finalizers from deleting CR
-      kubernetes.core.k8s:
-        state: present
+      kubernetes.core.k8s_json_patch:
         api_version: "{{ hs_api_version }}"
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        definition:
-          metadata:
-            finalizers: []
+        patch:
+          - op: replace
+            path: /metadata/finalizers
+            value: []
       failed_when: false
 
     - name: End play after finalizer clear
