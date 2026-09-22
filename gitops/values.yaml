@@ -31,7 +31,7 @@ provision:
   mce: true
   builds: true
   operators: true
-  platformConfigs: true  # always-on RbacConfig / AAPConfig / QuayConfig
+  platformConfigs: true  # ZTP prereq — RbacConfig / AAPConfig / QuayConfig (default on)
   platformSmoke: true    # always-on ACME Entity + dummy AAP/Quay/Rbac CRs
   ui: true
   samples: false  # disabled — do not install workshop sample CRs via ArgoCD

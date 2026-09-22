@@ -13,7 +13,7 @@ Child Applications — ZTP wave order (parent sync waits for prior wave Healthy)
  35  hs-aap-config
  38  hs-crds             — hybridsovereign CRDs only
  40  hs-operators        — Deployments + image-wait (needs CRDs + image)
- 42  hs-platform-configs — always-on RbacConfig / AAPConfig / QuayConfig
+ 42  hs-platform-configs — ZTP prereq: RbacConfig/AAPConfig/QuayConfig (+ secret/ready hooks)
  46  hs-platform-smoke   — always-on ACME Entity + dummy tool CRs
  50  hs-ui
  60  hs-samples          — gated by provision.samples (default: false)

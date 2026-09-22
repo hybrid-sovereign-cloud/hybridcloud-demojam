@@ -45,8 +45,10 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 | 35 | `hs-aap-config` | JobTemplates / adopt AAP | AAP baseline |
 | 38 | `hs-crds` | hybridsovereign CRDs only | — |
 | 40 | `hs-operators` | Operator Deployments + image-wait | CRDs + operator image |
+| 42 | `hs-platform-configs` | **ZTP prerequisite:** RbacConfig + AAPConfig + QuayConfig | Operators + AAP JTs + RHBK/AAP/Quay secrets |
+| 46 | `hs-platform-smoke` | Always-on ACME Entity + dummy tool CRs | Platform configs ready |
 | 50 | `hs-ui` | Dashboards + plugins + OAuth | UI ImageStreams |
-| 60 | `hs-samples` | Demo CRs | CRDs + operators Healthy |
+| 60 | `hs-samples` | Demo CRs (default off) | CRDs + operators Healthy |
 
 Parent sync **waits for prior-wave Application health** before creating the next Application CR.
 
@@ -54,14 +56,29 @@ Parent sync **waits for prior-wave Application health** before creating the next
 
 ```
 ESO ──► Vault ──► Security (secrets)
-Builds ──────────────────────► Operators ──► Samples
-                              └────────────► UI
+Builds ──────────────────────► Operators ──► Platform configs (42) ──► Smoke (46)
+                              └────────────────────────────────────► UI
 MCE (24) ──► ACM hub (26)
-CRDs (38) ──► Operators (40) ──► Samples (60)
-AAP baseline ──► hs-aap-config
-ODF ──► Quay OBC
+CRDs (38) ──► Operators (40) ──► Platform configs (42) ──► Samples (60)
+AAP baseline ──► hs-aap-config (JTs) ──► Operators launch AAP jobs for configs
+ODF ──► Quay OBC ──► platform-configs Sync hook (plugin secrets)
+RHBK adopt ──► RbacConfig secret (rhbk-services-admin)
 ```
 
+## Platform configs (ZTP prerequisite)
+
+On every new cluster pointing at `gitops/`, `provision.platformConfigs: true` (default) creates
+`hs-platform-configs`, which:
+
+1. **Sync hook** `hs-platform-config-ensure-secrets` — waits for Keycloak / AAP / Quay and
+   writes plugin admin credentials into `sovereign-cloud-plugins` (no secrets in Git).
+2. Applies always-on CRs: `RbacConfig`, `AAPConfig`, `QuayConfig`.
+3. Operators launch AAP JobTemplates (`rbacconfig` / `aapconfig` / `quayconfig` provision).
+4. **PostSync hook** `hs-platform-config-wait-ready` — blocks until all three CRs report
+   `status.ready=true` (force-reconciles on failure). Parent wave sync will not advance
+   past 42 until this succeeds.
+
+Disable only with `provision.platformConfigs: false` (not recommended for production ZTP).
 ## Known ZTP failure modes (and mitigations)
 
 See `gitops/issues.md` for the live wipe-cycle log (ZTP-001…016).
@@ -119,10 +136,11 @@ After Vault + ESO are up, `hs-security` PushSecrets sync these into Vault. No mi
 
 1. **Step 0** secrets in `sovereign-secrets` (above).
 2. Install OpenShift GitOps + instance `openshift-gitops`.
-3. Ensure baseline adoptees (AAP, RHBK, ODF) or disable related `provision.*`.
+3. Ensure baseline adoptees (AAP, RHBK/Keycloak, ODF) — required for platform configs ZTP.
 4. Root Application → `path: gitops`, `targetRevision: main`, auto-sync.
-5. Prefer `./scripts/ztp-app.sh validate-sequence` on the first cluster.
-6. Fresh cold start: `./scripts/ztp-wipe.sh` (preserves Step 0 secrets; single field-content trigger).
+5. Prefer `./scripts/ztp-app.sh validate-sequence` on the first cluster (includes wave 42 configs).
+6. Confirm `hs-platform-configs` Synced+Healthy before relying on tenant CRs.
+7. Fresh cold start: `./scripts/ztp-wipe.sh` (preserves Step 0 secrets; single field-content trigger).
 
 ## Recovery
 

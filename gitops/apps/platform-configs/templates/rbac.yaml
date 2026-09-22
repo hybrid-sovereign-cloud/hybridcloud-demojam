@@ -1,0 +1,55 @@
+# ZTP RBAC for platform-config Sync/PostSync Jobs (applied before config CRs).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-platform-config-ztp
+  namespace: sovereign-cloud-plugins
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-config: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-platform-config-ztp
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-config: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "namespaces"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["config.openshift.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["hybridsovereign.redhat"]
+    resources: ["rbacconfigs", "aapconfigs", "quayconfigs"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-platform-config-ztp
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-config: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-platform-config-ztp
+    namespace: sovereign-cloud-plugins
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-platform-config-ztp

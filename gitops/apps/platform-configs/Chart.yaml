@@ -2,5 +2,5 @@ apiVersion: v2
 name: hs-platform-configs
 description: Always-on platform RbacConfig / AAPConfig / QuayConfig (not samples)
 type: application
-version: 0.1.0
+version: 0.1.2
 appVersion: "0.1.0"

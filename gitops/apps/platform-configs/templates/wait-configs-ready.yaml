@@ -1,0 +1,81 @@
+# PostSync — block ZTP wave progression until platform configs are ready.
+# Operators launch AAP JobTemplates (rbacconfig/aapconfig/quayconfig provision);
+# this Job force-reconciles if needed and waits for status.ready=true.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-platform-config-wait-ready
+  namespace: sovereign-cloud-plugins
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-config: "true"
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 2400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+        hybridsovereign.redhat/platform-config: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-platform-config-ztp
+      containers:
+        - name: wait
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              NS=sovereign-cloud-plugins
+              declare -A KIND=(
+                [rbacconfig]=keycloak-sovereign-tenants-services
+                [aapconfig]=aap-sovereign-services
+                [quayconfig]=quay-sovereign-services
+              )
+
+              force_reconcile() {
+                local kind="$1" name="$2"
+                oc annotate "$kind" "$name" -n "$NS" \
+                  ansible.sdk.operatorframework.io/reconcileNow=true \
+                  --overwrite >/dev/null 2>&1 || true
+              }
+
+              echo "ZTP PostSync: waiting for platform configs ready (AAP jobs)..."
+              for i in $(seq 1 120); do
+                all_ready=1
+                for kind in rbacconfig aapconfig quayconfig; do
+                  name="${KIND[$kind]}"
+                  if ! oc get "$kind" "$name" -n "$NS" >/dev/null 2>&1; then
+                    echo "  missing $kind/$name"
+                    all_ready=0
+                    continue
+                  fi
+                  ready=$(oc get "$kind" "$name" -n "$NS" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                  status=$(oc get "$kind" "$name" -n "$NS" -o jsonpath='{.status.status}' 2>/dev/null || echo "")
+                  msg=$(oc get "$kind" "$name" -n "$NS" -o jsonpath='{.status.message}' 2>/dev/null || echo "")
+                  echo "  [$i] $kind/$name ready=$ready status=$status msg=${msg:0:80}"
+                  if [ "$ready" != "true" ]; then
+                    all_ready=0
+                    # Kick operator → AAP job if failed or stuck
+                    if [ "$status" = "failed" ] || [ $((i % 15)) -eq 0 ]; then
+                      echo "    force reconcileNow on $kind/$name"
+                      force_reconcile "$kind" "$name"
+                    fi
+                  fi
+                done
+                if [ "$all_ready" -eq 1 ]; then
+                  echo "ZTP PostSync: RbacConfig + AAPConfig + QuayConfig all ready"
+                  exit 0
+                fi
+                sleep 20
+              done
+              echo "FATAL: platform configs not ready within timeout" >&2
+              oc get rbacconfig,aapconfig,quayconfig -n "$NS" -o wide >&2 || true
+              exit 1

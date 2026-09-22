@@ -34,6 +34,8 @@ CATALOG=$(cat <<'EOF'
 35|hs-aap-config|gitops/infrastructure/aap|aap|adopt AAP; JobTemplates
 38|hs-crds|gitops/custom-operators/crds||CRDs only (no Deployments)
 40|hs-operators|gitops/custom-operators|sovereign-cloud|needs operator image + CRDs
+42|hs-platform-configs|gitops/apps/platform-configs|sovereign-cloud-plugins|ZTP prereq: RbacConfig+AAPConfig+QuayConfig ready
+46|hs-platform-smoke|gitops/apps/platform-smoke|sovereign-cloud,entity-acme-corp|always-on ACME smoke CRs
 50|hs-ui|gitops/apps/ui|sovereign-ui|needs UI ImageStreams
 60|hs-samples|gitops/apps/samples|sovereign-cloud|needs CRDs + operators
 EOF
