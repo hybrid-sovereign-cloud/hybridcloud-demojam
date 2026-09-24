@@ -775,10 +775,10 @@ spec:
         - /metadata/labels
 
   # Seed-once: auto-sync on create / git change, but never restore UI-deleted CRs
-  # (selfHeal=false). prune is normally false; one-time true only to drop removed sample kinds.
+  # (selfHeal=false) and never prune resources removed from git (prune=false).
   syncPolicy:
     automated:
-      prune: true
+      prune: false
       selfHeal: false
       allowEmpty: true
     syncOptions:

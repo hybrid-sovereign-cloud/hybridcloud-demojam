@@ -53,7 +53,7 @@ samples:
     - Assignment
     - OpenStackMigration
   # CloudVirt is NOT a sample — always-on via platform-smoke (local-virt)
-  # PlatformOpenshift and Assignment are not applied by hs-samples
+  # CloudAWS, CloudOSO, PlatformOpenshift, Assignment are not applied by hs-samples
 # Non-secret URLs (optional overrides from field-content)
 deployer:
   domain: ""
