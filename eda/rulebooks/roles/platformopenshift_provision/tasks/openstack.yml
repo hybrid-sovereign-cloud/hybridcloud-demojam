@@ -1,19 +1,12 @@
 ---
-# PlatformOpenshift type:openstack handler
-# Workshop path: bind to ready CloudOSO and mark ready (full OSP cluster build
-# deferred — needs sovereign-cloud-jobs prep + OpenStack installer EE).
-
 - name: Set OpenStack spec facts
   ansible.builtin.set_fact:
-    oso_env_name: "{{ platform_spec['openstack']['environment'] | default('') }}"
-
-- name: Fail when CloudOSO environment ref missing
-  ansible.builtin.assert:
-    that:
-      - oso_env_name | length > 0
-    fail_msg: >-
-      PlatformOpenshift {{ platformopenshift_cr_name }} type=openstack
-      needs spec.openstack.environment
+    oso_env_name: "{{ platform_spec.openstack.environment }}"
+    oso_control_plane_count: "{{ platform_spec.openstack.controlPlaneCount | default(3) }}"
+    oso_worker_count: "{{ platform_spec.openstack.workerCount | default(3) }}"
+    oso_control_plane_flavor: "{{ platform_spec.openstack.controlPlaneFlavor | default('b1.xlarge') }}"
+    oso_worker_flavor: "{{ platform_spec.openstack.workerFlavor | default('b1.large') }}"
+    oso_external_network: "{{ platform_spec.openstack.externalNetwork | default('internet') }}"
 
 - name: Read CloudOSO CR
   kubernetes.core.k8s_info:
@@ -23,14 +16,15 @@
     api_version: hybridsovereign.redhat/v1alpha1
     kind: CloudOSO
     name: "{{ oso_env_name }}"
-    namespace: "{{ platformopenshift_cr_namespace }}"
+    namespace: "{{ ansible_operator_meta.namespace }}"
   register: cloudoso_cr
 
-- name: Fail if CloudOSO missing
+- name: Fail if CloudOSO not found
   ansible.builtin.assert:
     that:
       - cloudoso_cr.resources | length > 0
-    fail_msg: CloudOSO '{{ oso_env_name }}' not found in {{ platformopenshift_cr_namespace }}
+    fail_msg: >-
+      CloudOSO '{{ oso_env_name }}' not found in namespace {{ ansible_operator_meta.namespace }}.
 
 - name: Fail if CloudOSO not ready
   ansible.builtin.assert:
@@ -39,41 +33,166 @@
     fail_msg: >-
       CloudOSO '{{ oso_env_name }}' is not ready yet. Wait for environment preparation.
 
-- name: Get current timestamp and CloudOSO status fields
+- name: Extract CloudOSO details
+  ansible.builtin.set_fact:
+    cb_slug: "{{ cloudoso_cr.resources[0].status.slug }}"
+    oso_domain: "{{ cloudoso_cr.resources[0].status.domain }}"
+    cb_base_domain: "{{ cloudoso_cr.resources[0].spec.baseDomain }}"
+    oso_project_domain: "{{ cloudoso_cr.resources[0].spec.projectDomain | default('Default') }}"
+    cb_route53_vault_path: "{{ cloudoso_cr.resources[0].spec.route53VaultPath | default('oso/accounts/route53-openstack') }}"
+    cb_api_vip: "{{ cloudoso_cr.resources[0].status.apiVIP | default('') }}"
+    cb_ingress_vip: "{{ cloudoso_cr.resources[0].status.ingressVIP | default('') }}"
+    cb_external_network: "{{ oso_external_network }}"
+    use_designate_dns: "{{ cloudoso_cr.resources[0].spec.baseDomain | default('') == (lookup('env', 'BASE_DOMAIN') | default('', true)) }}"
+    designate_zone_id: "{{ cloudoso_cr.resources[0].spec.designateZoneId | default('895a1406-9ad2-4372-80f9-4e23fe1fd9ef') }}"
+    designate_project_id: "{{ cloudoso_cr.resources[0].status.projectId | default(cloudoso_cr.resources[0].spec.designateProjectId | default('')) }}"
+    designate_project_name: "{{ cloudoso_cr.resources[0].status.projectName | default('') }}"
+    designate_admin_vault_path: "{{ cloudoso_cr.resources[0].spec.vaultPath | default('oso/accounts/shc_admin') }}"
+    designate_dns_project_name: "{{ cloudoso_cr.resources[0].spec.designateDnsProject | default('lab-project') }}"
+
+- name: Set cluster build identifiers
+  ansible.builtin.set_fact:
+    cb_app_name: "{{ ansible_operator_meta.name }}"
+    cb_cluster_name: "{{ ansible_operator_meta.name }}"
+    cb_cluster_domain: >-
+      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
+         if (use_designate_dns | default(false) | bool)
+         else (cb_slug ~ '.' ~ cb_base_domain) }}
+
+- name: Read PlatformOpenshift CR for existing cluster status
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: PlatformOpenshift
+    name: "{{ ansible_operator_meta.name }}"
+    namespace: "{{ ansible_operator_meta.namespace }}"
+  register: po_cr_current
+
+- name: Fast-path reconcile for already-installed healthy cluster
+  when:
+    - po_cr_current.resources[0].status.clusterInstalled | default(false) | bool
+    - po_cr_current.resources[0].status.clusterHealth | default('') == 'Healthy'
+  block:
+    - name: Refresh Designate DNS for healthy cluster
+      ansible.builtin.include_tasks: designate_dns.yml
+
+    - name: Refresh cluster monitor facts for healthy cluster
+      ansible.builtin.include_tasks: openstack_clusterbuild_monitor.yml
+
+    - name: Preserve API URLs from existing status when monitor omits them
+      ansible.builtin.set_fact:
+        cb_api_url: "{{ cb_api_url | default(po_cr_current.resources[0].status.apiURL) }}"
+        cb_apps_url: "{{ cb_apps_url | default(po_cr_current.resources[0].status.appsURL) }}"
+
+- name: Run OpenStack cluster build
+  ansible.builtin.include_tasks: openstack_clusterbuild.yml
+  when: >-
+    not (
+      po_cr_current.resources[0].status.clusterInstalled | default(false) | bool and
+      po_cr_current.resources[0].status.clusterHealth | default('') == 'Healthy'
+    )
+
+- name: Mark fast-path reconcile
+  ansible.builtin.set_fact:
+    cb_fast_path_reconciled: true
+  when: >-
+    po_cr_current.resources[0].status.clusterInstalled | default(false) | bool and
+    po_cr_current.resources[0].status.clusterHealth | default('') == 'Healthy'
+
+- name: Get reconciliation timestamp
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
     transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
-    oso_slug: "{{ cloudoso_cr.resources[0].status.slug | default(oso_env_name[:5]) }}"
-    oso_domain: "{{ cloudoso_cr.resources[0].status.domain | default('') }}"
 
-- name: Update PlatformOpenshift status as ready (openstack workshop stub)
+- name: Emit reconciliation event
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: events.k8s.io/v1
+      kind: Event
+      metadata:
+        namespace: "{{ ansible_operator_meta.namespace }}"
+        generateName: "platformopenshift-{{ ansible_operator_meta.name }}-"
+      regarding:
+        apiVersion: hybridsovereign.redhat/v1alpha1
+        kind: PlatformOpenshift
+        name: "{{ ansible_operator_meta.name }}"
+        namespace: "{{ ansible_operator_meta.namespace }}"
+      note: >-
+        PlatformOpenshift {{ ansible_operator_meta.name }} OpenStack cluster build completed.
+        App: {{ cb_app_name }}, Domain: {{ cb_base_domain }}
+      type: Normal
+      action: Reconcile
+      reason: ClusterBuildCompleted
+      reportingController: platformopenshift-operator
+      reportingInstance: platformopenshift-operator
+      eventTime: "{{ event_time }}"
+  ignore_errors: true
+
+- name: Update PlatformOpenshift status
   ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
   vars:
     cr_api_version: hybridsovereign.redhat/v1alpha1
     cr_plural: platformopenshifts
-    cr_name: "{{ platformopenshift_cr_name }}"
-    cr_namespace: "{{ platformopenshift_cr_namespace }}"
+    cr_name: "{{ ansible_operator_meta.name }}"
+    cr_namespace: "{{ ansible_operator_meta.namespace }}"
     cr_status_body:
       status: ready
       ready: true
-      phase: provisioned
       observedGeneration: "{{ platformopenshift_generation }}"
       lastReconciledAt: "{{ event_time }}"
-      name: "{{ platformopenshift_cr_name }}"
-      namespace: "{{ platformopenshift_cr_namespace }}"
+      name: "{{ ansible_operator_meta.name }}"
+      namespace: "{{ ansible_operator_meta.namespace }}"
       entity: "{{ resolved_entity }}"
       billingId: "{{ resolved_billing_id }}"
       description: "{{ resolved_description }}"
       platformType: openstack
-      slug: "{{ oso_slug }}"
+      slug: "{{ cb_slug }}"
       domain: "{{ oso_domain }}"
-      clusterInstalled: false
-      message: >-
-        PlatformOpenshift type=openstack bound to CloudOSO {{ oso_env_name }}
-        (OSP install deferred — workshop stub)
+      apiURL: "{{ cb_api_url }}"
+      appsURL: "{{ cb_apps_url }}"
+      consoleURL: "{{ cb_console_url | default('') }}"
+      adminPasswordVaultPath: "{{ cb_admin_password_vault | default('') }}"
+      kubeconfigVaultPath: "{{ cb_kubeconfig_vault | default('') }}"
+      secretsVaultPath: "{{ cb_secrets_vault_path | default('') }}"
+      clusterVersion: "{{ cb_cluster_version | default('') }}"
+      powerState: "{{ cb_power_state | default('Unknown') }}"
+      clusterHealth: "{{ cb_cluster_health | default('Unknown') }}"
+      provisionStatus: "{{ cb_provision_status | default('Unknown') }}"
+      acmAvailable: "{{ cb_acm_available | default('Unknown') }}"
+      clusterInstalled: "{{ cb_cluster_installed | default(false) | bool }}"
       conditions:
         - type: Available
           status: "True"
           lastTransitionTime: "{{ transition_time }}"
           reason: EDASucceeded
-          message: Bound to ready CloudOSO {{ oso_env_name }}
+          message: >-
+            OpenStack OCP cluster build '{{ cb_app_name }}' provisioned.
+            API: {{ cb_api_url }}
+
+- name: Configure Keycloak OIDC client and ACM OAuth policy for this cluster
+  ansible.builtin.include_tasks: keycloak_oidc.yml
+  vars:
+    cluster_name: "{{ ansible_operator_meta.name }}"
+    cluster_console_url: "{{ cb_console_url | default('') }}"
+    cluster_api_url: "{{ cb_api_url | default('') }}"
+    cluster_apps_url: "{{ cb_apps_url | default('') }}"
+    cluster_namespace: "{{ ansible_operator_meta.namespace }}"
+  when: cb_cluster_installed | default(false) | bool
+
+- name: Update PlatformOpenshift status with OIDC info
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: platformopenshifts
+    cr_name: "{{ ansible_operator_meta.name }}"
+    cr_namespace: "{{ ansible_operator_meta.namespace }}"
+    cr_status_body:
+      oidcConfigured: "{{ oidc_configured | default(false) | bool }}"
+      oidcClientId: "{{ oidc_client_id | default('') }}"
+  when: cb_cluster_installed | default(false) | bool

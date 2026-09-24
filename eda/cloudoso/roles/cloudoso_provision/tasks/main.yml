@@ -75,6 +75,7 @@
 
     - name: Log VRF spec passthrough for future use
       ansible.builtin.include_tasks: vrf_passthrough.yml
+      when: false
 
     - name: Get reconciliation timestamp
       ansible.builtin.set_fact:

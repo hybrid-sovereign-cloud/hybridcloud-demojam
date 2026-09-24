@@ -278,6 +278,7 @@
     ep_subdomain_zone_id: "{{ ep_parent_zone_id }}"
 
 - name: Read Vault root token
+  when: (lookup('env', 'VAULT_TOKEN') | default('', true) | length) == 0
   kubernetes.core.k8s_info:
     host: "{{ central_api_host }}"
     api_key: "{{ central_bearer_token }}"
@@ -288,14 +289,25 @@
     namespace: "{{ vault_init_secret_namespace }}"
   register: vault_init_secret_info_ep
 
-- name: Set Vault root token
+- name: Set Vault root token from job credential or Secret
   ansible.builtin.set_fact:
-    vault_root_token_ep: "{{ vault_init_secret_info_ep.resources[0].data.root_token | b64decode }}"
+    vault_root_token_ep: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+    vault_kv_write_addr: "{{ lookup('env', 'VAULT_ADDR') | default(vault_init_addr, true) }}"
+    vault_kv_write_mount: "{{ vault_kv_mount | default('hybridsovereign') }}"
+  no_log: true
+
+- name: Fall back to vault-init Secret when VAULT_TOKEN unset
+  when: (vault_root_token_ep | default('') | length) == 0
+  ansible.builtin.set_fact:
+    vault_root_token_ep: >-
+      {{
+        vault_init_secret_info_ep.resources[0].data[vault_root_token_key | default('rootToken')] | default(vault_init_secret_info_ep.resources[0].data.root_token) | b64decode
+      }}
   no_log: true
 
 - name: Check existing credential in Vault
   ansible.builtin.uri:
-    url: "{{ vault_init_addr }}/v1/central/data/oso/projects/{{ cloudoso_cr_name }}/clouds-config"
+    url: "{{ vault_kv_write_addr }}/v1/{{ vault_kv_write_mount }}/data/oso/projects/{{ cloudoso_cr_name }}/clouds-config"
     method: GET
     headers:
       X-Vault-Token: "{{ vault_root_token_ep }}"
@@ -401,7 +413,7 @@
 
 - name: Write per-project clouds.yaml to Vault
   ansible.builtin.uri:
-    url: "{{ vault_init_addr }}/v1/central/data/oso/projects/{{ cloudoso_cr_name }}/clouds-config"
+    url: "{{ vault_kv_write_addr }}/v1/{{ vault_kv_write_mount }}/data/oso/projects/{{ cloudoso_cr_name }}/clouds-config"
     method: POST
     headers:
       X-Vault-Token: "{{ vault_root_token }}"

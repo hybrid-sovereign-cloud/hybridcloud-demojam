@@ -13,8 +13,11 @@ default_project_domain: "shc_domain"
 default_region_name: "ATUIN"
 openstack_admin_user: "shc_admin"
 
-vault_init_secret_name: "vault-init-secrets"
-vault_init_secret_namespace: "central-vault"
-vault_init_addr: "http://vault-active.central-vault.svc:8200"
+vault_init_secret_name: "vault-init"
+vault_init_secret_namespace: "vault"
+vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault.vault.svc:8200', true) }}"
+vault_kv_mount: hybridsovereign
+vault_root_token_key: rootToken
+
 
 eda_dashboard_host: ""

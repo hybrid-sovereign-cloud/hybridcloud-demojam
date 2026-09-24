@@ -72,32 +72,6 @@
 
     - name: Run OpenStack environment preparation
       ansible.builtin.include_tasks: environmentprep.yml
-      when: false  # workshop: default AAP EE lacks openstack.cloud; use stub below
-
-    - name: Workshop CloudOSO stub (default EE lacks openstack.cloud)
-      block:
-        - name: Set CloudOSO stub facts from CR spec
-          ansible.builtin.set_fact:
-            ep_project: "{{ entity_name }}_{{ cloudoso_cr_name }}"
-            ep_base_domain: "{{ oso_spec.baseDomain | default('lab.signal9.gg') }}"
-            ep_project_domain: "{{ oso_spec.projectDomain | default('Default') }}"
-            ep_external_network: "{{ oso_spec.externalNetwork | default('ext-net') }}"
-            ep_slug: "{{ (cloudoso_cr_name | hash('sha256'))[:5] }}"
-        - name: Derive stub domain
-          ansible.builtin.set_fact:
-            ep_cluster_domain: "{{ ep_slug }}.{{ ep_base_domain }}"
-        - name: Export stub OSO status facts
-          ansible.builtin.set_fact:
-            oso_project_name: "{{ ep_project }}"
-            oso_project_id: "stub-{{ ep_slug }}"
-            oso_domain_id: stub-domain
-            oso_domain_name: "{{ ep_project_domain }}"
-            oso_slug: "{{ ep_slug }}"
-            oso_dns_domain: "{{ ep_cluster_domain }}"
-            oso_route53_zone_id: ""
-            oso_api_vip: ""
-            oso_ingress_vip: ""
-            oso_external_network: "{{ ep_external_network }}"
 
     - name: Log VRF spec passthrough for future use
       ansible.builtin.include_tasks: vrf_passthrough.yml
