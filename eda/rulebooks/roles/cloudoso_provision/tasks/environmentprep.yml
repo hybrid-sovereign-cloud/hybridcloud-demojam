@@ -1,7 +1,7 @@
 ---
 - name: Set environmentprep spec facts
   ansible.builtin.set_fact:
-    ep_project: "{{ entity_name }}_{{ cloudoso_cr_name }}"
+    ep_project: "{{ oso_spec.project | default(entity_name ~ '_' ~ cloudoso_cr_name, true) }}"
     ep_vault_path: "{{ oso_spec.vaultPath | default('') }}"
     ep_credentials_secret_name: "{{ (oso_spec.credentialsSecretRef | default({})).name | default('') }}"
     ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true) }}"
@@ -13,6 +13,8 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
+    # When credentialsSecretRef is set, reuse the clouds.yaml project (no Keystone admin).
+    ep_reuse_existing_project: "{{ (oso_spec.credentialsSecretRef.name | default('') | length) > 0 }}"
     use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)) }}"
     ep_parent_zone_id: >-
       {{ oso_spec.designateZoneId | default('')
@@ -125,6 +127,7 @@
          else (ep_slug ~ '.' ~ ep_base_domain) }}
 
 - name: Create OpenStack project
+  when: not (ep_reuse_existing_project | default(false) | bool)
   openstack.cloud.project:
     cloud: "{{ clouds_yaml_cloud }}"
     name: "{{ ep_project }}"
@@ -135,6 +138,7 @@
   register: os_project
 
 - name: Assign admin role to shc_admin on new project
+  when: not (ep_reuse_existing_project | default(false) | bool)
   openstack.cloud.role_assignment:
     cloud: "{{ clouds_yaml_cloud }}"
     user: "{{ openstack_admin_user }}"
@@ -143,6 +147,32 @@
     state: present
   environment:
     OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
+
+- name: Resolve existing project from clouds.yaml when reusing credentials
+  when: ep_reuse_existing_project | default(false) | bool
+  ansible.builtin.shell: |
+    python3 -c "
+    import json, yaml, os
+    with open(os.environ['OS_CLIENT_CONFIG_FILE']) as f:
+        cfg = yaml.safe_load(f)
+    auth = cfg['clouds']['{{ clouds_yaml_cloud }}']['auth']
+    print(json.dumps({
+      'name': auth.get('project_name') or '{{ ep_project }}',
+      'id': auth.get('project_id') or '',
+      'domain_id': auth.get('project_domain_id') or '',
+      'domain_name': auth.get('project_domain_name') or '{{ ep_project_domain }}',
+    }))
+    "
+  environment:
+    OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
+  register: existing_project_raw
+  changed_when: false
+
+- name: Set os_project fact for reused credentials
+  when: ep_reuse_existing_project | default(false) | bool
+  ansible.builtin.set_fact:
+    os_project:
+      project: "{{ existing_project_raw.stdout | from_json }}"
 
 - name: Find or create floating IPs (idempotent via description tags)
   ansible.builtin.shell: |
