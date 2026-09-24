@@ -1603,6 +1603,7 @@ data:
       kind: PlatformOpenshift
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 120s
       finalizer:
         name: platformopenshift.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1627,6 +1628,8 @@ spec:
     metadata:
       labels:
         hybridsovereign.redhat/operator-kind: PlatformOpenshift
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20260924-ztp-virt-aci-1"
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: hybridsovereign-platformopenshift-operator
