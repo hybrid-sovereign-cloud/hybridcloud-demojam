@@ -67,7 +67,9 @@ CNV adopt ──► CloudVirt local-virt (hs-platform-smoke)
 ```
 
 `hs-platform-smoke` PostSync waits for QuayConfig/AAPConfig ready, then force-reconciles
-AAPOrg/QuayOrg if they raced ahead. AAP playbooks also wait (not fail-fast) for configs.
+AAPOrg/QuayOrg/CloudVirt if they raced ahead. Operators for those kinds use
+`reconcilePeriod: 120s` so failed AAP jobs are relaunched without manual annotate.
+AAP playbooks wait for configs and CloudVirt reads `event_payload.regarding`.
 ```
 
 ## Platform configs (ZTP prerequisite)

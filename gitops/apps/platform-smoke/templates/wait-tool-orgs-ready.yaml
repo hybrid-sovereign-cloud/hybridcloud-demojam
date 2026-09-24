@@ -46,7 +46,7 @@ roleRef:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hs-platform-smoke-wait-tool-orgs
+  name: hs-platform-smoke-wait-tool-orgs-v2
   namespace: sovereign-cloud
   labels:
     hybridsovereign.redhat/gitops-owned: "true"

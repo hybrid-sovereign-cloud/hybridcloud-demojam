@@ -815,6 +815,7 @@ data:
       group: hybridsovereign.redhat
       kind: AAPOrg
       role: kind_reconcile
+      reconcilePeriod: 120s
       snakeCaseParameters: false
       finalizer:
         name: aaporg.hybridsovereign.redhat/finalizer
@@ -838,6 +839,8 @@ spec:
       hybridsovereign.redhat/operator-kind: AAPOrg
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
       labels:
         hybridsovereign.redhat/operator-kind: AAPOrg
         hybridsovereign.redhat/gitops-owned: "true"
@@ -926,6 +929,8 @@ data:
       group: hybridsovereign.redhat
       kind: QuayOrg
       role: kind_reconcile
+      # Requeue failed/stuck CRs without relying on annotate-only reconcileNow
+      reconcilePeriod: 120s
       snakeCaseParameters: false
       finalizer:
         name: quayorg.hybridsovereign.redhat/finalizer
@@ -949,6 +954,8 @@ spec:
       hybridsovereign.redhat/operator-kind: QuayOrg
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
       labels:
         hybridsovereign.redhat/operator-kind: QuayOrg
         hybridsovereign.redhat/gitops-owned: "true"
@@ -1481,6 +1488,7 @@ data:
       group: hybridsovereign.redhat
       kind: CloudVirt
       role: kind_reconcile
+      reconcilePeriod: 120s
       snakeCaseParameters: false
       finalizer:
         name: cloudvirt.hybridsovereign.redhat/finalizer
@@ -1504,6 +1512,8 @@ spec:
       hybridsovereign.redhat/operator-kind: CloudVirt
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
       labels:
         hybridsovereign.redhat/operator-kind: CloudVirt
         hybridsovereign.redhat/gitops-owned: "true"

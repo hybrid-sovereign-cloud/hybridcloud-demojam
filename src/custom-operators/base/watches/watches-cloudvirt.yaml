@@ -1,10 +1,10 @@
 ---
 - version: v1alpha1
   group: hybridsovereign.redhat
-  kind: QuayOrg
+  kind: CloudVirt
   role: kind_reconcile
   reconcilePeriod: 120s
   snakeCaseParameters: false
   finalizer:
-    name: quayorg.hybridsovereign.redhat/finalizer
+    name: cloudvirt.hybridsovereign.redhat/finalizer
     role: kind_reconcile

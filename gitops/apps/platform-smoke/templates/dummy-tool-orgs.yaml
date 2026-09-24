@@ -1,4 +1,6 @@
-# Always-on dummy AAPOrg / QuayOrg — exercise AAPConfig and QuayConfig end-to-end.
+# QuayOrg / AAPOrg after Rbacs; CloudVirt after orgs. Parent wave 46 runs only after
+# hs-platform-configs PostSync proves QuayConfig/AAPConfig ready — first-apply must
+# not race. Operators also reconcilePeriod=120s to recover any stuck failed jobs.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: AAPOrg
