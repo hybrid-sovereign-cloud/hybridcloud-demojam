@@ -69,7 +69,7 @@
             requests:
               storage: "{{ vac_vm.disk_gi }}Gi"
           storageClassName: "{{ vac_storage_class }}"
-          volumeMode: Filesystem
+          volumeMode: Block
 
 - name: Create VirtualMachine {{ vac_vm.name }} (boots discovery ISO)
   kubernetes.core.k8s:

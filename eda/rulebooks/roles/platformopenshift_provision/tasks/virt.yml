@@ -438,7 +438,7 @@
                 "index": i,
                 "cores": cp_cores,
                 "memory": cp_mem,
-                "disk_gi": 100,
+                "disk_gi": 120,
                 "ip": f"192.168.100.{10 + i}",
                 "mac": f"02:00:{h[0:2]}:{h[2:4]}:c{i:01x}:{i:02x}",
             })
@@ -449,7 +449,7 @@
                 "index": i,
                 "cores": w_cores,
                 "memory": w_mem,
-                "disk_gi": 80,
+                "disk_gi": 120,
                 "ip": f"192.168.100.{50 + i}",
                 "mac": f"02:00:{h[0:2]}:{h[2:4]}:d{i:01x}:{i:02x}",
             })
@@ -565,6 +565,7 @@
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     state: present
+    merge_type: merge
     definition:
       apiVersion: agent-install.openshift.io/v1beta1
       kind: Agent
@@ -573,7 +574,20 @@
         namespace: "{{ vac_namespace }}"
       spec:
         approved: true
-        installation_disk_id: "{{ item.spec.installation_disk_id | default(omit) }}"
+        role: "{{ item.status.role | default('master') }}"
+        installation_disk_id: >-
+          {{
+            (
+              (item.status.inventory.disks | default([]))
+              | selectattr('driveType', 'defined')
+              | rejectattr('driveType', 'equalto', 'ODD')
+              | sort(attribute='sizeBytes', reverse=true)
+              | map(attribute='id')
+              | list
+              | first
+            )
+            | default(item.spec.installation_disk_id | default(omit), true)
+          }}
   loop: "{{ vac_agents.resources }}"
   failed_when: false
 
@@ -614,3 +628,38 @@
           lastTransitionTime: "{{ transition_time }}"
           reason: EDASucceeded
           message: AgentClusterInstall + {{ vac_vm_defs | length }} CNV VMs created
+
+# Label ManagedCluster for ZTP SSO governance Placement (when Hive imports it).
+- name: Check ManagedCluster for SSO label
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ vac_name }}"
+  register: vac_mc
+  failed_when: false
+
+- name: Label ManagedCluster for SSO governance
+  when: vac_mc.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1
+      kind: ManagedCluster
+      metadata:
+        name: "{{ vac_name }}"
+        labels: >-
+          {{
+            (vac_mc.resources[0].metadata.labels | default({}))
+            | combine({
+                'hybridsovereign.redhat/sso': 'enabled',
+                'hybridsovereign.redhat/platformopenshift': platformopenshift_cr_name,
+                'hybridsovereign.redhat/platform-type': 'virt'
+              })
+          }}
+  failed_when: false

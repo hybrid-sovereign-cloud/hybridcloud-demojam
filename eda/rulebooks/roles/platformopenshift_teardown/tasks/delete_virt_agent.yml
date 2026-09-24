@@ -1,11 +1,26 @@
 ---
 # Tear down ACM AgentClusterInstall path for type=virt (CNV VM-based install).
-# Deletes VMs/DataVolumes, then Hive/Assisted CRs and ManagedCluster.
+# Order: stop VMs → Agents → DV/PVC → Assisted/Hive → NAD → namespace.
 
 - name: Set virt agent teardown facts
   ansible.builtin.set_fact:
     vac_name: "{{ platformopenshift_cr_name }}"
     vac_namespace: "{{ platformopenshift_cr_name }}"
+
+- name: Check cluster namespace exists
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Namespace
+    name: "{{ vac_namespace }}"
+  register: vac_ns
+  failed_when: false
+
+- name: Skip virt teardown when namespace already gone
+  ansible.builtin.meta: end_host
+  when: vac_ns.resources | default([]) | length == 0
 
 - name: List VirtualMachines in cluster namespace
   kubernetes.core.k8s_info:
@@ -15,12 +30,28 @@
     api_version: kubevirt.io/v1
     kind: VirtualMachine
     namespace: "{{ vac_namespace }}"
-    label_selectors:
-      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
   register: vac_vms
   failed_when: false
 
-- name: Stop and delete VirtualMachines
+- name: Stop VirtualMachines before delete
+  when: vac_vms.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      metadata:
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ vac_namespace }}"
+      spec:
+        running: false
+  loop: "{{ vac_vms.resources }}"
+  failed_when: false
+
+- name: Delete VirtualMachines
   when: vac_vms.resources | default([]) | length > 0
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
@@ -36,17 +67,15 @@
   loop: "{{ vac_vms.resources }}"
   failed_when: false
 
-- name: Delete DataVolumes in cluster namespace
+- name: Delete Assisted Agents
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     state: absent
-    api_version: cdi.kubevirt.io/v1beta1
-    kind: DataVolume
+    api_version: agent-install.openshift.io/v1beta1
+    kind: Agent
     namespace: "{{ vac_namespace }}"
-    label_selectors:
-      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
   failed_when: false
 
 - name: Delete NMStateConfigs
@@ -58,8 +87,28 @@
     api_version: agent-install.openshift.io/v1beta1
     kind: NMStateConfig
     namespace: "{{ vac_namespace }}"
-    label_selectors:
-      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+  failed_when: false
+
+- name: Delete DataVolumes
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: cdi.kubevirt.io/v1beta1
+    kind: DataVolume
+    namespace: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Delete lingering PVCs
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: PersistentVolumeClaim
+    namespace: "{{ vac_namespace }}"
   failed_when: false
 
 - name: Delete InfraEnv
@@ -98,7 +147,7 @@
     namespace: "{{ vac_namespace }}"
   failed_when: false
 
-- name: Wait briefly for ClusterDeployment gone
+- name: Wait for ClusterDeployment deletion
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -109,7 +158,7 @@
     namespace: "{{ vac_namespace }}"
   register: vac_cd
   until: vac_cd.resources | length == 0
-  retries: 30
+  retries: 36
   delay: 10
   failed_when: false
 
@@ -125,6 +174,33 @@
     namespace: "{{ vac_namespace }}"
   failed_when: false
 
+- name: Delete ManagedCluster if present
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ vac_name }}"
+  failed_when: false
+
+- name: Delete per-cluster SSO Policy artifacts
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: "{{ item.api }}"
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    namespace: openshift-gitops
+  loop:
+    - { api: policy.open-cluster-management.io/v1, kind: PlacementBinding, name: "{{ vac_name }}-keycloak-oidc-binding" }
+    - { api: cluster.open-cluster-management.io/v1beta1, kind: Placement, name: "{{ vac_name }}-keycloak-oidc-placement" }
+    - { api: policy.open-cluster-management.io/v1, kind: Policy, name: "{{ vac_name }}-keycloak-oidc" }
+  failed_when: false
+
 - name: Delete cluster namespace
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
@@ -134,4 +210,18 @@
     api_version: v1
     kind: Namespace
     name: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Wait for cluster namespace gone
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Namespace
+    name: "{{ vac_namespace }}"
+  register: vac_ns_gone
+  until: vac_ns_gone.resources | length == 0
+  retries: 36
+  delay: 10
   failed_when: false

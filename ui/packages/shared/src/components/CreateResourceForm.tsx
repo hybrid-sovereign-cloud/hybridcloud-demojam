@@ -212,7 +212,14 @@ export function CreateResourceForm({
   const [platformEnv, setPlatformEnv] = useState('');
   const [cpCount, setCpCount] = useState('3');
   const [workerCount, setWorkerCount] = useState('3');
+  const [nodePoolReplicas, setNodePoolReplicas] = useState('2');
+  const [cpMemory, setCpMemory] = useState('16Gi');
+  const [workerMemory, setWorkerMemory] = useState('8Gi');
+  const [cpCores, setCpCores] = useState('4');
+  const [workerCores, setWorkerCores] = useState('2');
   const [rbacMulti, setRbacMulti] = useState('');
+  const [rbacOperator, setRbacOperator] = useState('');
+  const [rbacViewer, setRbacViewer] = useState('');
   const [networkViewerRbac, setNetworkViewerRbac] = useState('');
 
   const type = formType;
@@ -370,7 +377,17 @@ export function CreateResourceForm({
           storageClass: virtStorageClass || undefined,
         };
       case 'platformopenshift': {
-        const rbacList = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const adminList = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const operatorList = rbacOperator.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const viewerList = rbacViewer.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const toolRbac =
+          adminList.length || operatorList.length || viewerList.length
+            ? {
+                ...(adminList.length ? { clusterAdminRbac: adminList } : {}),
+                ...(operatorList.length ? { clusterOperatorRbac: operatorList } : {}),
+                ...(viewerList.length ? { clusterViewerRbac: viewerList } : {}),
+              }
+            : undefined;
         if (platformType === 'aws') {
           return {
             type: 'aws',
@@ -381,25 +398,34 @@ export function CreateResourceForm({
               controlPlaneCount: Number(cpCount) || 3,
               workerCount: Number(workerCount) || 2,
             },
-            ...(rbacList.length
-              ? { toolRbac: { clusterAdminRbac: rbacList }, clusterViewerRbac: rbacList }
-              : {}),
+            ...(toolRbac ? { toolRbac } : {}),
           };
         }
-        if (platformType === 'virt' || platformType === 'hosted') {
+        if (platformType === 'hosted') {
           const envName = platformEnv || cloudVirtRef;
-          const size = {
-            environment: envName,
-            controlPlaneCount: Number(cpCount) || 3,
-            workerCount: Number(workerCount) || 2,
-          };
           return {
-            type: platformType,
-            ...(platformType === 'hosted' ? { hosted: { environment: envName } } : { virt: size }),
-            cloudRef: envName,
-            ...(rbacList.length
-              ? { toolRbac: { clusterAdminRbac: rbacList }, clusterViewerRbac: rbacList }
-              : {}),
+            type: 'hosted',
+            hosted: {
+              environment: envName,
+              nodePoolReplicas: Number(nodePoolReplicas) || 2,
+            },
+            ...(toolRbac ? { toolRbac } : {}),
+          };
+        }
+        if (platformType === 'virt') {
+          const envName = platformEnv || cloudVirtRef;
+          return {
+            type: 'virt',
+            virt: {
+              environment: envName,
+              controlPlaneCount: Number(cpCount) || 1,
+              workerCount: Number(workerCount) || 0,
+              controlPlaneMemory: cpMemory || '16Gi',
+              workerMemory: workerMemory || '8Gi',
+              controlPlaneCores: Number(cpCores) || 4,
+              workerCores: Number(workerCores) || 2,
+            },
+            ...(toolRbac ? { toolRbac } : {}),
           };
         }
         return {
@@ -410,9 +436,7 @@ export function CreateResourceForm({
             workerCount: Number(workerCount) || 3,
             externalNetwork,
           },
-          ...(rbacList.length
-            ? { toolRbac: { clusterAdminRbac: rbacList }, clusterViewerRbac: rbacList }
-            : {}),
+          ...(toolRbac ? { toolRbac } : {}),
         };
       }
       case 'migration':
@@ -712,12 +736,24 @@ export function CreateResourceForm({
                     id="platform-type"
                     label="Platform type"
                     value={platformType}
-                    onChange={(v) => { setPlatformType(v); setPlatformEnv(''); }}
+                    onChange={(v) => {
+                      setPlatformType(v);
+                      setPlatformEnv('');
+                      if (v === 'virt') {
+                        setCpCount('1');
+                        setWorkerCount('0');
+                      } else if (v === 'hosted') {
+                        setNodePoolReplicas('2');
+                      } else {
+                        setCpCount('3');
+                        setWorkerCount(v === 'aws' ? '2' : '3');
+                      }
+                    }}
                     options={[
                       { value: 'openstack', label: 'OpenStack' },
                       { value: 'aws', label: 'AWS' },
-                      { value: 'virt', label: 'Virt (CNV)' },
-                      { value: 'hosted', label: 'Hosted (Hypershift)' },
+                      { value: 'virt', label: 'Virt — standalone on CNV VMs (VM control plane)' },
+                      { value: 'hosted', label: 'Hosted — Hypershift HCP (containerized control plane)' },
                     ]}
                     isRequired
                   />
@@ -753,12 +789,54 @@ export function CreateResourceForm({
                     )}
                     isRequired
                   />
-                  <FormGroup label="Control plane count" fieldId="cp-count">
-                    <TextInput id="cp-count" type="number" value={cpCount} onChange={(_e, v) => setCpCount(v)} />
-                  </FormGroup>
-                  <FormGroup label="Worker count" fieldId="worker-count">
-                    <TextInput id="worker-count" type="number" value={workerCount} onChange={(_e, v) => setWorkerCount(v)} />
-                  </FormGroup>
+                  {platformType === 'hosted' ? (
+                    <FormGroup label="Worker NodePool replicas" fieldId="nodepool-replicas">
+                      <TextInput
+                        id="nodepool-replicas"
+                        type="number"
+                        value={nodePoolReplicas}
+                        onChange={(_e, v) => setNodePoolReplicas(v)}
+                      />
+                    </FormGroup>
+                  ) : (
+                    <>
+                      <FormGroup
+                        label={platformType === 'virt' ? 'Control plane VMs' : 'Control plane count'}
+                        fieldId="cp-count"
+                      >
+                        <TextInput id="cp-count" type="number" value={cpCount} onChange={(_e, v) => setCpCount(v)} />
+                      </FormGroup>
+                      <FormGroup label="Worker count" fieldId="worker-count">
+                        <TextInput
+                          id="worker-count"
+                          type="number"
+                          value={workerCount}
+                          onChange={(_e, v) => setWorkerCount(v)}
+                        />
+                      </FormGroup>
+                    </>
+                  )}
+                  {platformType === 'virt' && (
+                    <>
+                      <FormGroup label="Control plane memory" fieldId="cp-mem">
+                        <TextInput id="cp-mem" value={cpMemory} onChange={(_e, v) => setCpMemory(v)} />
+                      </FormGroup>
+                      <FormGroup label="Control plane cores" fieldId="cp-cores">
+                        <TextInput id="cp-cores" type="number" value={cpCores} onChange={(_e, v) => setCpCores(v)} />
+                      </FormGroup>
+                      <FormGroup label="Worker memory" fieldId="w-mem">
+                        <TextInput id="w-mem" value={workerMemory} onChange={(_e, v) => setWorkerMemory(v)} />
+                      </FormGroup>
+                      <FormGroup label="Worker cores" fieldId="w-cores">
+                        <TextInput
+                          id="w-cores"
+                          type="number"
+                          value={workerCores}
+                          onChange={(_e, v) => setWorkerCores(v)}
+                        />
+                      </FormGroup>
+                    </>
+                  )}
                   {platformType === 'aws' && (
                     <FormGroup label="Region" fieldId="plat-region">
                       <TextInput id="plat-region" value={region} onChange={(_e, v) => setRegion(v)} />
@@ -769,8 +847,22 @@ export function CreateResourceForm({
                       <TextInput id="plat-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} />
                     </FormGroup>
                   )}
-                  <FormGroup label="Cluster admin RBAC (comma-separated)" fieldId="plat-rbac">
-                    <TextArea id="plat-rbac" value={rbacMulti} onChange={(_e, v) => setRbacMulti(v)} rows={2} placeholder={names(rbacs.items).map((r) => r.value).join(', ')} />
+                  <FormGroup label="Cluster admin RBAC (comma-separated Rbac names)" fieldId="plat-rbac-admin">
+                    <TextArea
+                      id="plat-rbac-admin"
+                      value={rbacMulti}
+                      onChange={(_e, v) => setRbacMulti(v)}
+                      rows={2}
+                      placeholder={names(rbacs.items)
+                        .map((r) => r.value)
+                        .join(', ')}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Cluster operator RBAC" fieldId="plat-rbac-op">
+                    <TextArea id="plat-rbac-op" value={rbacOperator} onChange={(_e, v) => setRbacOperator(v)} rows={2} />
+                  </FormGroup>
+                  <FormGroup label="Cluster viewer RBAC" fieldId="plat-rbac-view">
+                    <TextArea id="plat-rbac-view" value={rbacViewer} onChange={(_e, v) => setRbacViewer(v)} rows={2} />
                   </FormGroup>
                 </>
               )}

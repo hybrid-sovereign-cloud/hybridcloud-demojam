@@ -74,6 +74,10 @@ AAP playbooks wait for configs and CloudVirt reads `event_payload.regarding`.
 PlatformOpenshift types on CloudVirt:
 - `type: hosted` → Hypershift HostedCluster (containerized control plane) + KubeVirt NodePool
 - `type: virt` → ACM AgentClusterInstall + InfraEnv; control plane (and workers) as CNV VMs
+
+Spoke SSO (ZTP): ACM Policy `hs-spoke-sso` in `hs-acm` selects ManagedClusters labeled
+`hybridsovereign.redhat/sso=enabled` (set by PlatformOpenshift provision) and enforces
+OpenShift OAuth → Keycloak realm via a shared OIDC client.
 ```
 
 ## Platform configs (ZTP prerequisite)

@@ -1,0 +1,114 @@
+# ZTP: ACM governance Policy that configures Keycloak SSO (OIDC) on every
+# ManagedCluster labeled hybridsovereign.redhat/sso=enabled.
+# PlatformOpenshift provision labels hosted/virt ManagedClusters accordingly.
+#
+# Shared OIDC client secret is expected at:
+#   Secret/openshift-spoke-sso in sovereign-cloud-plugins (key: clientSecret)
+# created by the ensure-spoke-sso Sync hook Job.
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: hs-spoke-sso
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            hybridsovereign.redhat/sso: "enabled"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: hs-spoke-sso
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "31"
+placementRef:
+  name: hs-spoke-sso
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: hs-spoke-sso
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: hs-spoke-sso
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "32"
+    policy.open-cluster-management.io/standards: "NIST SP 800-53"
+    policy.open-cluster-management.io/categories: "AC Access Control"
+    policy.open-cluster-management.io/controls: "AC-2 Account Management"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: hs-spoke-sso-oauth-secret
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: openid-client-secret-keycloak
+                  namespace: openshift-config
+                type: Opaque
+                data:
+                  clientSecret: '{{ "{{hub fromSecret \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"clientSecret\"}}" }}'
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: hs-spoke-sso-oauth
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: OAuth
+                metadata:
+                  name: cluster
+                spec:
+                  identityProviders:
+                    - name: keycloak-sso
+                      mappingMethod: claim
+                      type: OpenID
+                      openID:
+                        clientID: openshift-spoke-sso
+                        clientSecret:
+                          name: openid-client-secret-keycloak
+                        extraScopes:
+                          - profile
+                          - email
+                        claims:
+                          preferredUsername:
+                            - preferred_username
+                          name:
+                            - name
+                          email:
+                            - email
+                          groups:
+                            - groups
+                        issuer: '{{ "{{hub fromConfigMap \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"issuer\"}}" }}'

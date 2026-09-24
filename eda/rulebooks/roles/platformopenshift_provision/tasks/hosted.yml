@@ -256,3 +256,37 @@
           lastTransitionTime: "{{ transition_time }}"
           reason: EDASucceeded
           message: HostedCluster {{ hc_name }} submitted (HCP, not AgentClusterInstall)
+
+- name: Label HostedCluster ManagedCluster for SSO governance
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ hc_name }}"
+  register: hc_mc
+  failed_when: false
+
+- name: Apply SSO label on HostedCluster ManagedCluster
+  when: hc_mc.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1
+      kind: ManagedCluster
+      metadata:
+        name: "{{ hc_name }}"
+        labels: >-
+          {{
+            (hc_mc.resources[0].metadata.labels | default({}))
+            | combine({
+                'hybridsovereign.redhat/sso': 'enabled',
+                'hybridsovereign.redhat/platformopenshift': platformopenshift_cr_name,
+                'hybridsovereign.redhat/platform-type': 'hosted'
+              })
+          }}
+  failed_when: false

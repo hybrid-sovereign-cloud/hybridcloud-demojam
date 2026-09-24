@@ -1,0 +1,148 @@
+# Sync hook: ensure shared Keycloak OIDC client + hub Secret/ConfigMap used by
+# hs-spoke-sso ACM governance Policy (ZTP SSO for PlatformOpenshift spokes).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-spoke-sso-ensure
+  namespace: sovereign-cloud-jobs
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "25"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-spoke-sso-ensure
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "25"
+rules:
+  - apiGroups: [""]
+    resources: [secrets, configmaps, namespaces]
+    verbs: [get, list, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-spoke-sso-ensure
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "25"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-spoke-sso-ensure
+subjects:
+  - kind: ServiceAccount
+    name: hs-spoke-sso-ensure
+    namespace: sovereign-cloud-jobs
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-spoke-sso-ensure
+  namespace: sovereign-cloud-jobs
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "26"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: hs-spoke-sso-ensure
+      restartPolicy: OnFailure
+      containers:
+        - name: ensure
+          image: quay.io/openshift/origin-cli:latest
+          env:
+            - name: KC_URL
+              value: "http://keycloak.keycloak.svc:8080"
+            - name: KC_REALM
+              value: "sso"
+            - name: KC_ADMIN_SECRET
+              value: "rhbk-services-admin"
+            - name: KC_ADMIN_NS
+              value: "sovereign-cloud-plugins"
+            - name: TARGET_NS
+              value: "sovereign-cloud-plugins"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              oc get ns "$TARGET_NS" >/dev/null 2>&1 || oc create ns "$TARGET_NS"
+              USER=$(oc get secret "$KC_ADMIN_SECRET" -n "$KC_ADMIN_NS" -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || true)
+              PASS=$(oc get secret "$KC_ADMIN_SECRET" -n "$KC_ADMIN_NS" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+              if [[ -z "${USER}" || -z "${PASS}" ]]; then
+                USER=$(oc get secret rhbk-admin-credentials -n sovereign-cloud -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || true)
+                PASS=$(oc get secret rhbk-admin-credentials -n sovereign-cloud -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+              fi
+              if [[ -z "${USER}" || -z "${PASS}" ]]; then
+                echo "Keycloak admin secret not found; writing placeholder issuer ConfigMap only"
+                oc apply -f - <<EOF
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: openshift-spoke-sso
+                namespace: ${TARGET_NS}
+              data:
+                issuer: "${KC_URL}/realms/${KC_REALM}"
+                clientID: openshift-spoke-sso
+                status: pending-admin-secret
+              EOF
+                exit 0
+              fi
+              TOKEN=$(curl -sk -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
+                -d "grant_type=password&client_id=admin-cli&username=${USER}&password=${PASS}" \
+                | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+              [[ -n "$TOKEN" ]] || { echo "failed to get Keycloak token"; exit 1; }
+              EXIST=$(curl -sk -H "Authorization: Bearer ${TOKEN}" \
+                "${KC_URL}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso")
+              if echo "$EXIST" | grep -q '"id"'; then
+                CID=$(echo "$EXIST" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+              else
+                curl -sk -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+                  "${KC_URL}/admin/realms/${KC_REALM}/clients" \
+                  -d '{"clientId":"openshift-spoke-sso","name":"OpenShift managed spokes SSO","protocol":"openid-connect","publicClient":false,"standardFlowEnabled":true,"directAccessGrantsEnabled":false,"redirectUris":["https://oauth-openshift.apps.*/*","https://console-openshift-console.apps.*/*"],"webOrigins":["https://*"],"attributes":{"groups.claim.enabled":"true"}}' \
+                  -o /dev/null -w "%{http_code}\n" | grep -E '201|409'
+                EXIST=$(curl -sk -H "Authorization: Bearer ${TOKEN}" \
+                  "${KC_URL}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso")
+                CID=$(echo "$EXIST" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+              fi
+              SECRET=$(curl -sk -H "Authorization: Bearer ${TOKEN}" \
+                "${KC_URL}/admin/realms/${KC_REALM}/clients/${CID}/client-secret" \
+                | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+              [[ -n "$SECRET" ]] || { echo "no client secret"; exit 1; }
+              # Prefer external issuer if route exists
+              ISSUER="${KC_URL}/realms/${KC_REALM}"
+              EXT=$(oc get route -A -o jsonpath='{range .items[*]}{.spec.host}{"\n"}{end}' 2>/dev/null | grep -iE 'keycloak|rhbk' | head -1 || true)
+              if [[ -n "$EXT" ]]; then
+                ISSUER="https://${EXT}/realms/${KC_REALM}"
+              fi
+              oc apply -f - <<EOF
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: openshift-spoke-sso
+                namespace: ${TARGET_NS}
+              type: Opaque
+              stringData:
+                clientSecret: "${SECRET}"
+                clientID: openshift-spoke-sso
+              ---
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: openshift-spoke-sso
+                namespace: ${TARGET_NS}
+              data:
+                issuer: "${ISSUER}"
+                clientID: openshift-spoke-sso
+              EOF
+              echo "spoke SSO client ready issuer=${ISSUER}"
