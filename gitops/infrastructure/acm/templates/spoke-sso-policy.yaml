@@ -6,6 +6,18 @@
 #   Secret/openshift-spoke-sso in sovereign-cloud-plugins (key: clientSecret)
 # created by the ensure-spoke-sso Sync hook Job.
 ---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "29"
+spec:
+  clusterSet: global
+---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -16,6 +28,8 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "30"
 spec:
+  clusterSets:
+    - global
   predicates:
     - requiredClusterSelector:
         labelSelector:
