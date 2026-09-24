@@ -14,6 +14,10 @@
       {{ (oso_env_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
+    cb_install_base_domain: >-
+      {{ (oso_env_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
+         if (use_designate_dns | default(false) | bool)
+         else (cb_slug ~ '.' ~ cb_base_domain) }}
     cb_image_set: "{{ platform_spec.openstack.ocpImageSet | default(default_ocp_image_set) }}"
     cb_controller_flavor: "{{ oso_control_plane_flavor }}"
     cb_worker_flavor: "{{ oso_worker_flavor }}"
