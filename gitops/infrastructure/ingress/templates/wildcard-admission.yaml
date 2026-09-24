@@ -1,16 +1,104 @@
-# Partial adopt of IngressController/default — only routeAdmission.
-# Required for Hypershift KubeVirt baseDomainPassthrough (Subdomain wildcard routes).
-# Applied by Argo via ServerSideApply; see Application ignoreDifferences for other fields.
-apiVersion: operator.openshift.io/v1
-kind: IngressController
+# Adopt-only patch of IngressController/default.routeAdmission.
+# Runs in openshift-gitops (openshift-ingress-operator has deny-all NetPol).
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: default
-  namespace: openshift-ingress-operator
+  name: hs-ingress-wildcard
+  namespace: openshift-gitops
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-ingress-wildcard
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["ingresscontrollers"]
+    resourceNames: ["default"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-ingress-wildcard
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-ingress-wildcard
+subjects:
+  - kind: ServiceAccount
+    name: hs-ingress-wildcard
+    namespace: openshift-gitops
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # GenerateName via Argo hook-delete BeforeHookCreation; fixed name is fine with that policy.
+  name: hs-ingress-wildcard
+  namespace: openshift-gitops
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    app.kubernetes.io/name: hs-ingress-wildcard
+  annotations:
     argocd.argoproj.io/sync-wave: "1"
-    argocd.argoproj.io/sync-options: ServerSideApply=true,RespectIgnoreDifferences=true
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  routeAdmission:
-    wildcardPolicy: WildcardsAllowed
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hs-ingress-wildcard
+    spec:
+      serviceAccountName: hs-ingress-wildcard
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: patch
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              NS=openshift-ingress-operator
+              NAME=default
+              echo "Ensuring IngressController/${NAME} routeAdmission.wildcardPolicy=WildcardsAllowed..."
+              oc patch ingresscontroller "${NAME}" -n "${NS}" --type=merge -p '{
+                "spec": {
+                  "routeAdmission": {
+                    "wildcardPolicy": "WildcardsAllowed"
+                  }
+                }
+              }'
+              POLICY=$(oc get ingresscontroller "${NAME}" -n "${NS}" -o jsonpath='{.spec.routeAdmission.wildcardPolicy}')
+              echo "wildcardPolicy=${POLICY}"
+              test "${POLICY}" = "WildcardsAllowed"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
