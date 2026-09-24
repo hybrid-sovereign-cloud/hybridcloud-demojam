@@ -1,0 +1,78 @@
+---
+# Stop one VM, remove discoveryiso disk/volume, start again (boot from rootdisk).
+- name: Stop VM {{ vac_vm_obj.metadata.name }} for ISO eject
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      metadata:
+        name: "{{ vac_vm_obj.metadata.name }}"
+        namespace: "{{ vac_namespace }}"
+      spec:
+        runStrategy: Halted
+
+- name: Wait for VMI stopped {{ vac_vm_obj.metadata.name }}
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ vac_vm_obj.metadata.name }}"
+    namespace: "{{ vac_namespace }}"
+  register: vac_vmi_gone
+  until: vac_vmi_gone.resources | length == 0
+  retries: 40
+  delay: 5
+  failed_when: false
+
+- name: Build VM definition without discovery ISO
+  ansible.builtin.set_fact:
+    vac_vm_no_iso:
+      apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      metadata:
+        name: "{{ vac_vm_obj.metadata.name }}"
+        namespace: "{{ vac_namespace }}"
+        labels: "{{ vac_vm_obj.metadata.labels | default({}) }}"
+      spec:
+        runStrategy: Always
+        template:
+          metadata:
+            labels: "{{ vac_vm_obj.spec.template.metadata.labels | default({}) }}"
+          spec:
+            domain:
+              cpu:
+                cores: "{{ vac_vm_obj.spec.template.spec.domain.cpu.cores | default(4) }}"
+              resources:
+                requests:
+                  memory: "{{ vac_vm_obj.spec.template.spec.domain.resources.requests.memory | default('16Gi') }}"
+              devices:
+                disks:
+                  - name: rootdisk
+                    bootOrder: 1
+                    disk:
+                      bus: virtio
+                interfaces: "{{ vac_vm_obj.spec.template.spec.domain.devices.interfaces }}"
+              machine:
+                type: q35
+            networks: "{{ vac_vm_obj.spec.template.spec.networks }}"
+            volumes: >-
+              {{
+                vac_vm_obj.spec.template.spec.volumes | default([])
+                | rejectattr('name', 'equalto', 'discoveryiso')
+                | list
+              }}
+            evictionStrategy: None
+
+- name: Apply VM without discovery ISO {{ vac_vm_obj.metadata.name }}
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ vac_vm_no_iso }}"

@@ -591,6 +591,9 @@
   loop: "{{ vac_agents.resources }}"
   failed_when: false
 
+- name: Eject discovery ISO when agents reboot to disk
+  ansible.builtin.include_tasks: virt_eject_iso_wait.yml
+
 - name: Get current timestamp
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"

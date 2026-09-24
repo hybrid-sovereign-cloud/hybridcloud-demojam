@@ -1,0 +1,58 @@
+---
+# After Assisted reaches Rebooting, CNV VMs must eject the discovery ISO or they
+# boot the CD again → ACI state installing-pending-user-action.
+- name: Wait until agents request disk boot (Rebooting / pending user action)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: agent-install.openshift.io/v1beta1
+    kind: Agent
+    namespace: "{{ vac_namespace }}"
+  register: vac_agents_reboot
+  until: >-
+    vac_agents_reboot.resources | default([]) | length > 0 and
+    (
+      vac_agents_reboot.resources
+      | map(attribute='status.progress.currentStage')
+      | map('default', '', true)
+      | select('search', 'Reboot|Done|Configuring')
+      | list
+      | length
+    ) > 0
+    or
+    (
+      vac_agents_reboot.resources
+      | map(attribute='status.conditions')
+      | map('default', [], true)
+      | flatten
+      | selectattr('type', 'equalto', 'Installed')
+      | selectattr('message', 'defined')
+      | map(attribute='message')
+      | select('search', 'boot from disk|boot order|installation image')
+      | list
+      | length
+    ) > 0
+  retries: 90
+  delay: 20
+  failed_when: false
+
+- name: List VirtualMachines for ISO eject
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachine
+    namespace: "{{ vac_namespace }}"
+    label_selectors:
+      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+  register: vac_vms_eject
+  failed_when: false
+
+- name: Eject discovery ISO and boot from root disk
+  when: vac_vms_eject.resources | default([]) | length > 0
+  ansible.builtin.include_tasks: virt_eject_iso.yml
+  loop: "{{ vac_vms_eject.resources }}"
+  loop_control:
+    loop_var: vac_vm_obj
