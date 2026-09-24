@@ -47,7 +47,8 @@
         quayorg_quay_config_name: "{{ _quayorg_cr.resources[0].spec['quayConfig'] | default('') }}"
         quayorg_generation: "{{ _quayorg_cr.resources[0].metadata.generation | default(0) | int }}"
 
-    - name: Read QuayConfig
+    # ZTP race: QuayOrg often reconciles while QuayConfig AAP job is still running.
+    - name: Wait for QuayConfig ready
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
         api_key: "{{ services_bearer_token }}"
@@ -57,16 +58,21 @@
         name: "{{ quayorg_quay_config_name }}"
         namespace: "{{ plugin_quay_config_namespace }}"
       register: _quay_config
+      until: >-
+        (_quay_config.resources | length > 0)
+        and (_quay_config.resources[0].status.ready | default(false) | bool)
+      retries: 60
+      delay: 20
 
     - name: Fail if QuayConfig not found
       ansible.builtin.fail:
         msg: "QuayConfig {{ quayorg_quay_config_name }} not found in {{ plugin_quay_config_namespace }}"
       when: _quay_config.resources | length == 0
 
-    - name: Fail if QuayConfig not ready
+    - name: Fail if QuayConfig not ready after wait
       ansible.builtin.fail:
-        msg: "QuayConfig {{ quayorg_quay_config_name }} is not ready"
-      when: not (_quay_config.resources[0].status.ready | default(false))
+        msg: "QuayConfig {{ quayorg_quay_config_name }} is not ready after waiting"
+      when: not (_quay_config.resources[0].status.ready | default(false) | bool)
 
     - name: Read entity Namespace
       kubernetes.core.k8s_info:

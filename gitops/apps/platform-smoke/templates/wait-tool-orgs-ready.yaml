@@ -1,0 +1,123 @@
+# ZTP PostSync — after smoke CRs apply, wait for platform configs then requeue
+# stuck AAPOrg/QuayOrg that raced ahead (classic QuayConfig-not-ready failure).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-platform-smoke-ztp
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-platform-smoke-ztp
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+rules:
+  - apiGroups: ["hybridsovereign.redhat"]
+    resources: ["rbacconfigs", "aapconfigs", "quayconfigs", "aaporgs", "quayorgs"]
+    verbs: ["get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-platform-smoke-ztp
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-platform-smoke-ztp
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-platform-smoke-ztp
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-platform-smoke-wait-tool-orgs
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-smoke: "true"
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 2400
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+        hybridsovereign.redhat/platform-smoke: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-platform-smoke-ztp
+      containers:
+        - name: wait
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              PLUGINS=sovereign-cloud-plugins
+              ENT=entity-acme-corp
+
+              echo "ZTP smoke PostSync: wait for platform configs..."
+              for i in $(seq 1 90); do
+                QC=$(oc get quayconfig quay-sovereign-services -n "$PLUGINS" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                AC=$(oc get aapconfig aap-sovereign-services -n "$PLUGINS" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                RC=$(oc get rbacconfig keycloak-sovereign-tenants-services -n "$PLUGINS" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                echo "  [$i] rbacCfg=$RC aapCfg=$AC quayCfg=$QC"
+                if [ "$QC" = "true" ] && [ "$AC" = "true" ] && [ "$RC" = "true" ]; then
+                  break
+                fi
+                sleep 20
+              done
+              [ "$(oc get quayconfig quay-sovereign-services -n "$PLUGINS" -o jsonpath='{.status.ready}' 2>/dev/null)" = "true" ] \
+                || { echo "FATAL: QuayConfig not ready" >&2; exit 1; }
+
+              requeue() {
+                local kind="$1" name="$2"
+                local ready status
+                ready=$(oc get "$kind" "$name" -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                status=$(oc get "$kind" "$name" -n "$ENT" -o jsonpath='{.status.status}' 2>/dev/null || echo "")
+                echo "  $kind/$name ready=$ready status=$status"
+                if [ "$ready" != "true" ]; then
+                  echo "  force reconcileNow on $kind/$name"
+                  oc annotate "$kind" "$name" -n "$ENT" \
+                    ansible.sdk.operatorframework.io/reconcileNow=true --overwrite >/dev/null
+                fi
+              }
+
+              echo "ZTP smoke PostSync: requeue tool orgs if needed..."
+              for i in $(seq 1 60); do
+                requeue aaporg acme-automation
+                requeue quayorg acme-registry
+                AO=$(oc get aaporg acme-automation -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                QO=$(oc get quayorg acme-registry -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                echo "  [$i] aapOrg=$AO quayOrg=$QO"
+                if [ "$AO" = "true" ] && [ "$QO" = "true" ]; then
+                  echo "ZTP smoke PostSync: AAPOrg + QuayOrg ready"
+                  exit 0
+                fi
+                sleep 20
+              done
+              echo "FATAL: tool orgs not ready within timeout" >&2
+              oc get aaporg,quayorg -n "$ENT" -o wide >&2 || true
+              exit 1

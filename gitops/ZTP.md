@@ -66,6 +66,10 @@ RHBK adopt ──► RbacConfig secret (rhbk-services-admin)
 CNV adopt ──► CloudVirt local-virt (hs-platform-smoke)
 ```
 
+`hs-platform-smoke` PostSync waits for QuayConfig/AAPConfig ready, then force-reconciles
+AAPOrg/QuayOrg if they raced ahead. AAP playbooks also wait (not fail-fast) for configs.
+```
+
 ## Platform configs (ZTP prerequisite)
 
 On every new cluster pointing at `gitops/`, `provision.platformConfigs: true` (default) creates

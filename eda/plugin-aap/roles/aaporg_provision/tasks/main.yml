@@ -52,7 +52,7 @@
       ansible.builtin.set_fact:
         aaporg_generation: "{{ _aaporg_cr.resources[0].metadata.generation | default(0) | int }}"
 
-    - name: Read AAPConfig CR
+    - name: Wait for AAPConfig ready
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
         api_key: "{{ services_bearer_token }}"
@@ -62,16 +62,21 @@
         name: "{{ aaporg_spec.aapConfig }}"
         namespace: "{{ plugin_aap_config_namespace }}"
       register: _aap_config
+      until: >-
+        (_aap_config.resources | length > 0)
+        and (_aap_config.resources[0].status.ready | default(false) | bool)
+      retries: 60
+      delay: 20
 
     - name: Fail if AAPConfig not found
       ansible.builtin.fail:
         msg: "AAPConfig {{ aaporg_spec.aapConfig }} not found in {{ plugin_aap_config_namespace }}"
       when: _aap_config.resources | length == 0
 
-    - name: Fail if AAPConfig not ready
+    - name: Fail if AAPConfig not ready after wait
       ansible.builtin.fail:
-        msg: "AAPConfig {{ aaporg_spec.aapConfig }} is not ready"
-      when: not (_aap_config.resources[0].status.ready | default(false))
+        msg: "AAPConfig {{ aaporg_spec.aapConfig }} is not ready after waiting"
+      when: not (_aap_config.resources[0].status.ready | default(false) | bool)
 
     - name: Discover AAP gateway Route from services cluster
       kubernetes.core.k8s_info:
