@@ -155,7 +155,21 @@
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
           hybridsovereign.redhat/platform-type: virt
           hybridsovereign.redhat/entity: "{{ resolved_entity }}"
-          cluster.open-cluster-management.io/managedCluster: "{{ vac_name }}"
+
+- name: Wait until cluster namespace is Active
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Namespace
+    name: "{{ vac_namespace }}"
+  register: vac_ns
+  until: >-
+    vac_ns.resources | length > 0 and
+    (vac_ns.resources[0].status.phase | default('')) == 'Active'
+  retries: 60
+  delay: 5
 
 - name: Read hub pull-secret
   kubernetes.core.k8s_info:
@@ -303,28 +317,9 @@
             "subnets": "{{ vac_machine_cidr }}"
           }
 
-- name: Create ManagedCluster for ACM import
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: cluster.open-cluster-management.io/v1
-      kind: ManagedCluster
-      metadata:
-        name: "{{ vac_name }}"
-        labels:
-          cloud: Agent
-          vendor: OpenShift
-          name: "{{ vac_name }}"
-          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
-          hybridsovereign.redhat/platform-type: virt
-          cluster.open-cluster-management.io/clusterset: default
-      spec:
-        hubAcceptsClient: true
+# ManagedCluster is created by Hive/ACM import after AgentClusterInstall completes.
+# Creating it early races with namespace lifecycle (Terminating) on this hub.
 
-- name: Create ClusterDeployment (agentBareMetal → AgentClusterInstall)
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
