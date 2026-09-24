@@ -38,6 +38,7 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 | 15 | `hs-builds` | ImageStreams + BuildConfigs | `sovereign-cloud` NS |
 | 20 | `hs-vault` | Vault STS + init + unseal CronJob | Storage class |
 | 22 | `hs-security` | ClusterSecretStore / PushSecrets | Vault **unsealed** |
+| 23 | `hs-ingress` | `WildcardsAllowed` on hub IngressController (HCP KubeVirt passthrough) | Ingress operator |
 | 24 | `hs-mce` | Multicluster Engine OLM | OLM |
 | 26 | `hs-acm` | ACM hub (`MultiClusterHub`) | MCE installing |
 | 30 | `hs-quay` | QuayRegistry + OBC | ODF/NooBaa |
@@ -72,7 +73,9 @@ AAPOrg/QuayOrg/CloudVirt if they raced ahead. Operators for those kinds use
 AAP playbooks wait for configs and CloudVirt reads `event_payload.regarding`.
 
 PlatformOpenshift types on CloudVirt:
-- `type: hosted` → Hypershift HostedCluster (containerized control plane) + KubeVirt NodePool
+- `type: hosted` → Hypershift HostedCluster (containerized control plane) + KubeVirt NodePool.
+  Requires hub `IngressController/default` `routeAdmission.wildcardPolicy: WildcardsAllowed`
+  (`hs-ingress`) when `baseDomainPassthrough` is used, or guest console stays Unavailable.
 - `type: virt` → ACM AgentClusterInstall + InfraEnv; control plane (and workers) as CNV VMs
 
 Spoke SSO (ZTP): ACM Policy `hs-spoke-sso` in `hs-acm` selects ManagedClusters labeled

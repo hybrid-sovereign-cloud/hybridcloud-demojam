@@ -1,0 +1,107 @@
+# Adopt-only: do not own IngressController/default. Patch routeAdmission so
+# Hypershift KubeVirt baseDomainPassthrough Subdomain routes are Admitted.
+# Without WildcardsAllowed, guest console/apps hit the hub router with the wrong cert.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-ingress-wildcard
+  namespace: openshift-ingress-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hs-ingress-wildcard
+  namespace: openshift-ingress-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["ingresscontrollers"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hs-ingress-wildcard
+  namespace: openshift-ingress-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hs-ingress-wildcard
+subjects:
+  - kind: ServiceAccount
+    name: hs-ingress-wildcard
+    namespace: openshift-ingress-operator
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-ingress-wildcard
+  namespace: openshift-ingress-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hs-ingress-wildcard
+    spec:
+      serviceAccountName: hs-ingress-wildcard
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: patch
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              NS=openshift-ingress-operator
+              NAME=default
+              echo "Ensuring IngressController/${NAME} routeAdmission.wildcardPolicy=WildcardsAllowed..."
+              oc patch ingresscontroller "${NAME}" -n "${NS}" --type=merge -p '{
+                "spec": {
+                  "routeAdmission": {
+                    "wildcardPolicy": "WildcardsAllowed"
+                  }
+                }
+              }'
+              POLICY=$(oc get ingresscontroller "${NAME}" -n "${NS}" -o jsonpath='{.spec.routeAdmission.wildcardPolicy}')
+              echo "wildcardPolicy=${POLICY}"
+              if [ "${POLICY}" != "WildcardsAllowed" ]; then
+                echo "FATAL: expected WildcardsAllowed, got '${POLICY}'" >&2
+                exit 1
+              fi
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

@@ -29,6 +29,9 @@ provision:
   gitea: true
   acm: true
   mce: true
+  # WildcardsAllowed on IngressController/default — required for Hypershift
+  # KubeVirt baseDomainPassthrough guest console/apps routes
+  ingress: true
   builds: true
   operators: true
   platformConfigs: true  # ZTP prereq — RbacConfig / AAPConfig / QuayConfig (default on)

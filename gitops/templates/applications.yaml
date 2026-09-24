@@ -6,6 +6,7 @@ Child Applications — ZTP wave order (parent sync waits for prior wave Healthy)
  15  hs-builds
  20  hs-vault
  22  hs-security
+ 23  hs-ingress          — WildcardsAllowed (HCP KubeVirt passthrough)
  24  hs-mce              — MulticlusterEngine OLM (before ACM hub)
  26  hs-acm              — ACM hub / MultiClusterHub
  30  hs-quay
@@ -248,6 +249,49 @@ spec:
         duration: 30s
         factor: 2
         maxDuration: 5m
+
+{{- if (default true .Values.provision.ingress) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-ingress
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/instance: field-content
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/infrastructure/ingress
+  destination:
+    server: {{ $server | quote }}
+    namespace: openshift-ingress-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
 
 {{- if .Values.provision.mce }}
 ---

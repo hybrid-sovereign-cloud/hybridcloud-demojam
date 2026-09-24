@@ -27,6 +27,7 @@ CATALOG=$(cat <<'EOF'
 15|hs-builds|gitops/builds|sovereign-cloud|BuildConfigs/ImageStreams only
 20|hs-vault|gitops/infrastructure/vault|vault|STS + init + unseal CronJob
 22|hs-security|gitops/infrastructure/security|sovereign-secrets|needs Vault unsealed
+23|hs-ingress|gitops/infrastructure/ingress||WildcardsAllowed for HCP KubeVirt passthrough
 24|hs-mce|gitops/infrastructure/mce|multicluster-engine|MCE Subscription before ACM hub
 26|hs-acm|gitops/infrastructure/acm|open-cluster-management,openshift-acm|ACM hub after MCE
 30|hs-quay|gitops/infrastructure/quay|quay|needs ODF NooBaa
