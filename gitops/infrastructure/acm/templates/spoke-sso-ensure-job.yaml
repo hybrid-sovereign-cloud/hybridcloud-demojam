@@ -1,5 +1,6 @@
 # Sync hook: ensure shared Keycloak OIDC client + hub Secret/ConfigMap used by
 # hs-spoke-sso ACM governance Policy (ZTP SSO for PlatformOpenshift spokes).
+# Soft-fails (exit 0) so a missing Keycloak never blocks ACM GitOps sync.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -21,8 +22,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "25"
 rules:
   - apiGroups: [""]
-    resources: [secrets, configmaps, namespaces]
+    resources: [secrets, configmaps, namespaces, services]
     verbs: [get, list, create, update, patch]
+  - apiGroups: [route.openshift.io]
+    resources: [routes]
+    verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -52,7 +56,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "26"
 spec:
   ttlSecondsAfterFinished: 600
-  backoffLimit: 3
+  backoffLimit: 2
   template:
     spec:
       serviceAccountName: hs-spoke-sso-ensure
@@ -61,8 +65,6 @@ spec:
         - name: ensure
           image: registry.redhat.io/ubi9/ubi-minimal:latest
           env:
-            - name: KC_URL
-              value: "https://sso.apps.cluster-pbkjw.dyn.redhatworkshops.io"
             - name: KC_INTERNAL_URL
               value: "http://keycloak.keycloak.svc:8080"
             - name: KC_REALM
@@ -77,49 +79,47 @@ spec:
             - /bin/bash
             - -c
             - |
-              set -euo pipefail
-              microdnf install -y curl jq openssl >/dev/null 2>&1 || true
-              # Soft-fail path so Argo Sync hooks never block ACM chart sync
+              set +e
+              microdnf install -y curl jq >/dev/null 2>&1
               finish() { echo "$1"; exit 0; }
-              if ! command -v curl >/dev/null || ! command -v jq >/dev/null; then
-                finish "curl/jq missing; skip spoke SSO ensure"
-              fi
-              # oc may be absent in ubi-minimal — use Kubernetes API via curl token
+              command -v curl >/dev/null && command -v jq >/dev/null || finish "curl/jq missing; skip"
               TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
               CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
               API=https://kubernetes.default.svc
               kget() { curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" "$API$1"; }
-              kapply() { curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/yaml" -X POST "$API/api/v1/namespaces/${TARGET_NS}/$1" --data-binary @- || true; }
-              USER=$(kget "/api/v1/namespaces/${KC_ADMIN_NS}/secrets/${KC_ADMIN_SECRET}" | jq -r '.data.username // empty' | base64 -d 2>/dev/null || true)
-              PASS=$(kget "/api/v1/namespaces/${KC_ADMIN_NS}/secrets/${KC_ADMIN_SECRET}" | jq -r '.data.password // empty' | base64 -d 2>/dev/null || true)
+              USER=$(kget "/api/v1/namespaces/${KC_ADMIN_NS}/secrets/${KC_ADMIN_SECRET}" | jq -r '.data.username // empty' | base64 -d 2>/dev/null)
+              PASS=$(kget "/api/v1/namespaces/${KC_ADMIN_NS}/secrets/${KC_ADMIN_SECRET}" | jq -r '.data.password // empty' | base64 -d 2>/dev/null)
               [[ -n "$USER" && -n "$PASS" ]] || finish "admin secret missing; skip"
-              KC="$KC_URL"
-              TOK=$(curl -sk -X POST "${KC}/realms/master/protocol/openid-connect/token" \
+              # Prefer OpenShift Route host for issuer; admin API via in-cluster SVC
+              ROUTE=$(kget "/apis/route.openshift.io/v1/namespaces/keycloak/routes" | jq -r '.items[0].spec.host // empty')
+              KC_ADMIN="${KC_INTERNAL_URL}"
+              ISSUER_BASE="https://${ROUTE}"
+              [[ -n "$ROUTE" ]] || ISSUER_BASE="${KC_INTERNAL_URL}"
+              TOK=$(curl -sk -X POST "${KC_ADMIN}/realms/master/protocol/openid-connect/token" \
                 -d "grant_type=password&client_id=admin-cli&username=${USER}&password=${PASS}" | jq -r '.access_token // empty')
               [[ -n "$TOK" ]] || finish "keycloak token failed; skip"
-              EXIST=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso")
+              EXIST=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso")
               CID=$(echo "$EXIST" | jq -r '.[0].id // empty')
               if [[ -z "$CID" ]]; then
                 curl -sk -X POST -H "Authorization: Bearer ${TOK}" -H "Content-Type: application/json" \
-                  "${KC}/admin/realms/${KC_REALM}/clients" \
-                  -d '{"clientId":"openshift-spoke-sso","name":"OpenShift managed spokes SSO","protocol":"openid-connect","publicClient":false,"standardFlowEnabled":true,"redirectUris":["https://oauth-openshift.apps.*/*","https://console-openshift-console.apps.*/*"],"webOrigins":["https://*"],"attributes":{"groups.claim.enabled":"true"}}' >/dev/null || true
-                CID=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso" | jq -r '.[0].id // empty')
+                  "${KC_ADMIN}/admin/realms/${KC_REALM}/clients" \
+                  -d '{"clientId":"openshift-spoke-sso","name":"OpenShift managed spokes SSO","protocol":"openid-connect","publicClient":false,"standardFlowEnabled":true,"redirectUris":["https://oauth-openshift.apps.*/*","https://console-openshift-console.apps.*/*"],"webOrigins":["https://*"],"attributes":{"groups.claim.enabled":"true"}}' >/dev/null
+                CID=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso" | jq -r '.[0].id // empty')
               fi
               [[ -n "$CID" ]] || finish "client id missing; skip"
-              SECRET=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC}/admin/realms/${KC_REALM}/clients/${CID}/client-secret" | jq -r '.value // empty')
+              SECRET=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients/${CID}/client-secret" | jq -r '.value // empty')
               [[ -n "$SECRET" ]] || finish "client secret missing; skip"
-              ISSUER="${KC}/realms/${KC_REALM}"
-              B64=$(printf '%s' "$SECRET" | base64 -w0)
+              ISSUER="${ISSUER_BASE}/realms/${KC_REALM}"
+              B64=$(printf '%s' "$SECRET" | base64 -w0 2>/dev/null || printf '%s' "$SECRET" | base64)
+              CIDB64=$(printf 'openshift-spoke-sso' | base64 -w0 2>/dev/null || printf 'openshift-spoke-sso' | base64)
+              BODY_SEC="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"type\":\"Opaque\",\"data\":{\"clientSecret\":\"${B64}\",\"clientID\":\"${CIDB64}\"}}"
               curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                -X PUT "$API/api/v1/namespaces/${TARGET_NS}/secrets/openshift-spoke-sso" \
-                -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"type\":\"Opaque\",\"data\":{\"clientSecret\":\"${B64}\",\"clientID\":\"$(printf openshift-spoke-sso | base64 -w0)\"}}" >/dev/null || \
+                -X PUT "$API/api/v1/namespaces/${TARGET_NS}/secrets/openshift-spoke-sso" -d "$BODY_SEC" >/dev/null \
+                || curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                -X POST "$API/api/v1/namespaces/${TARGET_NS}/secrets" -d "$BODY_SEC" >/dev/null
+              BODY_CM="{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"data\":{\"issuer\":\"${ISSUER}\",\"clientID\":\"openshift-spoke-sso\"}}"
               curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                -X POST "$API/api/v1/namespaces/${TARGET_NS}/secrets" \
-                -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"type\":\"Opaque\",\"data\":{\"clientSecret\":\"${B64}\",\"clientID\":\"$(printf openshift-spoke-sso | base64 -w0)\"}}" >/dev/null
-              curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                -X PUT "$API/api/v1/namespaces/${TARGET_NS}/configmaps/openshift-spoke-sso" \
-                -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"data\":{\"issuer\":\"${ISSUER}\",\"clientID\":\"openshift-spoke-sso\"}}" >/dev/null || \
-              curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                -X POST "$API/api/v1/namespaces/${TARGET_NS}/configmaps" \
-                -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"openshift-spoke-sso\",\"namespace\":\"${TARGET_NS}\"},\"data\":{\"issuer\":\"${ISSUER}\",\"clientID\":\"openshift-spoke-sso\"}}" >/dev/null
+                -X PUT "$API/api/v1/namespaces/${TARGET_NS}/configmaps/openshift-spoke-sso" -d "$BODY_CM" >/dev/null \
+                || curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                -X POST "$API/api/v1/namespaces/${TARGET_NS}/configmaps" -d "$BODY_CM" >/dev/null
               finish "spoke SSO client ready issuer=${ISSUER}"
