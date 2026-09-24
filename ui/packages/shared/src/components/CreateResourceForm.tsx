@@ -213,10 +213,6 @@ export function CreateResourceForm({
   const [cpCount, setCpCount] = useState('3');
   const [workerCount, setWorkerCount] = useState('3');
   const [nodePoolReplicas, setNodePoolReplicas] = useState('2');
-  const [cpMemory, setCpMemory] = useState('16Gi');
-  const [workerMemory, setWorkerMemory] = useState('8Gi');
-  const [cpCores, setCpCores] = useState('4');
-  const [workerCores, setWorkerCores] = useState('2');
   const [rbacMulti, setRbacMulti] = useState('');
   const [rbacOperator, setRbacOperator] = useState('');
   const [rbacViewer, setRbacViewer] = useState('');
@@ -408,22 +404,6 @@ export function CreateResourceForm({
             hosted: {
               environment: envName,
               nodePoolReplicas: Number(nodePoolReplicas) || 2,
-            },
-            ...(toolRbac ? { toolRbac } : {}),
-          };
-        }
-        if (platformType === 'virt') {
-          const envName = platformEnv || cloudVirtRef;
-          return {
-            type: 'virt',
-            virt: {
-              environment: envName,
-              controlPlaneCount: Number(cpCount) || 1,
-              workerCount: Number(workerCount) || 0,
-              controlPlaneMemory: cpMemory || '16Gi',
-              workerMemory: workerMemory || '8Gi',
-              controlPlaneCores: Number(cpCores) || 4,
-              workerCores: Number(workerCores) || 2,
             },
             ...(toolRbac ? { toolRbac } : {}),
           };
@@ -739,10 +719,7 @@ export function CreateResourceForm({
                     onChange={(v) => {
                       setPlatformType(v);
                       setPlatformEnv('');
-                      if (v === 'virt') {
-                        setCpCount('1');
-                        setWorkerCount('0');
-                      } else if (v === 'hosted') {
+                      if (v === 'hosted') {
                         setNodePoolReplicas('2');
                       } else {
                         setCpCount('3');
@@ -752,7 +729,6 @@ export function CreateResourceForm({
                     options={[
                       { value: 'openstack', label: 'OpenStack' },
                       { value: 'aws', label: 'AWS' },
-                      { value: 'virt', label: 'Virt — standalone on CNV VMs (VM control plane)' },
                       { value: 'hosted', label: 'Hosted — Hypershift HCP (containerized control plane)' },
                     ]}
                     isRequired
@@ -762,7 +738,7 @@ export function CreateResourceForm({
                     label={
                       platformType === 'aws'
                         ? 'CloudAWS environment'
-                        : platformType === 'virt' || platformType === 'hosted'
+                        : platformType === 'hosted'
                           ? 'CloudVirt environment'
                           : 'CloudOSO environment'
                     }
@@ -770,20 +746,20 @@ export function CreateResourceForm({
                       platformEnv ||
                       (platformType === 'aws'
                         ? cloudAwsRef
-                        : platformType === 'virt' || platformType === 'hosted'
+                        : platformType === 'hosted'
                           ? cloudVirtRef
                           : cloudosoRef)
                     }
                     onChange={(v) => {
                       setPlatformEnv(v);
                       if (platformType === 'aws') setCloudAwsRef(v);
-                      else if (platformType === 'virt' || platformType === 'hosted') setCloudVirtRef(v);
+                      else if (platformType === 'hosted') setCloudVirtRef(v);
                       else setCloudosoRef(v);
                     }}
                     options={names(
                       platformType === 'aws'
                         ? cloudAwss.items
-                        : platformType === 'virt' || platformType === 'hosted'
+                        : platformType === 'hosted'
                           ? cloudVirts.items
                           : cloudosos.items,
                     )}
@@ -800,10 +776,7 @@ export function CreateResourceForm({
                     </FormGroup>
                   ) : (
                     <>
-                      <FormGroup
-                        label={platformType === 'virt' ? 'Control plane VMs' : 'Control plane count'}
-                        fieldId="cp-count"
-                      >
+                      <FormGroup label="Control plane count" fieldId="cp-count">
                         <TextInput id="cp-count" type="number" value={cpCount} onChange={(_e, v) => setCpCount(v)} />
                       </FormGroup>
                       <FormGroup label="Worker count" fieldId="worker-count">
@@ -812,27 +785,6 @@ export function CreateResourceForm({
                           type="number"
                           value={workerCount}
                           onChange={(_e, v) => setWorkerCount(v)}
-                        />
-                      </FormGroup>
-                    </>
-                  )}
-                  {platformType === 'virt' && (
-                    <>
-                      <FormGroup label="Control plane memory" fieldId="cp-mem">
-                        <TextInput id="cp-mem" value={cpMemory} onChange={(_e, v) => setCpMemory(v)} />
-                      </FormGroup>
-                      <FormGroup label="Control plane cores" fieldId="cp-cores">
-                        <TextInput id="cp-cores" type="number" value={cpCores} onChange={(_e, v) => setCpCores(v)} />
-                      </FormGroup>
-                      <FormGroup label="Worker memory" fieldId="w-mem">
-                        <TextInput id="w-mem" value={workerMemory} onChange={(_e, v) => setWorkerMemory(v)} />
-                      </FormGroup>
-                      <FormGroup label="Worker cores" fieldId="w-cores">
-                        <TextInput
-                          id="w-cores"
-                          type="number"
-                          value={workerCores}
-                          onChange={(_e, v) => setWorkerCores(v)}
                         />
                       </FormGroup>
                     </>

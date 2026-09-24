@@ -198,13 +198,9 @@
       data:
         clientSecret: "{{ hc_sso_client_secret_b64 }}"
 
-- name: Create HostedCluster (KubeVirt platform — containerized control plane)
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
+- name: Build HostedCluster definition
+  ansible.builtin.set_fact:
+    hc_definition:
       apiVersion: hypershift.openshift.io/v1beta1
       kind: HostedCluster
       metadata:
@@ -230,30 +226,6 @@
         pullSecret:
           name: "{{ hc_pull_secret_name }}"
         infraID: "{{ hc_name }}"
-        configuration: >-
-          {{
-            {
-              'oauth': {
-                'identityProviders': [{
-                  'name': 'keycloak-sso',
-                  'mappingMethod': 'claim',
-                  'type': 'OpenID',
-                  'openID': {
-                    'clientID': 'openshift-spoke-sso',
-                    'clientSecret': {'name': 'openid-client-secret-keycloak'},
-                    'issuer': hc_sso_issuer,
-                    'extraScopes': ['profile', 'email'],
-                    'claims': {
-                      'preferredUsername': ['preferred_username'],
-                      'name': ['name'],
-                      'email': ['email'],
-                      'groups': ['groups']
-                    }
-                  }
-                }]
-              }
-            } if (hc_sso_issuer | length) > 0 else omit
-          }}
         services:
           - service: APIServer
             servicePublishingStrategy:
@@ -282,6 +254,46 @@
               persistentVolume:
                 size: 8Gi
                 storageClassName: "{{ hc_etcd_storage_class }}"
+
+- name: Attach Keycloak SSO to HostedCluster definition
+  when: (hc_sso_issuer | default('') | length) > 0
+  ansible.builtin.set_fact:
+    hc_definition: >-
+      {{
+        hc_definition | combine({
+          'spec': hc_definition.spec | combine({
+            'configuration': {
+              'oauth': {
+                'identityProviders': [{
+                  'name': 'keycloak-sso',
+                  'mappingMethod': 'claim',
+                  'type': 'OpenID',
+                  'openID': {
+                    'clientID': 'openshift-spoke-sso',
+                    'clientSecret': {'name': 'openid-client-secret-keycloak'},
+                    'issuer': hc_sso_issuer,
+                    'extraScopes': ['profile', 'email'],
+                    'claims': {
+                      'preferredUsername': ['preferred_username'],
+                      'name': ['name'],
+                      'email': ['email'],
+                      'groups': ['groups']
+                    }
+                  }
+                }]
+              }
+            }
+          }, recursive=True)
+        }, recursive=True)
+      }}
+
+- name: Create HostedCluster (KubeVirt platform — containerized control plane)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ hc_definition }}"
 
 - name: Create NodePool for HostedCluster workers
   kubernetes.core.k8s:

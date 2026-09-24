@@ -219,8 +219,7 @@ export function EntityTopology({
 
     // Platform → CloudOSO/CloudAWS/CloudVirt when platform.spec.cloudRef matches
     for (const p of platforms.items) {
-      const cloudRef = (p.spec as { cloudRef?: string; virt?: { environment?: string }; hosted?: { environment?: string } } | undefined)?.cloudRef
-        || (p.spec as { virt?: { environment?: string } } | undefined)?.virt?.environment
+      const cloudRef = (p.spec as { cloudRef?: string; hosted?: { environment?: string } } | undefined)?.cloudRef
         || (p.spec as { hosted?: { environment?: string } } | undefined)?.hosted?.environment;
       if (!cloudRef) continue;
       const cloud =

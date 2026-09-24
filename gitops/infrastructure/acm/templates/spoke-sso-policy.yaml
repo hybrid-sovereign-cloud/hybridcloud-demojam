@@ -1,5 +1,5 @@
 # ZTP: ACM governance Policy — Keycloak SSO for standalone PlatformOpenshift
-# ManagedClusters (virt / aws / openstack). Hosted (HCP) OAuth is immutable on
+# ManagedClusters (aws / openstack). Hosted (HCP) OAuth is immutable on
 # the guest; SSO is applied via HostedCluster.spec.configuration.oauth instead
 # (provision playbook + hs-spoke-sso-ensure Job).
 #
@@ -38,7 +38,7 @@ spec:
               operator: Exists
             - key: hybridsovereign.redhat/platform-type
               operator: In
-              values: ["virt", "aws", "openstack"]
+              values: ["aws", "openstack"]
     - requiredClusterSelector:
         labelSelector:
           matchExpressions:
@@ -47,7 +47,7 @@ spec:
               values: ["enabled"]
             - key: hybridsovereign.redhat/platform-type
               operator: In
-              values: ["virt", "aws", "openstack"]
+              values: ["aws", "openstack"]
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

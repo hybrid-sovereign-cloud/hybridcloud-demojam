@@ -76,13 +76,13 @@ PlatformOpenshift types on CloudVirt:
 - `type: hosted` → Hypershift HostedCluster (containerized control plane) + KubeVirt NodePool.
   Requires hub `IngressController/default` `routeAdmission.wildcardPolicy: WildcardsAllowed`
   (`hs-ingress`) when `baseDomainPassthrough` is used, or guest console stays Unavailable.
-- `type: virt` → ACM AgentClusterInstall + InfraEnv; control plane (and workers) as CNV VMs
+  (`type: virt` VM control-plane installs were removed — use hosted/HCP instead.)
 
 Spoke SSO (ZTP):
 - **hosted (HCP):** OAuth is set on `HostedCluster.spec.configuration.oauth` (guest OAuth is
   admission-blocked). `hs-spoke-sso-ensure` + provision playbook push Keycloak `sso` realm IDP.
-- **virt / aws / openstack:** ACM Policy `hs-spoke-sso` selects ManagedClusters with
-  `hybridsovereign.redhat/platformopenshift` (excluding `platform-type=hosted`) and enforces
+- **aws / openstack:** ACM Policy `hs-spoke-sso` selects ManagedClusters with
+  `hybridsovereign.redhat/platformopenshift` (platform-type aws|openstack) and enforces
   OAuth → Keycloak via hub templates (`{{hub ... hub}}` from `open-cluster-management`).
 
 ```
@@ -106,7 +106,7 @@ Disable only with `provision.platformConfigs: false` (not recommended for produc
 
 Every target cluster adopts OpenShift Virtualization (`adopt.cnv: true`). `hs-platform-smoke`
 always applies `CloudVirt/local-virt` in `entity-acme-corp` (with Entity + dummy tool CRs).
-Sample `PlatformOpenshift` virt/hosted types reference `environment: local-virt`.
+Sample `PlatformOpenshift` hosted types reference `environment: local-virt`.
 
 ## Samples (seed-once)
 

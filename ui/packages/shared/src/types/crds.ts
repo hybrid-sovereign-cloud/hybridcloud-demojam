@@ -105,7 +105,7 @@ export interface PlatformOpenshiftOpenstackSpec {
 }
 
 export interface PlatformOpenshiftSpec {
-  type: 'openstack' | 'aws' | 'virt' | 'hosted' | 'vmware';
+  type: 'openstack' | 'aws' | 'hosted' | 'vmware';
   openstack?: PlatformOpenshiftOpenstackSpec;
   cloudRef?: string;
 }

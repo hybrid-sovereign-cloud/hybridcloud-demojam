@@ -28,7 +28,7 @@ Default interval **3–5 minutes**. Checkpoint to `/tmp/ztp-agent-state/` before
 
 ## Platform types
 
-`PlatformOpenshift.spec.type`: `openstack` | `aws` | `virt` | `hosted`.  
+`PlatformOpenshift.spec.type`: `openstack` | `aws` | `hosted`.  
 Environments: `CloudOSO`, `CloudAWS`, `CloudVirt`.
 
 See [ZTP.md](../../../gitops/ZTP.md) and [issues.md](../../../gitops/issues.md).

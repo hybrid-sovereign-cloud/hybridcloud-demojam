@@ -103,8 +103,11 @@
       ansible.builtin.include_tasks: hosted.yml
       when: platform_type == "hosted"
 
-    - name: Dispatch to Virt (AgentClusterInstall — VM control plane on CNV)
-      ansible.builtin.include_tasks: virt.yml
+    - name: Reject removed PlatformOpenshift type=virt
+      ansible.builtin.fail:
+        msg: >-
+          PlatformOpenshift type=virt (VM control plane) has been removed.
+          Use type=hosted (Hypershift HCP) on CloudVirt instead.
       when: platform_type == "virt"
 
     - name: Handle default (namespace metadata) reconciliation

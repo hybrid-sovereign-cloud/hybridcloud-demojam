@@ -23,7 +23,7 @@ Every OpenShift cluster must be a **mirror replica**:
 - **No EDA / Kafka / AMQ / MTC / MTV** in the active path.
 - **Images:** OpenShift BuildConfigs → ImageStreams (no external Quay hardcoding).
 - **Secrets:** `sovereign-secrets` + PushSecret → Vault (`hs-security`).
-- **Cloud samples (unparked):** CloudAWS, CloudOSO, CloudVirt + PlatformOpenshift `openstack|aws|virt|hosted`.
+- **Cloud samples (unparked):** CloudAWS, CloudOSO, CloudVirt + PlatformOpenshift `openstack|aws|hosted`.
 - **Still parked:** OpenStackMigration.
 
 ## Tracking & docs

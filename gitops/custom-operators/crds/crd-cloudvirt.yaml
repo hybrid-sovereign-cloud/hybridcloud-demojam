@@ -28,7 +28,7 @@ spec:
         openAPIV3Schema:
           description: >-
             CloudVirt declares an OpenShift Virtualization (CNV) environment
-            used as a target for PlatformOpenshift type=virt|hosted. Shape
+            used as a target for PlatformOpenshift type=hosted. Shape
             mirrors CloudOSO (vaultPath, baseDomain, toolRbac) with zero
             hardcoded cluster endpoints.
           type: object

@@ -1,5 +1,5 @@
-# Cluster-scoped AgentServiceConfig enables ACM Assisted Installer (InfraEnv /
-# AgentClusterInstall). Required for PlatformOpenshift type=virt.
+# Cluster-scoped AgentServiceConfig enables ACM Assisted Installer tooling.
+# PlatformOpenshift type=virt (VM control plane) was removed — use type=hosted (HCP).
 ---
 apiVersion: agent-install.openshift.io/v1beta1
 kind: AgentServiceConfig
