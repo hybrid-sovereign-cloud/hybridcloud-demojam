@@ -43,7 +43,18 @@ spec:
                   description: OpenStack project name hint (required)
                 vaultPath:
                   type: string
-                  description: Vault path for OpenStack admin credentials (e.g. oso/accounts/shc_admin)
+                  description: Vault path for OpenStack admin credentials (optional when credentialsSecretRef is set)
+                credentialsSecretRef:
+                  type: object
+                  description: >-
+                    Reference to a Secret in the same namespace holding key clouds.yaml
+                    (OpenStack clouds.yaml content). Preferred over vaultPath when
+                    credentials are supplied via UI.
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the Secret in the CloudOSO namespace
                 baseDomain:
                   type: string
                   description: Base DNS domain (e.g. )

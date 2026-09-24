@@ -27,6 +27,11 @@
              'resources': item.read_resources | map('regex_replace', '$', '/status') | list,
              'verbs': ['get','list','watch']}]
            if item.read_resources | length > 0 else [])
+          +
+          ([{'apiGroups': [''],
+             'resources': item.core_crud_resources | default([]),
+             'verbs': ['get','list','watch','create','update','patch','delete']}]
+           if (item.core_crud_resources | default([]) | length) > 0 else [])
         )
       }}
   loop: "{{ entity_named_roles }}"

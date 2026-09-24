@@ -66,7 +66,7 @@ app.use("/api/", (_req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "16kb" }));
+app.use(express.json({ limit: "256kb" }));
 
 function requireAuth(req, res, next) {
   const raw = req.headers["x-forwarded-access-token"];

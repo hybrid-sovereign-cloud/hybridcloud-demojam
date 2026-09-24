@@ -114,7 +114,9 @@ export type PlatformOpenshift = K8sResource<PlatformOpenshiftSpec>;
 
 /** CloudOSO — OpenStack environment */
 export interface CloudOSOSpec {
+  project?: string;
   vaultPath?: string;
+  credentialsSecretRef?: { name: string };
   baseDomain?: string;
   projectDomain?: string;
   externalNetwork?: string;
@@ -133,6 +135,7 @@ export interface CloudAWSToolRbac {
 export interface CloudAWSSpec {
   account?: string;
   vaultPath?: string;
+  credentialsSecretRef?: { name: string };
   baseDomain?: string;
   toolRbac?: CloudAWSToolRbac;
 }

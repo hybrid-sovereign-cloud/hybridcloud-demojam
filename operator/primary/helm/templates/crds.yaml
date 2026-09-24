@@ -518,14 +518,25 @@ spec:
               type: object
             spec:
               type: object
-              required: [account, vaultPath, baseDomain]
+              required: [account, baseDomain]
               properties:
                 account:
                   type: string
                   description: "AWS account ID"
                 vaultPath:
                   type: string
-                  description: "Vault KV path for AWS credentials (central cluster)"
+                  description: "Vault KV path for AWS credentials (optional when credentialsSecretRef is set)"
+                credentialsSecretRef:
+                  type: object
+                  description: >-
+                    Reference to a Secret in the same namespace holding AWS_ACCESS_KEY_ID,
+                    AWS_SECRET_ACCESS_KEY (and optional ACCOUNT_ID). Preferred over vaultPath
+                    when credentials are supplied via UI.
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the Secret in the CloudAWS namespace
                 baseDomain:
                   type: string
                   description: "Parent DNS domain (e.g. sandbox5530.opentlc.com)"
@@ -681,7 +692,18 @@ spec:
                   description: OpenStack project name hint (required)
                 vaultPath:
                   type: string
-                  description: Vault path for OpenStack admin credentials (e.g. oso/accounts/shc_admin)
+                  description: Vault path for OpenStack admin credentials (optional when credentialsSecretRef is set)
+                credentialsSecretRef:
+                  type: object
+                  description: >-
+                    Reference to a Secret in the same namespace holding key clouds.yaml
+                    (OpenStack clouds.yaml content). Preferred over vaultPath when
+                    credentials are supplied via UI.
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the Secret in the CloudOSO namespace
                 baseDomain:
                   type: string
                   description: Base DNS domain (e.g. )

@@ -2,7 +2,8 @@
 - name: Set environmentprep spec facts
   ansible.builtin.set_fact:
     ep_project: "{{ entity_name }}_{{ cloudoso_cr_name }}"
-    ep_vault_path: "{{ oso_spec.vaultPath | default('oso/accounts/shc_admin') }}"
+    ep_vault_path: "{{ oso_spec.vaultPath | default('') }}"
+    ep_credentials_secret_name: "{{ (oso_spec.credentialsSecretRef | default({})).name | default('') }}"
     ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true) }}"
     ep_project_domain: "{{ oso_spec.projectDomain | default(default_project_domain) }}"
     ep_entity_name: "{{ entity_name }}"
@@ -18,51 +19,80 @@
          if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)))
          else '' }}
 
-- name: Create temporary ExternalSecret for OpenStack admin credentials
-  kubernetes.core.k8s:
-    host: "{{ central_api_host }}"
-    api_key: "{{ central_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
+- name: Load OpenStack clouds.yaml from entity-namespace Secret
+  when: ep_credentials_secret_name | length > 0
+  block:
+    - name: Read credentials Secret referenced by CloudOSO
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ ep_credentials_secret_name }}"
+        namespace: "{{ cloudoso_cr_namespace }}"
+      register: openstack_admin_secret
+      until: >-
+        openstack_admin_secret.resources | length > 0 and
+        openstack_admin_secret.resources[0].data is defined and
+        openstack_admin_secret.resources[0].data['clouds.yaml'] is defined
+      retries: 12
+      delay: 5
+
+- name: Load OpenStack clouds.yaml from Vault via ExternalSecret
+  when: ep_credentials_secret_name | length == 0
+  block:
+    - name: Require vaultPath when credentialsSecretRef is unset
+      ansible.builtin.assert:
+        that:
+          - ep_vault_path | length > 0
+        fail_msg: CloudOSO requires spec.credentialsSecretRef.name or spec.vaultPath
+
+    - name: Create temporary ExternalSecret for OpenStack admin credentials
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: external-secrets.io/v1
+          kind: ExternalSecret
+          metadata:
+            name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
+            namespace: "{{ eda_central_work_namespace }}"
+            labels:
+              app.kubernetes.io/managed-by: eda-cloudoso
+              cloudoso: "{{ cloudoso_cr_name }}"
+          spec:
+            refreshInterval: 1m
+            secretStoreRef:
+              name: vault-backend
+              kind: ClusterSecretStore
+            target:
+              name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
+              creationPolicy: Owner
+            data:
+              - secretKey: clouds.yaml
+                remoteRef:
+                  key: "{{ ep_vault_path }}"
+                  property: clouds.yaml
+
+    - name: Wait for OpenStack admin credentials
+      kubernetes.core.k8s_info:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
         name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
         namespace: "{{ eda_central_work_namespace }}"
-        labels:
-          app.kubernetes.io/managed-by: eda-cloudoso
-          cloudoso: "{{ cloudoso_cr_name }}"
-      spec:
-        refreshInterval: 1m
-        secretStoreRef:
-          name: vault-backend
-          kind: ClusterSecretStore
-        target:
-          name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
-          creationPolicy: Owner
-        data:
-          - secretKey: clouds.yaml
-            remoteRef:
-              key: "{{ ep_vault_path }}"
-              property: clouds.yaml
-
-- name: Wait for OpenStack admin credentials
-  kubernetes.core.k8s_info:
-    host: "{{ central_api_host }}"
-    api_key: "{{ central_bearer_token }}"
-    validate_certs: false
-    api_version: v1
-    kind: Secret
-    name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
-    namespace: "{{ eda_central_work_namespace }}"
-  register: openstack_admin_secret
-  until: >-
-    openstack_admin_secret.resources | length > 0 and
-    openstack_admin_secret.resources[0].data is defined and
-    openstack_admin_secret.resources[0].data['clouds.yaml'] is defined
-  retries: 30
-  delay: 10
+      register: openstack_admin_secret
+      until: >-
+        openstack_admin_secret.resources | length > 0 and
+        openstack_admin_secret.resources[0].data is defined and
+        openstack_admin_secret.resources[0].data['clouds.yaml'] is defined
+      retries: 30
+      delay: 10
 
 - name: Write OpenStack clouds.yaml to temp path
   ansible.builtin.copy:

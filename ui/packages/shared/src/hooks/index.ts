@@ -1,6 +1,7 @@
 export {
   configureK8sClient,
   createDashboardResource,
+  createNamespaceSecret,
   deleteDashboardResource,
   forceReconcile,
   getK8sClientConfig,

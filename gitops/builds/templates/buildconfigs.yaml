@@ -158,6 +158,8 @@ spec:
       buildArgs:
         - name: PLUGIN_PACKAGE
           value: admin-console-plugin
+        - name: REBUILD_ID
+          value: "cloud-creds-ui-20260924"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
@@ -189,6 +191,8 @@ spec:
       buildArgs:
         - name: PLUGIN_PACKAGE
           value: tenant-console-plugin
+        - name: REBUILD_ID
+          value: "cloud-creds-ui-20260924"
   triggers:
     - type: ConfigChange
   runPolicy: Serial

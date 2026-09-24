@@ -23,6 +23,9 @@ entity_named_roles:
       - assignments
       - rbacs
     read_resources: []
+    # Core secrets CRUD for CloudAWS/CloudOSO credentialsSecretRef (UI-supplied keys)
+    core_crud_resources:
+      - secrets
 
   - spec_key: auditor
     role_name: auditor
@@ -60,6 +63,8 @@ entity_named_roles:
     role_name: cloudoso-admin
     crud_resources: [cloudosos]
     read_resources: [rbacs]
+    core_crud_resources:
+      - secrets
 
   - spec_key: cloudOSOView
     role_name: cloudoso-view
@@ -70,6 +75,8 @@ entity_named_roles:
     role_name: cloudaws-admin
     crud_resources: [cloudawss]
     read_resources: [rbacs]
+    core_crud_resources:
+      - secrets
 
   - spec_key: cloudAWSView
     role_name: cloudaws-view

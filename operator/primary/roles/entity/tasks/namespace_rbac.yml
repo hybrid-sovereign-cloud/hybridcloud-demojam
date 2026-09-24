@@ -81,13 +81,29 @@
         labels:
           app.kubernetes.io/managed-by: entity-operator
           hybridsovereign.redhat/entity: "{{ ansible_operator_meta.name }}"
-      rules:
-        - apiGroups: [hybridsovereign.redhat]
-          resources: ["{{ item.resource }}"]
-          verbs: [get, list, watch, create, update, patch, delete]
-        - apiGroups: [hybridsovereign.redhat]
-          resources: ["{{ item.resource }}/status"]
-          verbs: [get, list, watch]
+      rules: >-
+        {{
+          [
+            {
+              'apiGroups': ['hybridsovereign.redhat'],
+              'resources': [item.resource],
+              'verbs': ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete']
+            },
+            {
+              'apiGroups': ['hybridsovereign.redhat'],
+              'resources': [item.resource ~ '/status'],
+              'verbs': ['get', 'list', 'watch']
+            }
+          ]
+          + (
+            [{
+              'apiGroups': [''],
+              'resources': ['secrets'],
+              'verbs': ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete']
+            }]
+            if item.resource in ['cloudawss', 'cloudosos'] else []
+          )
+        }}
   loop: "{{ ns_rbac_resource_types }}"
   when: (ns_rbac[item.key] is defined) or (entity_admin_groups | length > 0)
 

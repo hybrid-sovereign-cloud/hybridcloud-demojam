@@ -13,7 +13,7 @@ import {
   FormSelect,
   FormSelectOption,
 } from '@patternfly/react-core';
-import { createDashboardResource, useK8sResourceList } from '../hooks/k8s';
+import { createDashboardResource, createNamespaceSecret, useK8sResourceList } from '../hooks/k8s';
 import { HybridSovereignKind, K8sResource } from '../types';
 import { PageHeader } from './PageHeader';
 
@@ -205,6 +205,9 @@ export function CreateResourceForm({
   const [awsAccount, setAwsAccount] = useState('');
   const [awsVaultPath, setAwsVaultPath] = useState('');
   const [awsBaseDomain, setAwsBaseDomain] = useState('');
+  const [awsAccessKeyId, setAwsAccessKeyId] = useState('');
+  const [awsSecretAccessKey, setAwsSecretAccessKey] = useState('');
+  const [cloudsYaml, setCloudsYaml] = useState('');
   const [virtVaultPath, setVirtVaultPath] = useState('');
   const [virtBaseDomain, setVirtBaseDomain] = useState('');
   const [virtStorageClass, setVirtStorageClass] = useState('ocs-storagecluster-ceph-rbd');
@@ -349,23 +352,31 @@ export function CreateResourceForm({
           ...(Object.keys(toolRbac).length ? { toolRbac } : {}),
         };
       }
-      case 'cloudoso':
+      case 'cloudoso': {
+        const credName = `${name}-openstack-credentials`;
         return {
           project: osoProject,
-          vaultPath,
           baseDomain,
           projectDomain,
           externalNetwork,
-          route53VaultPath,
           landingzone,
+          ...(cloudsYaml.trim()
+            ? { credentialsSecretRef: { name: credName } }
+            : { vaultPath }),
+          ...(route53VaultPath.trim() ? { route53VaultPath } : {}),
         };
-      case 'cloudaws':
+      }
+      case 'cloudaws': {
+        const credName = `${name}-aws-credentials`;
         return {
           account: awsAccount,
-          vaultPath: awsVaultPath,
           baseDomain: awsBaseDomain || baseDomain,
           landingzone,
+          ...(awsAccessKeyId.trim() && awsSecretAccessKey.trim()
+            ? { credentialsSecretRef: { name: credName } }
+            : { vaultPath: awsVaultPath }),
         };
+      }
       case 'cloudvirt':
         return {
           vaultPath: virtVaultPath || vaultPath,
@@ -512,8 +523,22 @@ export function CreateResourceForm({
     if (type === 'entity' && !billingID) return false;
     if (type === 'persona' && !entityNs) return false;
     if (type === 'assignment' && !teamRef) return false;
-    if (type === 'cloudoso' && (!osoProject || !vaultPath || !baseDomain || !projectDomain || !externalNetwork || !route53VaultPath)) return false;
-    if (type === 'cloudaws' && (!awsAccount || !awsVaultPath || !(awsBaseDomain || baseDomain))) return false;
+    if (
+      type === 'cloudoso' &&
+      (!osoProject ||
+        !baseDomain ||
+        !projectDomain ||
+        !externalNetwork ||
+        (!cloudsYaml.trim() && !vaultPath))
+    )
+      return false;
+    if (
+      type === 'cloudaws' &&
+      (!awsAccount ||
+        !(awsBaseDomain || baseDomain) ||
+        (!(awsAccessKeyId.trim() && awsSecretAccessKey.trim()) && !awsVaultPath))
+    )
+      return false;
     if (type === 'cloudvirt' && (!(virtVaultPath || vaultPath) || !(virtBaseDomain || baseDomain))) return false;
     if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef || cloudVirtRef)) return false;
     if (type === 'persona' && (!rbacRef || !personaType)) return false;
@@ -539,6 +564,35 @@ export function CreateResourceForm({
         type === 'hybridfabric' || type === 'cloudgateway' || type === 'transportlink' || type === 'uihealthchecker'
           ? 'sovereign-cloud'
           : entityNs;
+      if (!targetNs) {
+        throw new Error('Namespace is required');
+      }
+      if (type === 'cloudaws' && awsAccessKeyId.trim() && awsSecretAccessKey.trim()) {
+        await createNamespaceSecret(targetNs, {
+          name: `${name}-aws-credentials`,
+          labels: {
+            'hybridsovereign.redhat/cloudaws': name,
+            'hybridsovereign.redhat/credential-type': 'aws',
+          },
+          stringData: {
+            AWS_ACCESS_KEY_ID: awsAccessKeyId.trim(),
+            AWS_SECRET_ACCESS_KEY: awsSecretAccessKey.trim(),
+            ACCOUNT_ID: awsAccount.trim(),
+          },
+        });
+      }
+      if (type === 'cloudoso' && cloudsYaml.trim()) {
+        await createNamespaceSecret(targetNs, {
+          name: `${name}-openstack-credentials`,
+          labels: {
+            'hybridsovereign.redhat/cloudoso': name,
+            'hybridsovereign.redhat/credential-type': 'openstack',
+          },
+          stringData: {
+            'clouds.yaml': cloudsYaml.trim(),
+          },
+        });
+      }
       await createDashboardResource(kind, { name, namespace: targetNs, spec: buildSpec() }, targetNs);
       setResult({ ok: true, message: `${kind} "${name}" submitted.` });
       setTimeout(() => onSuccess(listPath), 1200);
@@ -658,8 +712,15 @@ export function CreateResourceForm({
                   <FormGroup label="OpenStack project" fieldId="oso-project" isRequired>
                     <TextInput id="oso-project" value={osoProject} onChange={(_e, v) => setOsoProject(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="Vault path" fieldId="oso-vault" isRequired>
-                    <TextInput id="oso-vault" value={vaultPath} onChange={(_e, v) => setVaultPath(v)} isRequired />
+                  <FormGroup label="clouds.yaml" fieldId="oso-clouds" isRequired>
+                    <TextArea
+                      id="oso-clouds"
+                      value={cloudsYaml}
+                      onChange={(_e, v) => setCloudsYaml(v)}
+                      rows={12}
+                      placeholder={'clouds:\n  openstack:\n    auth:\n      auth_url: https://...\n      username: ...\n      password: ...\n      project_name: ...\n      user_domain_name: Default\n      project_domain_name: Default\n    region_name: ...\n    interface: public\n    identity_api_version: 3'}
+                      isRequired
+                    />
                   </FormGroup>
                   <FormGroup label="Base domain" fieldId="oso-base" isRequired>
                     <TextInput id="oso-base" value={baseDomain} onChange={(_e, v) => setBaseDomain(v)} isRequired />
@@ -670,8 +731,11 @@ export function CreateResourceForm({
                   <FormGroup label="External network" fieldId="oso-ext" isRequired>
                     <TextInput id="oso-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="Route53 vault path" fieldId="oso-r53" isRequired>
-                    <TextInput id="oso-r53" value={route53VaultPath} onChange={(_e, v) => setRoute53VaultPath(v)} isRequired />
+                  <FormGroup label="Route53 vault path (optional)" fieldId="oso-r53">
+                    <TextInput id="oso-r53" value={route53VaultPath} onChange={(_e, v) => setRoute53VaultPath(v)} />
+                  </FormGroup>
+                  <FormGroup label="Vault path (optional fallback)" fieldId="oso-vault">
+                    <TextInput id="oso-vault" value={vaultPath} onChange={(_e, v) => setVaultPath(v)} />
                   </FormGroup>
                   <FormGroup label="Landing zone" fieldId="oso-lz">
                     <TextInput id="oso-lz" value={landingzone} onChange={(_e, v) => setLandingzone(v)} />
@@ -684,11 +748,30 @@ export function CreateResourceForm({
                   <FormGroup label="AWS account ID" fieldId="aws-acct" isRequired>
                     <TextInput id="aws-acct" value={awsAccount} onChange={(_e, v) => setAwsAccount(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="Vault path" fieldId="aws-vault" isRequired>
-                    <TextInput id="aws-vault" value={awsVaultPath} onChange={(_e, v) => setAwsVaultPath(v)} isRequired />
+                  <FormGroup label="AWS access key ID" fieldId="aws-ak" isRequired>
+                    <TextInput
+                      id="aws-ak"
+                      value={awsAccessKeyId}
+                      onChange={(_e, v) => setAwsAccessKeyId(v)}
+                      autoComplete="off"
+                      isRequired
+                    />
+                  </FormGroup>
+                  <FormGroup label="AWS secret access key" fieldId="aws-sk" isRequired>
+                    <TextInput
+                      id="aws-sk"
+                      type="password"
+                      value={awsSecretAccessKey}
+                      onChange={(_e, v) => setAwsSecretAccessKey(v)}
+                      autoComplete="new-password"
+                      isRequired
+                    />
                   </FormGroup>
                   <FormGroup label="Base domain" fieldId="aws-base" isRequired>
                     <TextInput id="aws-base" value={awsBaseDomain} onChange={(_e, v) => setAwsBaseDomain(v)} isRequired />
+                  </FormGroup>
+                  <FormGroup label="Vault path (optional fallback)" fieldId="aws-vault">
+                    <TextInput id="aws-vault" value={awsVaultPath} onChange={(_e, v) => setAwsVaultPath(v)} />
                   </FormGroup>
                   <FormGroup label="Landing zone" fieldId="aws-lz">
                     <TextInput id="aws-lz" value={landingzone} onChange={(_e, v) => setLandingzone(v)} />

@@ -277,6 +277,35 @@ function normalizeListPayload<T>(data: unknown): T[] {
   return [];
 }
 
+/** Create a core/v1 Secret in a namespace (credentials for CloudAWS / CloudOSO). */
+export async function createNamespaceSecret(
+  namespace: string,
+  opts: {
+    name: string;
+    stringData: Record<string, string>;
+    labels?: Record<string, string>;
+  },
+): Promise<unknown> {
+  const base = globalK8sConfig.baseUrl ?? '/api/k8s';
+  const url = `${base}/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets`;
+  const body = {
+    apiVersion: 'v1',
+    kind: 'Secret',
+    metadata: {
+      name: opts.name,
+      namespace,
+      ...(opts.labels ? { labels: opts.labels } : {}),
+    },
+    type: 'Opaque',
+    stringData: opts.stringData,
+  };
+  return k8sFetchJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 /** Create a Hybrid Sovereign CR via curated dashboard API when available */
 export async function createDashboardResource(
   kind: HybridSovereignKind,

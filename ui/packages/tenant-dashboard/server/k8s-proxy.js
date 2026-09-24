@@ -952,6 +952,7 @@ export function createK8sHandlers(apiServer) {
       const {
         project,
         vaultPath,
+        credentialsSecretRef,
         baseDomain,
         projectDomain,
         externalNetwork,
@@ -963,8 +964,16 @@ export function createK8sHandlers(apiServer) {
       if (!project || typeof project !== "string" || !project.trim()) {
         return res.status(400).json({ message: "spec.project is required" });
       }
-      if (!vaultPath || typeof vaultPath !== "string" || !vaultPath.trim()) {
-        return res.status(400).json({ message: "spec.vaultPath is required" });
+      const hasCredRef =
+        credentialsSecretRef &&
+        typeof credentialsSecretRef === "object" &&
+        typeof credentialsSecretRef.name === "string" &&
+        credentialsSecretRef.name.trim();
+      const hasVault = vaultPath && typeof vaultPath === "string" && vaultPath.trim();
+      if (!hasCredRef && !hasVault) {
+        return res.status(400).json({
+          message: "spec.credentialsSecretRef.name or spec.vaultPath is required",
+        });
       }
       if (!baseDomain || typeof baseDomain !== "string" || !baseDomain.trim()) {
         return res.status(400).json({ message: "spec.baseDomain is required" });
@@ -975,13 +984,6 @@ export function createK8sHandlers(apiServer) {
       if (!externalNetwork || typeof externalNetwork !== "string" || !externalNetwork.trim()) {
         return res.status(400).json({ message: "spec.externalNetwork is required" });
       }
-      if (
-        !route53VaultPath ||
-        typeof route53VaultPath !== "string" ||
-        !route53VaultPath.trim()
-      ) {
-        return res.status(400).json({ message: "spec.route53VaultPath is required" });
-      }
       if (enableVRF === true && (!vrfId || typeof vrfId !== "string" || !vrfId.trim())) {
         return res.status(400).json({ message: "spec.vrfId is required when enableVRF is true" });
       }
@@ -991,11 +993,15 @@ export function createK8sHandlers(apiServer) {
         metadata: { name, namespace },
         spec: {
           project: project.trim(),
-          vaultPath: vaultPath.trim(),
           baseDomain: baseDomain.trim(),
           projectDomain: projectDomain.trim(),
           externalNetwork: externalNetwork.trim(),
-          route53VaultPath: route53VaultPath.trim(),
+          ...(hasCredRef
+            ? { credentialsSecretRef: { name: credentialsSecretRef.name.trim() } }
+            : { vaultPath: vaultPath.trim() }),
+          ...(route53VaultPath && typeof route53VaultPath === "string" && route53VaultPath.trim()
+            ? { route53VaultPath: route53VaultPath.trim() }
+            : {}),
           ...(landingzone && typeof landingzone === "string" && landingzone.trim()
             ? { landingzone: landingzone.trim() }
             : {}),
@@ -1233,8 +1239,17 @@ export function createK8sHandlers(apiServer) {
       if (!name || !namespace) return res.status(400).json({ message: "name and namespace required" });
       if (!NAME_PATTERN.test(name)) return res.status(400).json({ message: "Invalid name" });
       if (!NS_PATTERN.test(namespace)) return res.status(400).json({ message: "Invalid namespace" });
-      if (!spec?.account || !spec?.vaultPath || !spec?.baseDomain) {
-        return res.status(400).json({ message: "spec.account, spec.vaultPath, and spec.baseDomain are required" });
+      const hasCredRef =
+        spec?.credentialsSecretRef &&
+        typeof spec.credentialsSecretRef === "object" &&
+        typeof spec.credentialsSecretRef.name === "string" &&
+        spec.credentialsSecretRef.name.trim();
+      const hasVault = spec?.vaultPath && typeof spec.vaultPath === "string" && spec.vaultPath.trim();
+      if (!spec?.account || !spec?.baseDomain || (!hasCredRef && !hasVault)) {
+        return res.status(400).json({
+          message:
+            "spec.account, spec.baseDomain, and credentialsSecretRef.name (or vaultPath) are required",
+        });
       }
       const cloudaws = {
         apiVersion: "hybridsovereign.redhat/v1alpha1",
@@ -1242,8 +1257,10 @@ export function createK8sHandlers(apiServer) {
         metadata: { name, namespace },
         spec: {
           account: spec.account,
-          vaultPath: spec.vaultPath,
           baseDomain: spec.baseDomain,
+          ...(hasCredRef
+            ? { credentialsSecretRef: { name: spec.credentialsSecretRef.name.trim() } }
+            : { vaultPath: spec.vaultPath }),
           ...(spec?.landingzone ? { landingzone: spec.landingzone } : {}),
         },
       };
