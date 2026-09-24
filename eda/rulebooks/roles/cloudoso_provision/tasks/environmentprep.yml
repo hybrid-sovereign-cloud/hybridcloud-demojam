@@ -31,13 +31,17 @@
         kind: Secret
         name: "{{ ep_credentials_secret_name }}"
         namespace: "{{ cloudoso_cr_namespace }}"
-      register: openstack_admin_secret
+      register: openstack_entity_secret
       until: >-
-        openstack_admin_secret.resources | length > 0 and
-        openstack_admin_secret.resources[0].data is defined and
-        openstack_admin_secret.resources[0].data['clouds.yaml'] is defined
+        openstack_entity_secret.resources | length > 0 and
+        openstack_entity_secret.resources[0].data is defined and
+        openstack_entity_secret.resources[0].data['clouds.yaml'] is defined
       retries: 12
       delay: 5
+
+    - name: Expose entity Secret as openstack_admin_secret
+      ansible.builtin.set_fact:
+        openstack_admin_secret: "{{ openstack_entity_secret }}"
 
 - name: Load OpenStack clouds.yaml from Vault via ExternalSecret
   when: ep_credentials_secret_name | length == 0
@@ -86,13 +90,17 @@
         kind: Secret
         name: "eda-cloudoso-{{ cloudoso_cr_name }}-openstack-creds"
         namespace: "{{ eda_central_work_namespace }}"
-      register: openstack_admin_secret
+      register: openstack_vault_secret
       until: >-
-        openstack_admin_secret.resources | length > 0 and
-        openstack_admin_secret.resources[0].data is defined and
-        openstack_admin_secret.resources[0].data['clouds.yaml'] is defined
+        openstack_vault_secret.resources | length > 0 and
+        openstack_vault_secret.resources[0].data is defined and
+        openstack_vault_secret.resources[0].data['clouds.yaml'] is defined
       retries: 30
       delay: 10
+
+    - name: Expose Vault Secret as openstack_admin_secret
+      ansible.builtin.set_fact:
+        openstack_admin_secret: "{{ openstack_vault_secret }}"
 
 - name: Write OpenStack clouds.yaml to temp path
   ansible.builtin.copy:
