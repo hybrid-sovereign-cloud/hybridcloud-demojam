@@ -152,6 +152,52 @@
         | default('10.10.10.30')
       }}
 
+- name: Read spoke SSO Secret for HostedCluster
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Secret
+    name: openshift-spoke-sso
+    namespace: open-cluster-management
+  register: hc_sso_secret
+  failed_when: false
+
+- name: Read spoke SSO issuer for HostedCluster
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: ConfigMap
+    name: openshift-spoke-sso
+    namespace: open-cluster-management
+  register: hc_sso_cm
+  failed_when: false
+
+- name: Set HostedCluster OIDC facts
+  ansible.builtin.set_fact:
+    hc_sso_issuer: "{{ (hc_sso_cm.resources | default([{}]))[0].data.issuer | default('') }}"
+    hc_sso_client_secret_b64: "{{ (hc_sso_secret.resources | default([{}]))[0].data.clientSecret | default('') }}"
+
+- name: Ensure OIDC client secret for HostedCluster SSO
+  when: (hc_sso_client_secret_b64 | default('') | length) > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: openid-client-secret-keycloak
+        namespace: "{{ hc_namespace }}"
+      type: Opaque
+      data:
+        clientSecret: "{{ hc_sso_client_secret_b64 }}"
+
 - name: Create HostedCluster (KubeVirt platform — containerized control plane)
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
@@ -167,6 +213,7 @@
         labels:
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
           hybridsovereign.redhat/platform-type: hosted
+          hybridsovereign.redhat/sso: enabled
       spec:
         release:
           image: "{{ hc_release_image }}"
@@ -183,6 +230,30 @@
         pullSecret:
           name: "{{ hc_pull_secret_name }}"
         infraID: "{{ hc_name }}"
+        configuration: >-
+          {{
+            {
+              'oauth': {
+                'identityProviders': [{
+                  'name': 'keycloak-sso',
+                  'mappingMethod': 'claim',
+                  'type': 'OpenID',
+                  'openID': {
+                    'clientID': 'openshift-spoke-sso',
+                    'clientSecret': {'name': 'openid-client-secret-keycloak'},
+                    'issuer': hc_sso_issuer,
+                    'extraScopes': ['profile', 'email'],
+                    'claims': {
+                      'preferredUsername': ['preferred_username'],
+                      'name': ['name'],
+                      'email': ['email'],
+                      'groups': ['groups']
+                    }
+                  }
+                }]
+              }
+            } if (hc_sso_issuer | length) > 0 else omit
+          }}
         services:
           - service: APIServer
             servicePublishingStrategy:

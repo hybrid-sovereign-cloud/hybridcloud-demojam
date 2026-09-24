@@ -1,13 +1,10 @@
-# ZTP: ACM governance Policy that configures Keycloak SSO (OIDC) on every
-# ManagedCluster for a PlatformOpenshift (hosted, virt, aws, openstack).
-# Selects by hybridsovereign.redhat/platformopenshift (set at provision) OR
-# hybridsovereign.redhat/sso=enabled (explicit).
+# ZTP: ACM governance Policy — Keycloak SSO for standalone PlatformOpenshift
+# ManagedClusters (virt / aws / openstack). Hosted (HCP) OAuth is immutable on
+# the guest; SSO is applied via HostedCluster.spec.configuration.oauth instead
+# (provision playbook + hs-spoke-sso-ensure Job).
 #
-# Hub templates MUST end with " hub}}" so ACM resolves them on the hub.
-# Shared OIDC client:
-#   Secret/ConfigMap openshift-spoke-sso in open-cluster-management
-#   (ACM hub-template fromSecret is restricted to that namespace)
-# created by the ensure-spoke-sso Sync hook Job.
+# Hub templates MUST end with " hub}}" and secrets MUST live in
+# open-cluster-management (ACM fromSecret namespace restriction).
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
@@ -39,10 +36,18 @@ spec:
           matchExpressions:
             - key: hybridsovereign.redhat/platformopenshift
               operator: Exists
+            - key: hybridsovereign.redhat/platform-type
+              operator: NotIn
+              values: ["hosted"]
     - requiredClusterSelector:
         labelSelector:
-          matchLabels:
-            hybridsovereign.redhat/sso: "enabled"
+          matchExpressions:
+            - key: hybridsovereign.redhat/sso
+              operator: In
+              values: ["enabled"]
+            - key: hybridsovereign.redhat/platform-type
+              operator: NotIn
+              values: ["hosted"]
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
@@ -96,8 +101,6 @@ spec:
                   namespace: openshift-config
                 type: Opaque
                 data:
-                  # Closing "hub" required so ACM resolves on the hub (not the
-                  # governance-standalone-hub-templating addon on the spoke).
                   clientSecret: '{{ "{{hub fromSecret \"open-cluster-management\" \"openshift-spoke-sso\" \"clientSecret\" hub}}" }}'
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -107,8 +110,10 @@ spec:
         spec:
           remediationAction: enforce
           severity: high
+          metadataComplianceType: musthave
           object-templates:
             - complianceType: musthave
+              recreateOption: None
               objectDefinition:
                 apiVersion: config.openshift.io/v1
                 kind: OAuth

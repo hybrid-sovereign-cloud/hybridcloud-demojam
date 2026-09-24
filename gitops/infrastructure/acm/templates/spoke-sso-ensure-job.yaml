@@ -27,6 +27,9 @@ rules:
   - apiGroups: [route.openshift.io]
     resources: [routes]
     verbs: [get, list]
+  - apiGroups: [hypershift.openshift.io]
+    resources: [hostedclusters]
+    verbs: [get, list, patch, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -123,4 +126,34 @@ spec:
                 -X PUT "$API/api/v1/namespaces/${TARGET_NS}/configmaps/openshift-spoke-sso" -d "$BODY_CM" >/dev/null \
                 || curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
                 -X POST "$API/api/v1/namespaces/${TARGET_NS}/configmaps" -d "$BODY_CM" >/dev/null
+              # HCP: OAuth is immutable on the guest — push IDP via HostedCluster.spec.configuration
+              HCS=$(kget "/apis/hypershift.openshift.io/v1beta1/hostedclusters" 2>/dev/null || echo '{"items":[]}')
+              echo "$HCS" | jq -c '.items[]?' 2>/dev/null | while read -r hc; do
+                HNS=$(echo "$hc" | jq -r '.metadata.namespace')
+                HNM=$(echo "$hc" | jq -r '.metadata.name')
+                [[ -n "$HNS" && -n "$HNM" && "$HNS" != "null" ]] || continue
+                curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                  -X PUT "$API/api/v1/namespaces/${HNS}/secrets/openid-client-secret-keycloak" \
+                  -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"openid-client-secret-keycloak\",\"namespace\":\"${HNS}\"},\"type\":\"Opaque\",\"data\":{\"clientSecret\":\"${B64}\"}}" >/dev/null \
+                  || curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                  -X POST "$API/api/v1/namespaces/${HNS}/secrets" \
+                  -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"openid-client-secret-keycloak\",\"namespace\":\"${HNS}\"},\"type\":\"Opaque\",\"data\":{\"clientSecret\":\"${B64}\"}}" >/dev/null
+                PATCH=$(jq -nc --arg iss "$ISSUER" '{
+                  spec: { configuration: { oauth: { identityProviders: [{
+                    name: "keycloak-sso", mappingMethod: "claim", type: "OpenID",
+                    openID: {
+                      clientID: "openshift-spoke-sso",
+                      clientSecret: {name: "openid-client-secret-keycloak"},
+                      issuer: $iss,
+                      extraScopes: ["profile","email"],
+                      claims: {
+                        preferredUsername: ["preferred_username"],
+                        name: ["name"], email: ["email"], groups: ["groups"]
+                      }
+                    }
+                  }]}}}}')
+                curl -sk --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/merge-patch+json" \
+                  -X PATCH "$API/apis/hypershift.openshift.io/v1beta1/namespaces/${HNS}/hostedclusters/${HNM}" \
+                  -d "$PATCH" >/dev/null && echo "HCP SSO patched ${HNS}/${HNM}" || echo "HCP SSO patch skip ${HNS}/${HNM}"
+              done
               finish "spoke SSO client ready issuer=${ISSUER}"
