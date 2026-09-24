@@ -339,6 +339,7 @@
           vendor: OpenShift
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
           hybridsovereign.redhat/platform-type: virt
+          hybridsovereign.redhat/sso: enabled
       spec:
         baseDomain: "{{ virt_domain }}"
         clusterName: "{{ vac_name }}"

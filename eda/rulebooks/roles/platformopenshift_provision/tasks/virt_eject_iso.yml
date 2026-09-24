@@ -76,3 +76,16 @@
     validate_certs: false
     state: present
     definition: "{{ vac_vm_no_iso }}"
+
+# Force a fresh boot from rootdisk (Assisted pending-user-action if CD still selected).
+- name: Delete VMI to reboot from disk {{ vac_vm_obj.metadata.name }}
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ vac_vm_obj.metadata.name }}"
+    namespace: "{{ vac_namespace }}"
+  failed_when: false

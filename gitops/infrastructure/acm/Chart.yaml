@@ -2,5 +2,5 @@ apiVersion: v2
 name: hs-acm
 description: ACM hub (MultiClusterHub); MCE is separate app hs-mce
 type: application
-version: 0.1.4
+version: 0.1.5
 appVersion: "2.17"

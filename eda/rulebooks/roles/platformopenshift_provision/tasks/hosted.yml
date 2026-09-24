@@ -257,7 +257,8 @@
           reason: EDASucceeded
           message: HostedCluster {{ hc_name }} submitted (HCP, not AgentClusterInstall)
 
-- name: Label HostedCluster ManagedCluster for SSO governance
+# Hypershift creates ManagedCluster asynchronously — wait before labeling.
+- name: Wait for HostedCluster ManagedCluster
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -266,6 +267,9 @@
     kind: ManagedCluster
     name: "{{ hc_name }}"
   register: hc_mc
+  until: hc_mc.resources | default([]) | length > 0
+  retries: 60
+  delay: 15
   failed_when: false
 
 - name: Apply SSO label on HostedCluster ManagedCluster

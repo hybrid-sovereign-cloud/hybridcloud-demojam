@@ -1,9 +1,11 @@
 # ZTP: ACM governance Policy that configures Keycloak SSO (OIDC) on every
-# ManagedCluster labeled hybridsovereign.redhat/sso=enabled.
-# PlatformOpenshift provision labels hosted/virt ManagedClusters accordingly.
+# ManagedCluster for a PlatformOpenshift (hosted, virt, aws, openstack).
+# Selects by hybridsovereign.redhat/platformopenshift (set at provision) OR
+# hybridsovereign.redhat/sso=enabled (explicit).
 #
-# Shared OIDC client secret is expected at:
-#   Secret/openshift-spoke-sso in sovereign-cloud-plugins (key: clientSecret)
+# Hub templates MUST end with " hub}}" so ACM resolves them on the hub.
+# Shared OIDC client:
+#   Secret/ConfigMap openshift-spoke-sso in sovereign-cloud-plugins
 # created by the ensure-spoke-sso Sync hook Job.
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
@@ -31,6 +33,11 @@ spec:
   clusterSets:
     - global
   predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: hybridsovereign.redhat/platformopenshift
+              operator: Exists
     - requiredClusterSelector:
         labelSelector:
           matchLabels:
@@ -88,7 +95,9 @@ spec:
                   namespace: openshift-config
                 type: Opaque
                 data:
-                  clientSecret: '{{ "{{hub fromSecret \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"clientSecret\"}}" }}'
+                  # Closing "hub" required so ACM resolves on the hub (not the
+                  # governance-standalone-hub-templating addon on the spoke).
+                  clientSecret: '{{ "{{hub fromSecret \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"clientSecret\" hub}}" }}'
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -125,4 +134,4 @@ spec:
                             - email
                           groups:
                             - groups
-                        issuer: '{{ "{{hub fromConfigMap \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"issuer\"}}" }}'
+                        issuer: '{{ "{{hub fromConfigMap \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"issuer\" hub}}" }}'

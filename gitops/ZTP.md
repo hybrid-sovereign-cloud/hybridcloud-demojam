@@ -78,9 +78,10 @@ PlatformOpenshift types on CloudVirt:
   (`hs-ingress`) when `baseDomainPassthrough` is used, or guest console stays Unavailable.
 - `type: virt` → ACM AgentClusterInstall + InfraEnv; control plane (and workers) as CNV VMs
 
-Spoke SSO (ZTP): ACM Policy `hs-spoke-sso` in `hs-acm` selects ManagedClusters labeled
-`hybridsovereign.redhat/sso=enabled` (set by PlatformOpenshift provision) and enforces
-OpenShift OAuth → Keycloak realm via a shared OIDC client.
+Spoke SSO (ZTP): ACM Policy `hs-spoke-sso` in `hs-acm` selects ManagedClusters with
+`hybridsovereign.redhat/platformopenshift` (any PlatformOpenshift type: hosted/virt/aws/openstack)
+or `hybridsovereign.redhat/sso=enabled`, and enforces OpenShift OAuth → Keycloak `sso` realm
+via a shared OIDC client. Hub templates use `{{hub ... hub}}` (hub-side resolution).
 ```
 
 ## Platform configs (ZTP prerequisite)
