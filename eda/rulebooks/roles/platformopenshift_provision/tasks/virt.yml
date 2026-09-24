@@ -544,6 +544,39 @@
   loop_control:
     loop_var: vac_vm
 
+- name: Wait for Assisted agents to appear
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: agent-install.openshift.io/v1beta1
+    kind: Agent
+    namespace: "{{ vac_namespace }}"
+  register: vac_agents
+  until: (vac_agents.resources | default([]) | length) >= ((vac_cp_count | int) + (vac_worker_count | int))
+  retries: 60
+  delay: 20
+  failed_when: false
+
+- name: Approve discovered agents for this cluster
+  when: vac_agents.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: agent-install.openshift.io/v1beta1
+      kind: Agent
+      metadata:
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ vac_namespace }}"
+      spec:
+        approved: true
+        installation_disk_id: "{{ item.spec.installation_disk_id | default(omit) }}"
+  loop: "{{ vac_agents.resources }}"
+  failed_when: false
+
 - name: Get current timestamp
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
