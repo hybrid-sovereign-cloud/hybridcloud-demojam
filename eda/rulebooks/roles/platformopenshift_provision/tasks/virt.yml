@@ -307,15 +307,17 @@
         labels:
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
       spec:
-        config: |
-          {
-            "cniVersion": "0.3.1",
-            "name": "{{ vac_nad_name }}",
-            "type": "ovn-k8s-cni-overlay",
-            "topology": "layer2",
-            "netAttachDefName": "{{ vac_namespace }}/{{ vac_nad_name }}",
-            "subnets": "{{ vac_machine_cidr }}"
-          }
+        config: >-
+          {{
+            {
+              'cniVersion': '0.3.1',
+              'name': vac_nad_name,
+              'type': 'ovn-k8s-cni-overlay',
+              'topology': 'layer2',
+              'netAttachDefName': vac_namespace ~ '/' ~ vac_nad_name,
+              'subnets': vac_machine_cidr
+            } | to_json
+          }}
 
 # ManagedCluster is created by Hive/ACM import after AgentClusterInstall completes.
 # Creating it early races with namespace lifecycle (Terminating) on this hub.
