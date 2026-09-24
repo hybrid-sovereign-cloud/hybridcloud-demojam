@@ -98,7 +98,7 @@
           spec:
             domain:
               cpu:
-                cores: "{{ vac_vm.cores | int }}"
+                cores: {{ vac_vm.cores | int }}
               resources:
                 requests:
                   memory: "{{ vac_vm.memory }}"
