@@ -79,6 +79,7 @@ RUN chmod ug+rw /etc/passwd
 RUN mkdir -p /runner && chgrp 0 /runner && chmod -R ug+rwx /runner
 WORKDIR /runner
 RUN $PYCMD -m pip install --no-cache-dir 'dumb-init==1.2.5'
+RUN curl -fsSL -o /tmp/helm.tar.gz https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz && cd /tmp && python3 -c "import tarfile; t=tarfile.open('helm.tar.gz'); m=t.getmember('linux-amd64/helm'); m.name='helm'; t.extract(m, '/usr/local/bin')" && chmod 755 /usr/local/bin/helm && rm -f /tmp/helm.tar.gz
 RUN rm -rf /output
 LABEL ansible-execution-environment=true
 USER 1000

@@ -276,10 +276,32 @@
 - name: Write central cluster kubeconfig for Helm
   ansible.builtin.include_tasks: write_central_helm_kubeconfig.yml
 
+# de-cloudoso historically omitted helm; bootstrap into /tmp when missing.
+- name: Ensure helm CLI is available
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if command -v helm >/dev/null 2>&1; then
+      command -v helm
+      exit 0
+    fi
+    curl -fsSL -o /tmp/helm.tgz https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz
+    tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+    mv /tmp/linux-amd64/helm /tmp/helm
+    chmod 755 /tmp/helm
+    echo /tmp/helm
+  args:
+    executable: /bin/bash
+  register: helm_bin_path
+  changed_when: false
+
+- name: Set helm binary path
+  ansible.builtin.set_fact:
+    helm_bin: "{{ helm_bin_path.stdout | trim }}"
+
 - name: Check existing Helm release
   ansible.builtin.command:
     argv:
-      - helm
+      - "{{ helm_bin }}"
       - status
       - "{{ cb_app_name }}"
       - --namespace
@@ -311,7 +333,7 @@
 - name: Get current Helm values for idempotency check
   ansible.builtin.command:
     argv:
-      - helm
+      - "{{ helm_bin }}"
       - get
       - values
       - "{{ cb_app_name }}"
@@ -325,7 +347,6 @@
   failed_when: false
   changed_when: false
   when: cb_helm_release_exists | bool
-
 - name: Determine if Helm upgrade is needed
   ansible.builtin.command:
     argv:
@@ -351,7 +372,7 @@
 - name: Deploy mce-cluster-build chart
   ansible.builtin.command:
     argv:
-      - helm
+      - "{{ helm_bin }}"
       - upgrade
       - "{{ cb_app_name }}"
       - "oci://{{ oci_registry_host }}/hybrid-sovereign/mce-cluster-build"

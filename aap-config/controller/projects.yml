@@ -40,7 +40,7 @@ controller_execution_environments:
     credential: quay-robot-credential
   - name: de-cloudoso
     organization: sovereign
-    image: "{{ quay_registry }}/de-cloudoso:0.1.7"
+    image: "{{ quay_registry }}/de-cloudoso:0.1.8"
     pull: missing
     credential: quay-robot-credential
   - name: de-openstack-migration

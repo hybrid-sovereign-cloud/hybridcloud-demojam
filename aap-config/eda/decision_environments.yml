@@ -28,7 +28,7 @@ eda_decision_environments:
     organization: Default
   - name: de-cloudoso
     description: Hybrid Sovereign decision environment for cloudoso
-    image_url: "{{ quay_registry }}/de-cloudoso:0.1.7"
+    image_url: "{{ quay_registry }}/de-cloudoso:0.1.8"
     credential: quay-registry-credential
     organization: Default
   - name: de-openstack-migration

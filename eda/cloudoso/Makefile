@@ -1,7 +1,7 @@
 IMAGE_REGISTRY ?= $(OCI_HOST)
 IMAGE_NAMESPACE ?= hybrid-sovereign
 DE_NAME = de-cloudoso
-DE_TAG ?= 0.1.7
+DE_TAG ?= 0.1.8
 
 .PHONY: de-cloudoso-build-push de-cloudoso-build de-cloudoso-push
 
