@@ -1,21 +1,20 @@
 # Adopt-only: do not own IngressController/default. Patch routeAdmission so
 # Hypershift KubeVirt baseDomainPassthrough Subdomain routes are Admitted.
-# Without WildcardsAllowed, guest console/apps hit the hub router with the wrong cert.
+# Job runs in openshift-gitops (API reachability); target is openshift-ingress-operator.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: hs-ingress-wildcard
-  namespace: openshift-ingress-operator
+  namespace: openshift-gitops
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: hs-ingress-wildcard
-  namespace: openshift-ingress-operator
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
@@ -26,28 +25,27 @@ rules:
     verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: hs-ingress-wildcard
-  namespace: openshift-ingress-operator
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: hs-ingress-wildcard
 subjects:
   - kind: ServiceAccount
     name: hs-ingress-wildcard
-    namespace: openshift-ingress-operator
+    namespace: openshift-gitops
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: hs-ingress-wildcard
-  namespace: openshift-ingress-operator
+  namespace: openshift-gitops
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:

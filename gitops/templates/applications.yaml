@@ -273,7 +273,7 @@ spec:
     path: gitops/infrastructure/ingress
   destination:
     server: {{ $server | quote }}
-    namespace: openshift-ingress-operator
+    namespace: openshift-gitops
   syncPolicy:
     automated:
       prune: true
