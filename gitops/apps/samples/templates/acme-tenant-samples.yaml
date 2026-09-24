@@ -1,6 +1,6 @@
 # ACME tenant sample CRs (Teams / Projects / Personas / fabric).
 # Entity, core Rbacs, AAPOrg, QuayOrg, CloudVirt: always-on via hs-platform-smoke.
-# CloudAWS/OSO: see cloud-environments.yaml. No PlatformOpenshift or Assignment samples.
+# No CloudAWS, CloudOSO, PlatformOpenshift, or Assignment samples.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Team

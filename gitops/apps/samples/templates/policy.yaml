@@ -7,12 +7,13 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
 data:
   parked: |
-    OpenStackMigration, PlatformOpenshift, Assignment — not applied via hs-samples.
+    CloudAWS, CloudOSO, PlatformOpenshift, Assignment, OpenStackMigration —
+    not applied via hs-samples.
   unparked: |
-    CloudAWS, CloudOSO — applied via hs-samples (seed-once: no selfHeal / no prune).
+    Tenant Teams/Projects/Personas + fabric samples via hs-samples (seed-once).
     CloudVirt local-virt is base ZTP (hs-platform-smoke), not a sample.
   status: |
-    Cloud environment samples live under templates/cloud-environments.yaml.
+    No Cloud* environment CRs in hs-samples.
   reconcile: |
     hs-samples: automated prune=false selfHeal=false — UI deletes of sample CRs
     are not restored by ArgoCD.

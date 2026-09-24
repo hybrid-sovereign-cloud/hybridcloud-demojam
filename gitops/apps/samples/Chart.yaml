@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hs-samples
-description: Workshop samples (seed-once); no PlatformOpenshift or Assignment CRs
+description: Workshop samples (seed-once); no CloudAWS/CloudOSO/PlatformOpenshift/Assignment
 type: application
-version: 0.1.10
+version: 0.1.11
 appVersion: "0.1.0"
