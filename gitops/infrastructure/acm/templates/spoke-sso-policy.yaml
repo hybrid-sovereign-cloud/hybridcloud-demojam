@@ -37,8 +37,8 @@ spec:
             - key: hybridsovereign.redhat/platformopenshift
               operator: Exists
             - key: hybridsovereign.redhat/platform-type
-              operator: NotIn
-              values: ["hosted"]
+              operator: In
+              values: ["virt", "aws", "openstack"]
     - requiredClusterSelector:
         labelSelector:
           matchExpressions:
@@ -46,8 +46,8 @@ spec:
               operator: In
               values: ["enabled"]
             - key: hybridsovereign.redhat/platform-type
-              operator: NotIn
-              values: ["hosted"]
+              operator: In
+              values: ["virt", "aws", "openstack"]
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
