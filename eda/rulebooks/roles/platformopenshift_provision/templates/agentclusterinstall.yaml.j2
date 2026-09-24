@@ -1,0 +1,30 @@
+apiVersion: extensions.hive.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  name: {{ vac_name }}
+  namespace: {{ vac_namespace }}
+  labels:
+    hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+    hybridsovereign.redhat/platform-type: virt
+  annotations:
+    agent-install.openshift.io/install-config-overrides: '{"platform":{"none":{}}}'
+spec:
+  clusterDeploymentRef:
+    name: {{ vac_name }}
+  imageSetRef:
+    name: {{ vac_image_set }}
+  platformType: None
+  sshPublicKey: {{ vac_ssh_public | to_json }}
+  networking:
+    networkType: OVNKubernetes
+    userManagedNetworking: true
+    clusterNetwork:
+      - cidr: 10.128.0.0/14
+        hostPrefix: 23
+    serviceNetwork:
+      - 172.30.0.0/16
+    machineNetwork:
+      - cidr: {{ vac_machine_cidr }}
+  provisionRequirements:
+    controlPlaneAgents: {{ vac_cp_count | int }}
+    workerAgents: {{ vac_worker_count | int }}

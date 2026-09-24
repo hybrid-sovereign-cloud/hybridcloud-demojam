@@ -1,0 +1,56 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: {{ vac_vm.name }}
+  namespace: {{ vac_namespace }}
+  labels:
+    hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+    hybridsovereign.redhat/platform-type: virt
+    hybridsovereign.redhat/agent-role: "{{ vac_vm.role }}"
+    kubevirt.io/domain: {{ vac_vm.name }}
+spec:
+  running: true
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: {{ vac_vm.name }}
+        hybridsovereign.redhat/agent-role: "{{ vac_vm.role }}"
+    spec:
+      domain:
+        cpu:
+          cores: {{ vac_vm.cores | int }}
+        resources:
+          requests:
+            memory: "{{ vac_vm.memory }}"
+        devices:
+          disks:
+            - name: discoveryiso
+              bootOrder: 1
+              cdrom:
+                bus: sata
+            - name: rootdisk
+              bootOrder: 2
+              disk:
+                bus: virtio
+          interfaces:
+            - name: agentnet
+              bridge: {}
+              macAddress: "{{ vac_vm.mac }}"
+            - name: default
+              masquerade: {}
+        machine:
+          type: q35
+      networks:
+        - name: agentnet
+          multus:
+            networkName: "{{ vac_namespace }}/{{ vac_nad_name }}"
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: "{{ vac_vm.name }}-root"
+        - name: discoveryiso
+          dataVolume:
+            name: "{% if vac_vm_defs | length > 1 %}{{ vac_vm.name }}-iso{% else %}{{ vac_name }}-discovery-iso{% endif %}"
+      evictionStrategy: None

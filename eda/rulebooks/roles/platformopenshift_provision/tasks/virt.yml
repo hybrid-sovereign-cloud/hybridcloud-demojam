@@ -361,37 +361,7 @@
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     state: present
-    definition:
-      apiVersion: extensions.hive.openshift.io/v1beta1
-      kind: AgentClusterInstall
-      metadata:
-        name: "{{ vac_name }}"
-        namespace: "{{ vac_namespace }}"
-        labels:
-          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
-          hybridsovereign.redhat/platform-type: virt
-        annotations:
-          agent-install.openshift.io/install-config-overrides: '{"platform":{"none":{}}}'
-      spec:
-        clusterDeploymentRef:
-          name: "{{ vac_name }}"
-        imageSetRef:
-          name: "{{ vac_image_set }}"
-        platformType: None
-        sshPublicKey: "{{ vac_ssh_public }}"
-        networking:
-          networkType: OVNKubernetes
-          userManagedNetworking: true
-          clusterNetwork:
-            - cidr: 10.128.0.0/14
-              hostPrefix: 23
-          serviceNetwork:
-            - 172.30.0.0/16
-          machineNetwork:
-            - cidr: "{{ vac_machine_cidr }}"
-        provisionRequirements:
-          controlPlaneAgents: {{ vac_cp_count | int }}
-          workerAgents: {{ vac_worker_count | int }}
+    definition: "{{ lookup('template', 'agentclusterinstall.yaml.j2') | from_yaml }}"
 
 - name: Create InfraEnv (discovery ISO for CNV VMs)
   kubernetes.core.k8s:
