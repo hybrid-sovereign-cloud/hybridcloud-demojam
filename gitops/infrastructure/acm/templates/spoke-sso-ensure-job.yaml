@@ -74,7 +74,8 @@ spec:
             - name: KC_ADMIN_NS
               value: "sovereign-cloud-plugins"
             - name: TARGET_NS
-              value: "sovereign-cloud-plugins"
+              # ACM hub templates (fromSecret/fromConfigMap) only allow this NS.
+              value: "open-cluster-management"
           command:
             - /bin/bash
             - -c

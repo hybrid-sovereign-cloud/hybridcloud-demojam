@@ -236,7 +236,7 @@
     cb_secrets_pushed: false
   when: not (cb_cluster_installed | bool)
 
-- name: Apply basechart:true label to ManagedCluster
+- name: Apply basechart + SSO labels to ManagedCluster
   kubernetes.core.k8s:
     host: "{{ central_api_host }}"
     api_key: "{{ central_bearer_token }}"
@@ -249,6 +249,9 @@
       metadata:
         labels:
           basechart: "true"
+          hybridsovereign.redhat/sso: enabled
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: openstack
   ignore_errors: true
 
 - name: Set clusterbuild output facts

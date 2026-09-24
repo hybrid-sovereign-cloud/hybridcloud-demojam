@@ -5,7 +5,8 @@
 #
 # Hub templates MUST end with " hub}}" so ACM resolves them on the hub.
 # Shared OIDC client:
-#   Secret/ConfigMap openshift-spoke-sso in sovereign-cloud-plugins
+#   Secret/ConfigMap openshift-spoke-sso in open-cluster-management
+#   (ACM hub-template fromSecret is restricted to that namespace)
 # created by the ensure-spoke-sso Sync hook Job.
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
@@ -97,7 +98,7 @@ spec:
                 data:
                   # Closing "hub" required so ACM resolves on the hub (not the
                   # governance-standalone-hub-templating addon on the spoke).
-                  clientSecret: '{{ "{{hub fromSecret \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"clientSecret\" hub}}" }}'
+                  clientSecret: '{{ "{{hub fromSecret \"open-cluster-management\" \"openshift-spoke-sso\" \"clientSecret\" hub}}" }}'
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -134,4 +135,4 @@ spec:
                             - email
                           groups:
                             - groups
-                        issuer: '{{ "{{hub fromConfigMap \"sovereign-cloud-plugins\" \"openshift-spoke-sso\" \"issuer\" hub}}" }}'
+                        issuer: '{{ "{{hub fromConfigMap \"open-cluster-management\" \"openshift-spoke-sso\" \"issuer\" hub}}" }}'
