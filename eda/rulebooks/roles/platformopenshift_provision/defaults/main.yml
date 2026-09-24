@@ -27,6 +27,6 @@ vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault.vault.s
 vault_kv_mount: hybridsovereign
 
 oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
-mce_cluster_build_chart_version: "0.2.2"
+mce_cluster_build_chart_version: "0.2.3"
 
 eda_dashboard_host: ""
