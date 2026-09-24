@@ -99,9 +99,13 @@
       ansible.builtin.include_tasks: openstack.yml
       when: platform_type == "openstack"
 
-    - name: Dispatch to Virt / Hosted handler
+    - name: Dispatch to Hosted (Hypershift HCP — containerized control plane)
+      ansible.builtin.include_tasks: hosted.yml
+      when: platform_type == "hosted"
+
+    - name: Dispatch to Virt (AgentClusterInstall — VM control plane on CNV)
       ansible.builtin.include_tasks: virt.yml
-      when: platform_type in ["virt", "hosted"]
+      when: platform_type == "virt"
 
     - name: Handle default (namespace metadata) reconciliation
       ansible.builtin.include_tasks: default.yml

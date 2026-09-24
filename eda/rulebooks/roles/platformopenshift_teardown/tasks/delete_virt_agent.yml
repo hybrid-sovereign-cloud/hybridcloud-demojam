@@ -1,0 +1,137 @@
+---
+# Tear down ACM AgentClusterInstall path for type=virt (CNV VM-based install).
+# Deletes VMs/DataVolumes, then Hive/Assisted CRs and ManagedCluster.
+
+- name: Set virt agent teardown facts
+  ansible.builtin.set_fact:
+    vac_name: "{{ platformopenshift_cr_name }}"
+    vac_namespace: "{{ platformopenshift_cr_name }}"
+
+- name: List VirtualMachines in cluster namespace
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachine
+    namespace: "{{ vac_namespace }}"
+    label_selectors:
+      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+  register: vac_vms
+  failed_when: false
+
+- name: Stop and delete VirtualMachines
+  when: vac_vms.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: kubevirt.io/v1
+    kind: VirtualMachine
+    name: "{{ item.metadata.name }}"
+    namespace: "{{ vac_namespace }}"
+    delete_options:
+      gracePeriodSeconds: 0
+  loop: "{{ vac_vms.resources }}"
+  failed_when: false
+
+- name: Delete DataVolumes in cluster namespace
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: cdi.kubevirt.io/v1beta1
+    kind: DataVolume
+    namespace: "{{ vac_namespace }}"
+    label_selectors:
+      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+  failed_when: false
+
+- name: Delete NMStateConfigs
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: agent-install.openshift.io/v1beta1
+    kind: NMStateConfig
+    namespace: "{{ vac_namespace }}"
+    label_selectors:
+      - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+  failed_when: false
+
+- name: Delete InfraEnv
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: agent-install.openshift.io/v1beta1
+    kind: InfraEnv
+    name: "{{ vac_name }}"
+    namespace: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Delete AgentClusterInstall
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: extensions.hive.openshift.io/v1beta1
+    kind: AgentClusterInstall
+    name: "{{ vac_name }}"
+    namespace: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Delete ClusterDeployment
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: hive.openshift.io/v1
+    kind: ClusterDeployment
+    name: "{{ vac_name }}"
+    namespace: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Wait briefly for ClusterDeployment gone
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hive.openshift.io/v1
+    kind: ClusterDeployment
+    name: "{{ vac_name }}"
+    namespace: "{{ vac_namespace }}"
+  register: vac_cd
+  until: vac_cd.resources | length == 0
+  retries: 30
+  delay: 10
+  failed_when: false
+
+- name: Delete NetworkAttachmentDefinition
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    name: virt-agent-l2
+    namespace: "{{ vac_namespace }}"
+  failed_when: false
+
+- name: Delete cluster namespace
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ vac_namespace }}"
+  failed_when: false

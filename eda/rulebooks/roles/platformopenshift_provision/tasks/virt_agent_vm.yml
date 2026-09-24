@@ -1,0 +1,141 @@
+---
+# Create NMStateConfig + blank disk DataVolume + VirtualMachine for one agent host.
+# Expects vac_vm: {name, role, index, cores, memory, disk_gi, ip, mac}
+
+- name: Create NMStateConfig for {{ vac_vm.name }}
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: agent-install.openshift.io/v1beta1
+      kind: NMStateConfig
+      metadata:
+        name: "{{ vac_vm.name }}"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          infraenvs.agent-install.openshift.io: "{{ vac_name }}"
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/agent-role: "{{ vac_vm.role }}"
+      spec:
+        config:
+          interfaces:
+            - name: enp1s0
+              type: ethernet
+              state: up
+              mac-address: "{{ vac_vm.mac }}"
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                  - ip: "{{ vac_vm.ip }}"
+                    prefix-length: 24
+              ipv6:
+                enabled: false
+          # No default route on L2 — egress uses KubeVirt masquerade NIC.
+          dns-resolver:
+            config:
+              server:
+                - "8.8.8.8"
+                - "1.1.1.1"
+        interfaces:
+          - name: "enp1s0"
+            macAddress: "{{ vac_vm.mac }}"
+
+- name: Create blank OS disk DataVolume for {{ vac_vm.name }}
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      metadata:
+        name: "{{ vac_vm.name }}-root"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+        annotations:
+          cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+      spec:
+        source:
+          blank: {}
+        pvc:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: "{{ vac_vm.disk_gi }}Gi"
+          storageClassName: "{{ vac_storage_class }}"
+          volumeMode: Filesystem
+
+- name: Create VirtualMachine {{ vac_vm.name }} (boots discovery ISO)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      metadata:
+        name: "{{ vac_vm.name }}"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: virt
+          hybridsovereign.redhat/agent-role: "{{ vac_vm.role }}"
+          kubevirt.io/domain: "{{ vac_vm.name }}"
+      spec:
+        running: true
+        template:
+          metadata:
+            labels:
+              kubevirt.io/domain: "{{ vac_vm.name }}"
+              hybridsovereign.redhat/agent-role: "{{ vac_vm.role }}"
+          spec:
+            domain:
+              cpu:
+                cores: "{{ vac_vm.cores | int }}"
+              resources:
+                requests:
+                  memory: "{{ vac_vm.memory }}"
+              devices:
+                disks:
+                  - name: discoveryiso
+                    bootOrder: 1
+                    cdrom:
+                      bus: sata
+                  - name: rootdisk
+                    bootOrder: 2
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: agentnet
+                    bridge: {}
+                    macAddress: "{{ vac_vm.mac }}"
+                  - name: default
+                    masquerade: {}
+              machine:
+                type: q35
+            networks:
+              - name: agentnet
+                multus:
+                  networkName: "{{ vac_namespace }}/{{ vac_nad_name }}"
+              - name: default
+                pod: {}
+            volumes:
+              - name: rootdisk
+                dataVolume:
+                  name: "{{ vac_vm.name }}-root"
+              - name: discoveryiso
+                dataVolume:
+                  name: >-
+                    {{
+                      vac_vm.name ~ '-iso'
+                      if (vac_vm_defs | length > 1)
+                      else (vac_name ~ '-discovery-iso')
+                    }}
+            evictionStrategy: None

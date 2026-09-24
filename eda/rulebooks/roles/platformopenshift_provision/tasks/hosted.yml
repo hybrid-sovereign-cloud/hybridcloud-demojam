@@ -1,0 +1,258 @@
+---
+# Hosted PlatformOpenshift — Hypershift Hosted Control Plane (containerized CP)
+# on KubeVirt worker NodePools. Requires CNV + Hypershift (MCE/ACM) on the hub.
+
+- name: Resolve CloudVirt environment name (hosted)
+  ansible.builtin.set_fact:
+    virt_env_name: >-
+      {{
+        (platform_spec['hosted'] | default({}))['environment']
+        | default(platform_spec['cloudRef']
+        | default(''))
+      }}
+
+- name: Fail when CloudVirt environment ref missing
+  ansible.builtin.assert:
+    that:
+      - virt_env_name | length > 0
+    fail_msg: >-
+      PlatformOpenshift {{ platformopenshift_cr_name }} type=hosted
+      needs spec.hosted.environment or spec.cloudRef
+
+- name: Read CloudVirt CR
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudVirt
+    name: "{{ virt_env_name }}"
+    namespace: "{{ platformopenshift_cr_namespace }}"
+  register: virt_cloud_cr
+
+- name: Fail if CloudVirt missing
+  ansible.builtin.assert:
+    that:
+      - virt_cloud_cr.resources | length > 0
+    fail_msg: CloudVirt '{{ virt_env_name }}' not found in {{ platformopenshift_cr_namespace }}
+
+- name: Fail if CloudVirt not ready
+  ansible.builtin.assert:
+    that:
+      - virt_cloud_cr.resources[0].status.ready | default(false) | bool
+    fail_msg: >-
+      CloudVirt '{{ virt_env_name }}' is not ready yet. Wait for environment preparation.
+
+- name: Set HostedCluster facts from CR
+  ansible.builtin.set_fact:
+    hc_name: "{{ platformopenshift_cr_name }}"
+    hc_namespace: "clusters-{{ platformopenshift_cr_name }}"
+    virt_slug: "{{ virt_cloud_cr.resources[0].status.slug | default(virt_env_name[:5]) }}"
+    virt_domain: >-
+      {{
+        virt_cloud_cr.resources[0].status.domain
+        | default(virt_cloud_cr.resources[0].spec.baseDomain | default(''))
+      }}
+    hc_node_replicas: "{{ (platform_spec['hosted'] | default({}))['nodePoolReplicas'] | default(2) }}"
+    hc_worker_cores: 2
+    hc_worker_memory: "8Gi"
+    hc_pull_secret_name: "pullsecret-cluster-{{ platformopenshift_cr_name }}"
+    hc_etcd_storage_class: >-
+      {{
+        virt_cloud_cr.resources[0].spec.storageClass
+        | default('ocs-external-storagecluster-ceph-rbd')
+      }}
+
+- name: Ensure HostedCluster namespace
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ hc_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: hosted
+          hybridsovereign.redhat/entity: "{{ resolved_entity }}"
+
+- name: Read cluster pull-secret for HostedCluster
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Secret
+    name: pull-secret
+    namespace: openshift-config
+  register: hub_pull_secret
+
+- name: Fail if hub pull-secret missing
+  ansible.builtin.assert:
+    that:
+      - hub_pull_secret.resources | length > 0
+    fail_msg: openshift-config/pull-secret is required to create HostedClusters
+
+- name: Create HostedCluster pull secret
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ hc_pull_secret_name }}"
+        namespace: "{{ hc_namespace }}"
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: "{{ hub_pull_secret.resources[0].data['.dockerconfigjson'] }}"
+
+- name: Resolve OCP release image from hub ClusterVersion
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: config.openshift.io/v1
+    kind: ClusterVersion
+    name: version
+  register: hub_cv
+
+- name: Set release image fact
+  ansible.builtin.set_fact:
+    hc_release_image: >-
+      {{
+        (platform_spec['hosted'] | default({}))['releaseImage']
+        | default(hub_cv.resources[0].status.desired.image, true)
+      }}
+
+- name: Resolve NodePort address for HostedCluster API (bare-metal hub)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Node
+    label_selectors:
+      - "node-role.kubernetes.io/worker"
+  register: worker_nodes
+
+- name: Set NodePort publish address
+  ansible.builtin.set_fact:
+    hc_nodeport_address: >-
+      {{
+        (worker_nodes.resources | default([{}]))[0].status.addresses
+        | selectattr('type','equalto','InternalIP')
+        | map(attribute='address')
+        | first
+        | default('10.10.10.30')
+      }}
+
+- name: Create HostedCluster (KubeVirt platform — containerized control plane)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: hypershift.openshift.io/v1beta1
+      kind: HostedCluster
+      metadata:
+        name: "{{ hc_name }}"
+        namespace: "{{ hc_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: hosted
+      spec:
+        release:
+          image: "{{ hc_release_image }}"
+        networking:
+          clusterNetwork:
+            - cidr: 10.132.0.0/14
+          serviceNetwork:
+            - cidr: 172.31.0.0/16
+          networkType: OVNKubernetes
+        platform:
+          type: KubeVirt
+          kubevirt:
+            baseDomainPassthrough: true
+        pullSecret:
+          name: "{{ hc_pull_secret_name }}"
+        infraID: "{{ hc_name }}"
+        services:
+          - service: APIServer
+            servicePublishingStrategy:
+              type: NodePort
+              nodePort:
+                address: "{{ hc_nodeport_address }}"
+          - service: OAuthServer
+            servicePublishingStrategy:
+              type: Route
+          - service: OIDC
+            servicePublishingStrategy:
+              type: Route
+          - service: Konnectivity
+            servicePublishingStrategy:
+              type: Route
+          - service: Ignition
+            servicePublishingStrategy:
+              type: Route
+        controllerAvailabilityPolicy: SingleReplica
+        infrastructureAvailabilityPolicy: SingleReplica
+        etcd:
+          managementType: Managed
+          managed:
+            storage:
+              type: PersistentVolume
+              persistentVolume:
+                size: 8Gi
+                storageClassName: "{{ hc_etcd_storage_class }}"
+
+- name: Create NodePool for HostedCluster workers
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'nodepool-kubevirt.yaml.j2') | from_yaml }}"
+
+- name: Get current timestamp
+  ansible.builtin.set_fact:
+    event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+    transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: Update PlatformOpenshift status (HostedCluster submitted)
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: platformopenshifts
+    cr_name: "{{ platformopenshift_cr_name }}"
+    cr_namespace: "{{ platformopenshift_cr_namespace }}"
+    cr_status_body:
+      status: ready
+      ready: true
+      phase: provisioning
+      observedGeneration: "{{ platformopenshift_generation }}"
+      lastReconciledAt: "{{ event_time }}"
+      name: "{{ platformopenshift_cr_name }}"
+      namespace: "{{ platformopenshift_cr_namespace }}"
+      entity: "{{ resolved_entity }}"
+      billingId: "{{ resolved_billing_id }}"
+      description: "{{ resolved_description }}"
+      platformType: hosted
+      slug: "{{ virt_slug }}"
+      domain: "{{ virt_domain }}"
+      clusterInstalled: false
+      message: >-
+        HostedCluster {{ hc_name }} (Hypershift containerized CP + KubeVirt workers)
+        created in {{ hc_namespace }}; NodePool replicas={{ hc_node_replicas }}
+      conditions:
+        - type: Available
+          status: "True"
+          lastTransitionTime: "{{ transition_time }}"
+          reason: EDASucceeded
+          message: HostedCluster {{ hc_name }} submitted (HCP, not AgentClusterInstall)

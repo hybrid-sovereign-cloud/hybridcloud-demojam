@@ -1,15 +1,16 @@
 ---
-# Virt / Hosted PlatformOpenshift — Hosted Control Plane on KubeVirt (CNV on hub).
-# Requires OpenShift Virtualization + Hypershift (MCE/ACM) on the management cluster.
+# Virt PlatformOpenshift — standalone OpenShift with control-plane (and workers)
+# running as CNV VirtualMachines, installed via ACM Assisted Installer
+# (AgentClusterInstall + InfraEnv + ClusterDeployment).
+# Distinct from type=hosted (Hypershift containerized control plane).
 
-- name: Resolve CloudVirt environment name
+- name: Resolve CloudVirt environment name (virt)
   ansible.builtin.set_fact:
     virt_env_name: >-
       {{
         (platform_spec['virt'] | default({}))['environment']
-        | default((platform_spec['hosted'] | default({}))['environment']
         | default(platform_spec['cloudRef']
-        | default('')))
+        | default(''))
       }}
 
 - name: Fail when CloudVirt environment ref missing
@@ -17,8 +18,8 @@
     that:
       - virt_env_name | length > 0
     fail_msg: >-
-      PlatformOpenshift {{ platformopenshift_cr_name }} type={{ platform_type }}
-      needs spec.virt.environment, spec.hosted.environment, or spec.cloudRef
+      PlatformOpenshift {{ platformopenshift_cr_name }} type=virt
+      needs spec.virt.environment or spec.cloudRef
 
 - name: Read CloudVirt CR
   kubernetes.core.k8s_info:
@@ -44,32 +45,102 @@
     fail_msg: >-
       CloudVirt '{{ virt_env_name }}' is not ready yet. Wait for environment preparation.
 
-- name: Set HostedCluster facts from CR
+- name: Set virt AgentClusterInstall facts
   ansible.builtin.set_fact:
-    hc_name: "{{ platformopenshift_cr_name }}"
-    hc_namespace: "clusters-{{ platformopenshift_cr_name }}"
+    vac_name: "{{ platformopenshift_cr_name }}"
+    vac_namespace: "{{ platformopenshift_cr_name }}"
     virt_slug: "{{ virt_cloud_cr.resources[0].status.slug | default(virt_env_name[:5]) }}"
     virt_domain: >-
       {{
         virt_cloud_cr.resources[0].status.domain
-        | default(virt_cloud_cr.resources[0].spec.baseDomain | default(''))
+        | default(virt_cloud_cr.resources[0].spec.baseDomain | default('cnv.local'))
       }}
-    hc_node_replicas: >-
-      {{
-        (platform_spec['hosted'] | default({}))['nodePoolReplicas']
-        | default((platform_spec['virt'] | default({}))['workerCount']
-        | default(2))
-      }}
-    hc_worker_cores: "{{ (platform_spec['virt'] | default({}))['workerCores'] | default(2) }}"
-    hc_worker_memory: "{{ (platform_spec['virt'] | default({}))['workerMemory'] | default('8Gi') }}"
-    hc_pull_secret_name: "pullsecret-cluster-{{ platformopenshift_cr_name }}"
-    hc_etcd_storage_class: >-
+    vac_storage_class: >-
       {{
         virt_cloud_cr.resources[0].spec.storageClass
         | default('ocs-external-storagecluster-ceph-rbd')
       }}
+    vac_cp_count: "{{ (platform_spec['virt'] | default({}))['controlPlaneCount'] | default(3) | int }}"
+    vac_worker_count: "{{ (platform_spec['virt'] | default({}))['workerCount'] | default(2) | int }}"
+    vac_cp_memory: "{{ (platform_spec['virt'] | default({}))['controlPlaneMemory'] | default('16Gi') }}"
+    vac_worker_memory: "{{ (platform_spec['virt'] | default({}))['workerMemory'] | default('8Gi') }}"
+    vac_cp_cores: "{{ (platform_spec['virt'] | default({}))['controlPlaneCores'] | default(4) | int }}"
+    vac_worker_cores: "{{ (platform_spec['virt'] | default({}))['workerCores'] | default(2) | int }}"
+    vac_machine_cidr: "192.168.100.0/24"
+    vac_nad_name: "virt-agent-l2"
+    vac_pull_secret_name: "{{ platformopenshift_cr_name }}-pull-secret"
+    vac_ssh_secret_name: "{{ platformopenshift_cr_name }}-ssh-key"
 
-- name: Ensure HostedCluster namespace
+- name: Resolve hub OCP version for ClusterImageSet
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: config.openshift.io/v1
+    kind: ClusterVersion
+    name: version
+  register: hub_cv
+
+- name: Set ClusterImageSet name from hub version
+  ansible.builtin.set_fact:
+    vac_image_set: >-
+      {{
+        'img'
+        ~ (hub_cv.resources[0].status.desired.version | default('4.22.14') | regex_replace('\\+.*$',''))
+        ~ '-x86-64-appsub'
+      }}
+
+- name: Ensure AgentServiceConfig exists (ACM Assisted Installer)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: agent-install.openshift.io/v1beta1
+      kind: AgentServiceConfig
+      metadata:
+        name: agent
+        labels:
+          hybridsovereign.redhat/managed-by: platformopenshift-virt
+      spec:
+        databaseStorage:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: "{{ vac_storage_class }}"
+          resources:
+            requests:
+              storage: 10Gi
+        filesystemStorage:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: "{{ vac_storage_class }}"
+          resources:
+            requests:
+              storage: 20Gi
+        imageStorage:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: "{{ vac_storage_class }}"
+          resources:
+            requests:
+              storage: 50Gi
+
+- name: Wait for assisted-service deployment
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: apps/v1
+    kind: Deployment
+    name: assisted-service
+    namespace: multicluster-engine
+  register: assisted_deploy
+  until: >-
+    assisted_deploy.resources | length > 0 and
+    (assisted_deploy.resources[0].status.readyReplicas | default(0) | int) >= 1
+  retries: 60
+  delay: 10
+  failed_when: false
+
+- name: Ensure cluster namespace for AgentClusterInstall
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -79,12 +150,14 @@
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: "{{ hc_namespace }}"
+        name: "{{ vac_namespace }}"
         labels:
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: virt
           hybridsovereign.redhat/entity: "{{ resolved_entity }}"
+          cluster.open-cluster-management.io/managedCluster: "{{ vac_name }}"
 
-- name: Read cluster pull-secret for HostedCluster
+- name: Read hub pull-secret
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -99,9 +172,9 @@
   ansible.builtin.assert:
     that:
       - hub_pull_secret.resources | length > 0
-    fail_msg: openshift-config/pull-secret is required to create HostedClusters
+    fail_msg: openshift-config/pull-secret is required for AgentClusterInstall
 
-- name: Create HostedCluster pull secret
+- name: Create cluster pull secret
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -111,122 +184,404 @@
       apiVersion: v1
       kind: Secret
       metadata:
-        name: "{{ hc_pull_secret_name }}"
-        namespace: "{{ hc_namespace }}"
+        name: "{{ vac_pull_secret_name }}"
+        namespace: "{{ vac_namespace }}"
       type: kubernetes.io/dockerconfigjson
       data:
         .dockerconfigjson: "{{ hub_pull_secret.resources[0].data['.dockerconfigjson'] }}"
 
-- name: Resolve OCP release image from hub ClusterVersion
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: config.openshift.io/v1
-    kind: ClusterVersion
-    name: version
-  register: hub_cv
-
-- name: Set release image fact
-  ansible.builtin.set_fact:
-    hc_release_image: "{{ hub_cv.resources[0].status.desired.image }}"
-
-- name: Resolve NodePort address for HostedCluster API (bare-metal hub)
+- name: Check for existing SSH key secret
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     api_version: v1
-    kind: Node
-    label_selectors:
-      - "node-role.kubernetes.io/worker"
-  register: worker_nodes
+    kind: Secret
+    name: "{{ vac_ssh_secret_name }}"
+    namespace: "{{ vac_namespace }}"
+  register: vac_ssh_existing
 
-- name: Set NodePort publish address
+- name: Generate SSH keypair for agent install
+  when: vac_ssh_existing.resources | length == 0
+  block:
+    - name: Create temporary SSH key directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -vac-ssh
+      register: vac_ssh_tmpdir
+
+    - name: Generate ed25519 key
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - "-t"
+          - ed25519
+          - "-N"
+          - ""
+          - "-f"
+          - "{{ vac_ssh_tmpdir.path }}/id_ed25519"
+          - "-C"
+          - "platformopenshift-{{ vac_name }}"
+      changed_when: true
+
+    - name: Read generated keys
+      ansible.builtin.set_fact:
+        vac_ssh_private: "{{ lookup('file', vac_ssh_tmpdir.path ~ '/id_ed25519') }}"
+        vac_ssh_public: "{{ lookup('file', vac_ssh_tmpdir.path ~ '/id_ed25519.pub') | trim }}"
+      no_log: true
+
+    - name: Store SSH key secret
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ vac_ssh_secret_name }}"
+            namespace: "{{ vac_namespace }}"
+          type: Opaque
+          stringData:
+            ssh-privatekey: "{{ vac_ssh_private }}"
+            ssh-publickey: "{{ vac_ssh_public }}"
+      no_log: true
+
+    - name: Cleanup temp SSH dir
+      ansible.builtin.file:
+        path: "{{ vac_ssh_tmpdir.path }}"
+        state: absent
+
+- name: Load SSH public key from secret
+  when: vac_ssh_existing.resources | length > 0
   ansible.builtin.set_fact:
-    hc_nodeport_address: >-
-      {{
-        (worker_nodes.resources | default([{}]))[0].status.addresses
-        | selectattr('type','equalto','InternalIP')
-        | map(attribute='address')
-        | first
-        | default('10.10.10.30')
-      }}
+    vac_ssh_public: "{{ vac_ssh_existing.resources[0].data['ssh-publickey'] | b64decode | trim }}"
+  no_log: true
 
-- name: Create HostedCluster (KubeVirt platform)
+- name: Ensure ssh public fact when freshly generated
+  when: vac_ssh_public is not defined
+  block:
+    - name: Re-read SSH secret after create
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ vac_ssh_secret_name }}"
+        namespace: "{{ vac_namespace }}"
+      register: vac_ssh_reread
+
+    - name: Set ssh public from re-read
+      ansible.builtin.set_fact:
+        vac_ssh_public: "{{ vac_ssh_reread.resources[0].data['ssh-publickey'] | b64decode | trim }}"
+      no_log: true
+
+- name: Create OVN layer2 NetworkAttachmentDefinition for agent VMs
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     state: present
     definition:
-      apiVersion: hypershift.openshift.io/v1beta1
-      kind: HostedCluster
+      apiVersion: k8s.cni.cncf.io/v1
+      kind: NetworkAttachmentDefinition
       metadata:
-        name: "{{ hc_name }}"
-        namespace: "{{ hc_namespace }}"
+        name: "{{ vac_nad_name }}"
+        namespace: "{{ vac_namespace }}"
         labels:
           hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
-          hybridsovereign.redhat/platform-type: "{{ platform_type }}"
       spec:
-        release:
-          image: "{{ hc_release_image }}"
-        networking:
-          clusterNetwork:
-            - cidr: 10.132.0.0/14
-          serviceNetwork:
-            - cidr: 172.31.0.0/16
-          networkType: OVNKubernetes
-        platform:
-          type: KubeVirt
-          kubevirt:
-            baseDomainPassthrough: true
-        pullSecret:
-          name: "{{ hc_pull_secret_name }}"
-        infraID: "{{ hc_name }}"
-        services:
-          - service: APIServer
-            servicePublishingStrategy:
-              type: NodePort
-              nodePort:
-                address: "{{ hc_nodeport_address }}"
-          - service: OAuthServer
-            servicePublishingStrategy:
-              type: Route
-          - service: OIDC
-            servicePublishingStrategy:
-              type: Route
-          - service: Konnectivity
-            servicePublishingStrategy:
-              type: Route
-          - service: Ignition
-            servicePublishingStrategy:
-              type: Route
-        controllerAvailabilityPolicy: SingleReplica
-        infrastructureAvailabilityPolicy: SingleReplica
-        etcd:
-          managementType: Managed
-          managed:
-            storage:
-              type: PersistentVolume
-              persistentVolume:
-                size: 8Gi
-                storageClassName: "{{ hc_etcd_storage_class }}"
+        config: |
+          {
+            "cniVersion": "0.3.1",
+            "name": "{{ vac_nad_name }}",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+            "netAttachDefName": "{{ vac_namespace }}/{{ vac_nad_name }}",
+            "subnets": "{{ vac_machine_cidr }}"
+          }
 
-- name: Create NodePool for HostedCluster workers
+- name: Create ManagedCluster for ACM import
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
     state: present
-    definition: "{{ lookup('template', 'nodepool-kubevirt.yaml.j2') | from_yaml }}"
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1
+      kind: ManagedCluster
+      metadata:
+        name: "{{ vac_name }}"
+        labels:
+          cloud: Agent
+          vendor: OpenShift
+          name: "{{ vac_name }}"
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: virt
+          cluster.open-cluster-management.io/clusterset: default
+      spec:
+        hubAcceptsClient: true
+
+- name: Create ClusterDeployment (agentBareMetal → AgentClusterInstall)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: hive.openshift.io/v1
+      kind: ClusterDeployment
+      metadata:
+        name: "{{ vac_name }}"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          cloud: Agent
+          vendor: OpenShift
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: virt
+      spec:
+        baseDomain: "{{ virt_domain }}"
+        clusterName: "{{ vac_name }}"
+        installed: false
+        installAttemptsLimit: 3
+        clusterInstallRef:
+          group: extensions.hive.openshift.io
+          kind: AgentClusterInstall
+          name: "{{ vac_name }}"
+          version: v1beta1
+        platform:
+          agentBareMetal:
+            agentSelector:
+              matchLabels:
+                infraenvs.agent-install.openshift.io: "{{ vac_name }}"
+        pullSecretRef:
+          name: "{{ vac_pull_secret_name }}"
+
+- name: Create AgentClusterInstall (VM control plane via Assisted Installer)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: extensions.hive.openshift.io/v1beta1
+      kind: AgentClusterInstall
+      metadata:
+        name: "{{ vac_name }}"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          hybridsovereign.redhat/platform-type: virt
+        annotations:
+          agent-install.openshift.io/install-config-overrides: '{"platform":{"none":{}}}'
+      spec:
+        clusterDeploymentRef:
+          name: "{{ vac_name }}"
+        imageSetRef:
+          name: "{{ vac_image_set }}"
+        platformType: None
+        sshPublicKey: "{{ vac_ssh_public }}"
+        networking:
+          networkType: OVNKubernetes
+          userManagedNetworking: true
+          clusterNetwork:
+            - cidr: 10.128.0.0/14
+              hostPrefix: 23
+          serviceNetwork:
+            - 172.30.0.0/16
+          machineNetwork:
+            - cidr: "{{ vac_machine_cidr }}"
+        provisionRequirements:
+          controlPlaneAgents: "{{ vac_cp_count | int }}"
+          workerAgents: "{{ vac_worker_count | int }}"
+
+- name: Create InfraEnv (discovery ISO for CNV VMs)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: agent-install.openshift.io/v1beta1
+      kind: InfraEnv
+      metadata:
+        name: "{{ vac_name }}"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+          agentclusterinstalls.extensions.hive.openshift.io/location: "{{ vac_name }}"
+      spec:
+        clusterRef:
+          name: "{{ vac_name }}"
+          namespace: "{{ vac_namespace }}"
+        agentLabels:
+          infraenvs.agent-install.openshift.io: "{{ vac_name }}"
+          agentclusterinstalls.extensions.hive.openshift.io/location: "{{ vac_name }}"
+        cpuArchitecture: x86_64
+        pullSecretRef:
+          name: "{{ vac_pull_secret_name }}"
+        sshAuthorizedKey: "{{ vac_ssh_public }}"
+        nmStateConfigLabelSelector:
+          matchLabels:
+            infraenvs.agent-install.openshift.io: "{{ vac_name }}"
+
+- name: Wait for InfraEnv ISO download URL
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: agent-install.openshift.io/v1beta1
+    kind: InfraEnv
+    name: "{{ vac_name }}"
+    namespace: "{{ vac_namespace }}"
+  register: vac_infraenv
+  until: >-
+    vac_infraenv.resources | length > 0 and
+    (vac_infraenv.resources[0].status.isoDownloadURL | default('') | length) > 0
+  retries: 90
+  delay: 10
+
+- name: Set ISO URL fact
+  ansible.builtin.set_fact:
+    vac_iso_url: "{{ vac_infraenv.resources[0].status.isoDownloadURL }}"
+
+- name: Build agent VM descriptors via python
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, hashlib
+        name = "{{ vac_name }}"
+        h = hashlib.md5(name.encode()).hexdigest()
+        cp_n = int("{{ vac_cp_count }}")
+        w_n = int("{{ vac_worker_count }}")
+        cp_cores = int("{{ vac_cp_cores }}")
+        w_cores = int("{{ vac_worker_cores }}")
+        cp_mem = "{{ vac_cp_memory }}"
+        w_mem = "{{ vac_worker_memory }}"
+        defs = []
+        for i in range(cp_n):
+            defs.append({
+                "name": f"{name}-cp-{i}",
+                "role": "master",
+                "index": i,
+                "cores": cp_cores,
+                "memory": cp_mem,
+                "disk_gi": 100,
+                "ip": f"192.168.100.{10 + i}",
+                "mac": f"02:00:{h[0:2]}:{h[2:4]}:c{i:01x}:{i:02x}",
+            })
+        for i in range(w_n):
+            defs.append({
+                "name": f"{name}-w-{i}",
+                "role": "worker",
+                "index": i,
+                "cores": w_cores,
+                "memory": w_mem,
+                "disk_gi": 80,
+                "ip": f"192.168.100.{50 + i}",
+                "mac": f"02:00:{h[0:2]}:{h[2:4]}:d{i:01x}:{i:02x}",
+            })
+        print(json.dumps(defs))
+  register: vac_vm_defs_cmd
+  changed_when: false
+
+- name: Set vac_vm_defs fact
+  ansible.builtin.set_fact:
+    vac_vm_defs: "{{ vac_vm_defs_cmd.stdout | from_json }}"
+
+- name: Create discovery ISO DataVolume (RWO — one VM boots; others use clone if needed)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      metadata:
+        name: "{{ vac_name }}-discovery-iso"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+        annotations:
+          cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+      spec:
+        source:
+          http:
+            url: "{{ vac_iso_url }}"
+        pvc:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 5Gi
+          storageClassName: "{{ vac_storage_class }}"
+          volumeMode: Filesystem
+
+- name: Wait for discovery ISO DataVolume Succeeded
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: cdi.kubevirt.io/v1beta1
+    kind: DataVolume
+    name: "{{ vac_name }}-discovery-iso"
+    namespace: "{{ vac_namespace }}"
+  register: vac_iso_dv_status
+  until: >-
+    vac_iso_dv_status.resources | length > 0 and
+    (vac_iso_dv_status.resources[0].status.phase | default('')) == 'Succeeded'
+  retries: 120
+  delay: 15
+
+- name: Create per-VM discovery ISO clone DataVolumes
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      metadata:
+        name: "{{ item.name }}-iso"
+        namespace: "{{ vac_namespace }}"
+        labels:
+          hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+        annotations:
+          cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+      spec:
+        source:
+          pvc:
+            namespace: "{{ vac_namespace }}"
+            name: "{{ vac_name }}-discovery-iso"
+        pvc:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 5Gi
+          storageClassName: "{{ vac_storage_class }}"
+          volumeMode: Filesystem
+  loop: "{{ vac_vm_defs }}"
+  when: vac_vm_defs | length > 1
+
+- name: Create NMStateConfig + VirtualMachine per agent
+  ansible.builtin.include_tasks: virt_agent_vm.yml
+  loop: "{{ vac_vm_defs }}"
+  loop_control:
+    loop_var: vac_vm
 
 - name: Get current timestamp
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
     transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
-- name: Update PlatformOpenshift status (HostedCluster submitted)
+- name: Update PlatformOpenshift status (AgentClusterInstall submitted)
   ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
   vars:
     cr_api_version: hybridsovereign.redhat/v1alpha1
@@ -244,16 +599,17 @@
       entity: "{{ resolved_entity }}"
       billingId: "{{ resolved_billing_id }}"
       description: "{{ resolved_description }}"
-      platformType: "{{ platform_type }}"
+      platformType: virt
       slug: "{{ virt_slug }}"
       domain: "{{ virt_domain }}"
       clusterInstalled: false
       message: >-
-        HostedCluster {{ hc_name }} (KubeVirt) created in {{ hc_namespace }};
-        NodePool replicas={{ hc_node_replicas }}
+        AgentClusterInstall {{ vac_name }} submitted (ACM Assisted);
+        controlPlaneAgents={{ vac_cp_count }} workerAgents={{ vac_worker_count }}
+        as CNV VirtualMachines (VM-based control plane, not HCP)
       conditions:
         - type: Available
           status: "True"
           lastTransitionTime: "{{ transition_time }}"
           reason: EDASucceeded
-          message: HostedCluster {{ hc_name }} submitted on hub CNV/Hypershift
+          message: AgentClusterInstall + {{ vac_vm_defs | length }} CNV VMs created

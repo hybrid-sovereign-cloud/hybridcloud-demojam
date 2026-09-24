@@ -70,6 +70,10 @@ CNV adopt ──► CloudVirt local-virt (hs-platform-smoke)
 AAPOrg/QuayOrg/CloudVirt if they raced ahead. Operators for those kinds use
 `reconcilePeriod: 120s` so failed AAP jobs are relaunched without manual annotate.
 AAP playbooks wait for configs and CloudVirt reads `event_payload.regarding`.
+
+PlatformOpenshift types on CloudVirt:
+- `type: hosted` → Hypershift HostedCluster (containerized control plane) + KubeVirt NodePool
+- `type: virt` → ACM AgentClusterInstall + InfraEnv; control plane (and workers) as CNV VMs
 ```
 
 ## Platform configs (ZTP prerequisite)
