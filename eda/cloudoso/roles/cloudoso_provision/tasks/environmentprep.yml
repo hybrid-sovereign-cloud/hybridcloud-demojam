@@ -13,13 +13,12 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
-    # When credentialsSecretRef is set, reuse the clouds.yaml project (no Keystone admin).
-    ep_reuse_existing_project: "{{ (oso_spec.credentialsSecretRef.name | default('') | length) > 0 }}"
-    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)) }}"
+    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('lab.signal9.gg', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)) }}"
     ep_parent_zone_id: >-
       {{ oso_spec.designateZoneId | default('')
-         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true)) == (lookup('env', 'BASE_DOMAIN') | default('', true)))
+         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('lab.signal9.gg', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
          else '' }}
+    ep_reuse_existing_project: "{{ ((oso_spec.credentialsSecretRef | default({})).name | default('') | length) > 0 }}"
 
 - name: Load OpenStack clouds.yaml from entity-namespace Secret
   when: ep_credentials_secret_name | length > 0
@@ -122,7 +121,7 @@
 - name: Derive domain names
   ansible.builtin.set_fact:
     ep_cluster_domain: >-
-      {{ (cloudoso_cr_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
+      {{ (cloudoso_cr_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
          if (use_designate_dns | default(false) | bool)
          else (ep_slug ~ '.' ~ ep_base_domain) }}
 
