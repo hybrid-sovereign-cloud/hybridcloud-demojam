@@ -73,6 +73,28 @@
     - not is_delete | bool
     - cur_observed | int == hs_generation | int
     - cur_phase in ['ready', 'provisioned']
+    - not (
+        ((hs_live.resources | default([{}]))[0].metadata.annotations | default({}))
+        .get('ansible.sdk.operatorframework.io/reconcileNow', '') | string | length > 0
+      )
+
+- name: Clear reconcileNow annotation when present
+  when: >-
+    (
+      ((hs_live.resources | default([{}]))[0].metadata.annotations | default({}))
+      .get('ansible.sdk.operatorframework.io/reconcileNow', '') | string | length > 0
+    )
+  kubernetes.core.k8s:
+    state: patched
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+    definition:
+      metadata:
+        annotations:
+          ansible.sdk.operatorframework.io/reconcileNow: null
+  failed_when: false
 
 - name: Include AAP API tasks
   ansible.builtin.include_tasks: aap_job.yml

@@ -22,7 +22,7 @@ metadata:
     hybridsovereign.redhat/platform-smoke: "true"
 rules:
   - apiGroups: ["hybridsovereign.redhat"]
-    resources: ["rbacconfigs", "aapconfigs", "quayconfigs", "aaporgs", "quayorgs"]
+    resources: ["rbacconfigs", "aapconfigs", "quayconfigs", "aaporgs", "quayorgs", "cloudvirts"]
     verbs: ["get", "list", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -93,31 +93,37 @@ spec:
                 || { echo "FATAL: QuayConfig not ready" >&2; exit 1; }
 
               requeue() {
-                local kind="$1" name="$2"
+                local kind="$1" name="$2" ns="$3"
                 local ready status
-                ready=$(oc get "$kind" "$name" -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
-                status=$(oc get "$kind" "$name" -n "$ENT" -o jsonpath='{.status.status}' 2>/dev/null || echo "")
+                ready=$(oc get "$kind" "$name" -n "$ns" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                status=$(oc get "$kind" "$name" -n "$ns" -o jsonpath='{.status.status}' 2>/dev/null || echo "")
                 echo "  $kind/$name ready=$ready status=$status"
                 if [ "$ready" != "true" ]; then
-                  echo "  force reconcileNow on $kind/$name"
-                  oc annotate "$kind" "$name" -n "$ENT" \
-                    ansible.sdk.operatorframework.io/reconcileNow=true --overwrite >/dev/null
+                  # Unique value each pass — constant "true" does not bump resourceVersion
+                  # and will not re-trigger the ansible-operator reconcile loop.
+                  local token
+                  token="$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
+                  echo "  force reconcileNow=$token on $kind/$name"
+                  oc annotate "$kind" "$name" -n "$ns" \
+                    "ansible.sdk.operatorframework.io/reconcileNow=${token}" --overwrite >/dev/null
                 fi
               }
 
-              echo "ZTP smoke PostSync: requeue tool orgs if needed..."
+              echo "ZTP smoke PostSync: requeue tool orgs / CloudVirt if needed..."
               for i in $(seq 1 60); do
-                requeue aaporg acme-automation
-                requeue quayorg acme-registry
+                requeue aaporg acme-automation "$ENT"
+                requeue quayorg acme-registry "$ENT"
+                requeue cloudvirt local-virt "$ENT"
                 AO=$(oc get aaporg acme-automation -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
                 QO=$(oc get quayorg acme-registry -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
-                echo "  [$i] aapOrg=$AO quayOrg=$QO"
-                if [ "$AO" = "true" ] && [ "$QO" = "true" ]; then
-                  echo "ZTP smoke PostSync: AAPOrg + QuayOrg ready"
+                CV=$(oc get cloudvirt local-virt -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
+                echo "  [$i] aapOrg=$AO quayOrg=$QO cloudVirt=$CV"
+                if [ "$AO" = "true" ] && [ "$QO" = "true" ] && [ "$CV" = "true" ]; then
+                  echo "ZTP smoke PostSync: AAPOrg + QuayOrg + CloudVirt ready"
                   exit 0
                 fi
                 sleep 20
               done
-              echo "FATAL: tool orgs not ready within timeout" >&2
-              oc get aaporg,quayorg -n "$ENT" -o wide >&2 || true
+              echo "FATAL: smoke tool CRs not ready within timeout" >&2
+              oc get aaporg,quayorg,cloudvirt -n "$ENT" -o wide >&2 || true
               exit 1
