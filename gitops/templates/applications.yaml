@@ -273,10 +273,34 @@ spec:
     path: gitops/infrastructure/ingress
   destination:
     server: {{ $server | quote }}
-    namespace: openshift-gitops
+    namespace: openshift-ingress-operator
+  ignoreDifferences:
+    - group: operator.openshift.io
+      kind: IngressController
+      name: default
+      jqPathExpressions:
+        - .status
+        - .metadata.annotations
+        - .metadata.labels
+        - .metadata.managedFields
+        - .spec.clientTLS
+        - .spec.closedClientConnectionPolicy
+        - .spec.defaultCertificate
+        - .spec.domain
+        - .spec.endpointPublishingStrategy
+        - .spec.httpCompression
+        - .spec.httpEmptyRequestsPolicy
+        - .spec.httpErrorCodePages
+        - .spec.idleConnectionTerminationPolicy
+        - .spec.namespaceSelector
+        - .spec.nodePlacement
+        - .spec.replicas
+        - .spec.routeSelector
+        - .spec.tuningOptions
+        - .spec.unsupportedConfigOverrides
   syncPolicy:
     automated:
-      prune: true
+      prune: false
       selfHeal: true
       allowEmpty: false
     syncOptions:
