@@ -1,43 +1,74 @@
 ---
-- name: Create temporary ExternalSecret for OpenStack admin credentials (designate)
-  kubernetes.core.k8s:
-    host: "{{ central_api_host }}"
-    api_key: "{{ central_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
+- name: Load Designate credentials from CloudOSO Secret
+  when: (designate_credentials_secret_name | default('') | length) > 0
+  block:
+    - name: Read CloudOSO credentials Secret for Designate
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ designate_credentials_secret_name }}"
+        namespace: "{{ designate_credentials_secret_namespace }}"
+      register: designate_entity_secret
+      until: >-
+        designate_entity_secret.resources | length > 0 and
+        designate_entity_secret.resources[0].data is defined and
+        designate_entity_secret.resources[0].data['clouds.yaml'] is defined
+      retries: 12
+      delay: 5
+
+    - name: Expose entity Secret for Designate
+      ansible.builtin.set_fact:
+        designate_creds_secret: "{{ designate_entity_secret }}"
+
+- name: Load Designate credentials from Vault via ExternalSecret
+  when: (designate_credentials_secret_name | default('') | length) == 0
+  block:
+    - name: Create temporary ExternalSecret for OpenStack admin credentials (designate)
+      kubernetes.core.k8s:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: external-secrets.io/v1
+          kind: ExternalSecret
+          metadata:
+            name: "eda-po-{{ cb_cluster_name }}-designate-creds"
+            namespace: "{{ eda_central_work_namespace }}"
+          spec:
+            refreshInterval: 1m
+            secretStoreRef:
+              name: vault-backend
+              kind: ClusterSecretStore
+            target:
+              name: "eda-po-{{ cb_cluster_name }}-designate-creds"
+              creationPolicy: Owner
+            data:
+              - secretKey: clouds.yaml
+                remoteRef:
+                  key: "{{ designate_admin_vault_path }}"
+                  property: clouds.yaml
+
+    - name: Wait for OpenStack admin credentials (designate)
+      kubernetes.core.k8s_info:
+        host: "{{ central_api_host }}"
+        api_key: "{{ central_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
         name: "eda-po-{{ cb_cluster_name }}-designate-creds"
         namespace: "{{ eda_central_work_namespace }}"
-      spec:
-        refreshInterval: 1m
-        secretStoreRef:
-          name: vault-backend
-          kind: ClusterSecretStore
-        target:
-          name: "eda-po-{{ cb_cluster_name }}-designate-creds"
-          creationPolicy: Owner
-        data:
-          - secretKey: clouds.yaml
-            remoteRef:
-              key: "{{ designate_admin_vault_path }}"
-              property: clouds.yaml
+      register: designate_vault_secret
+      until: designate_vault_secret.resources | length > 0
+      retries: 30
+      delay: 10
 
-- name: Wait for OpenStack admin credentials (designate)
-  kubernetes.core.k8s_info:
-    host: "{{ central_api_host }}"
-    api_key: "{{ central_bearer_token }}"
-    validate_certs: false
-    api_version: v1
-    kind: Secret
-    name: "eda-po-{{ cb_cluster_name }}-designate-creds"
-    namespace: "{{ eda_central_work_namespace }}"
-  register: designate_creds_secret
-  until: designate_creds_secret.resources | length > 0
-  retries: 30
-  delay: 10
+    - name: Expose Vault Secret for Designate
+      ansible.builtin.set_fact:
+        designate_creds_secret: "{{ designate_vault_secret }}"
 
 - name: Write clouds.yaml for designate
   ansible.builtin.copy:
@@ -75,9 +106,10 @@
         auth=auth,
         region_name=cloud_cfg.get('region_name', 'regionOne'),
         identity_api_version='3')
-    zone = conn.dns.find_zone('{{ lookup('env', 'BASE_DOMAIN') | default('', true) }}.')
+    zone_name = '{{ BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true) }}.'
+    zone = conn.dns.find_zone(zone_name)
     if zone is None:
-        raise SystemExit('Designate zone {{ lookup('env', 'BASE_DOMAIN') | default('', true) }} not found')
+        raise SystemExit(f'Designate zone {zone_name} not found')
     records = [
         ('api.{{ cb_cluster_name }}.{{ cb_cluster_domain }}.', '{{ cb_api_vip }}'),
         ('*.apps.{{ cb_cluster_name }}.{{ cb_cluster_domain }}.', '{{ cb_ingress_vip }}'),
@@ -99,6 +131,7 @@
   changed_when: true
 
 - name: Remove temporary designate credentials secret
+  when: (designate_credentials_secret_name | default('') | length) == 0
   kubernetes.core.k8s:
     host: "{{ central_api_host }}"
     api_key: "{{ central_bearer_token }}"

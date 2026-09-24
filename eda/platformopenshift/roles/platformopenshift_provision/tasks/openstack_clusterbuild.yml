@@ -11,7 +11,7 @@
     cb_app_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_domain: >-
-      {{ (oso_env_name ~ '.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true)))
+      {{ (oso_env_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
     cb_image_set: "{{ platform_spec.openstack.ocpImageSet | default(default_ocp_image_set) }}"
@@ -250,7 +250,7 @@
 
 - name: Write install-config to Vault
   ansible.builtin.uri:
-    url: "{{ vault_init_addr }}/v1/central/data/{{ cb_install_config_vault }}"
+    url: "{{ vault_init_addr }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ cb_install_config_vault }}"
     method: POST
     headers:
       X-Vault-Token: "{{ vault_root_token }}"

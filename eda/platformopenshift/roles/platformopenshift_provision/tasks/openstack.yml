@@ -49,6 +49,8 @@
     designate_project_name: "{{ cloudoso_cr.resources[0].status.projectName | default('') }}"
     designate_admin_vault_path: "{{ cloudoso_cr.resources[0].spec.vaultPath | default('oso/accounts/shc_admin') }}"
     designate_dns_project_name: "{{ cloudoso_cr.resources[0].spec.designateDnsProject | default('lab-project') }}"
+    designate_credentials_secret_name: "{{ (cloudoso_cr.resources[0].spec.credentialsSecretRef | default({})).name | default('') }}"
+    designate_credentials_secret_namespace: "{{ ansible_operator_meta.namespace }}"
 
 - name: Set cluster build identifiers
   ansible.builtin.set_fact:
