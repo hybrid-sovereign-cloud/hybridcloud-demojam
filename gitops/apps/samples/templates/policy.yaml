@@ -9,8 +9,12 @@ data:
   parked: |
     OpenStackMigration — YAML retained in repo samples/; not applied this pass.
   unparked: |
-    CloudAWS, CloudOSO, CloudVirt, PlatformOpenshift (openstack|aws|virt|hosted) —
-    applied via hs-samples after Step 0 secrets + PushSecrets to Vault.
+    CloudAWS, CloudOSO, PlatformOpenshift (openstack|aws|virt|hosted) —
+    applied via hs-samples (seed-once: no selfHeal / no prune).
+    CloudVirt local-virt is base ZTP (hs-platform-smoke), not a sample.
   status: |
     Cloud environment + four PlatformOpenshift samples live under
     templates/cloud-environments.yaml and templates/platformopenshift-four.yaml.
+  reconcile: |
+    hs-samples: automated prune=false selfHeal=false — UI deletes of sample CRs
+    are not restored by ArgoCD.

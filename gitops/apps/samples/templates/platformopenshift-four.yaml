@@ -1,5 +1,5 @@
 # Four PlatformOpenshift samples: openstack | aws | virt | hosted.
-# Environments reference unparked Cloud* CRs in the same entity namespace.
+# virt/hosted environments reference always-on CloudVirt local-virt (hs-platform-smoke).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
@@ -58,7 +58,7 @@ metadata:
 spec:
   type: virt
   virt:
-    environment: workshop-virt
+    environment: local-virt
   toolRbac:
     clusterAdminRbac:
       - acme-platform-admins
@@ -80,7 +80,7 @@ metadata:
 spec:
   type: hosted
   hosted:
-    environment: workshop-virt
+    environment: local-virt
     nodePoolReplicas: 2
   toolRbac:
     clusterAdminRbac:

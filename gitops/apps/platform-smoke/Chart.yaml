@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hs-platform-smoke
-description: Always-on ACME Entity + dummy Rbac/AAPOrg/QuayOrg CRs to validate platform configs
+description: Always-on ACME Entity + local CloudVirt + dummy Rbac/AAPOrg/QuayOrg CRs
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "0.1.0"

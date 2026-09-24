@@ -32,9 +32,9 @@ provision:
   builds: true
   operators: true
   platformConfigs: true  # ZTP prereq — RbacConfig / AAPConfig / QuayConfig (default on)
-  platformSmoke: true    # always-on ACME Entity + dummy AAP/Quay/Rbac CRs
+  platformSmoke: true    # always-on ACME Entity + local CloudVirt + dummy tool CRs
   ui: true
-  samples: false  # disabled — do not install workshop sample CRs via ArgoCD
+  samples: true  # seed workshop sample CRs once (no selfHeal — UI deletes stay deleted)
   aapConfig: true  # JobTemplates / org config only (not AAP instance)
 
 # Hard bans
@@ -51,7 +51,7 @@ samples:
     - CloudOSO
     - PlatformOpenshift
     - OpenStackMigration
-
+  # CloudVirt is NOT a sample — always-on via platform-smoke (local-virt)
 # Non-secret URLs (optional overrides from field-content)
 deployer:
   domain: ""

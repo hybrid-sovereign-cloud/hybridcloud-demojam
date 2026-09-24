@@ -46,9 +46,9 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 | 38 | `hs-crds` | hybridsovereign CRDs only | — |
 | 40 | `hs-operators` | Operator Deployments + image-wait | CRDs + operator image |
 | 42 | `hs-platform-configs` | **ZTP prerequisite:** RbacConfig + AAPConfig + QuayConfig | Operators + AAP JTs + RHBK/AAP/Quay secrets |
-| 46 | `hs-platform-smoke` | Always-on ACME Entity + dummy tool CRs | Platform configs ready |
+| 46 | `hs-platform-smoke` | Always-on ACME Entity + **local CloudVirt** + dummy tool CRs | Platform configs ready; CNV adopted |
 | 50 | `hs-ui` | Dashboards + plugins + OAuth | UI ImageStreams |
-| 60 | `hs-samples` | Demo CRs (default off) | CRDs + operators Healthy |
+| 60 | `hs-samples` | Workshop sample CRs (**seed-once**: no selfHeal / no prune) | Entity + platform configs |
 
 Parent sync **waits for prior-wave Application health** before creating the next Application CR.
 
@@ -56,13 +56,14 @@ Parent sync **waits for prior-wave Application health** before creating the next
 
 ```
 ESO ──► Vault ──► Security (secrets)
-Builds ──────────────────────► Operators ──► Platform configs (42) ──► Smoke (46)
+Builds ──────────────────────► Operators ──► Platform configs (42) ──► Smoke (46: Entity + local-virt)
                               └────────────────────────────────────► UI
 MCE (24) ──► ACM hub (26)
-CRDs (38) ──► Operators (40) ──► Platform configs (42) ──► Samples (60)
+CRDs (38) ──► Operators (40) ──► Platform configs (42) ──► Samples (60, seed-once)
 AAP baseline ──► hs-aap-config (JTs) ──► Operators launch AAP jobs for configs
 ODF ──► Quay OBC ──► platform-configs Sync hook (plugin secrets)
 RHBK adopt ──► RbacConfig secret (rhbk-services-admin)
+CNV adopt ──► CloudVirt local-virt (hs-platform-smoke)
 ```
 
 ## Platform configs (ZTP prerequisite)
@@ -79,6 +80,21 @@ On every new cluster pointing at `gitops/`, `provision.platformConfigs: true` (d
    past 42 until this succeeds.
 
 Disable only with `provision.platformConfigs: false` (not recommended for production ZTP).
+
+## Local CloudVirt (base ZTP, not a sample)
+
+Every target cluster adopts OpenShift Virtualization (`adopt.cnv: true`). `hs-platform-smoke`
+always applies `CloudVirt/local-virt` in `entity-acme-corp` (with Entity + dummy tool CRs).
+Sample `PlatformOpenshift` virt/hosted types reference `environment: local-virt`.
+
+## Samples (seed-once)
+
+`provision.samples: true` (default) creates `hs-samples` after smoke. Sync policy is
+**prune=false, selfHeal=false** and the Application has **no resources-finalizer**:
+
+- First sync (and later git additions) still apply sample CRs.
+- If a user deletes a sample CR in the UI, ArgoCD does **not** recreate it.
+- Deleting the `hs-samples` Application does **not** cascade-wipe remaining sample CRs.
 ## Known ZTP failure modes (and mitigations)
 
 See `gitops/issues.md` for the live wipe-cycle log (ZTP-001…016).

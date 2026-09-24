@@ -1,7 +1,7 @@
-# Unparked CloudOSO + CloudAWS + CloudVirt sample CRs (GitOps).
+# Unparked CloudOSO + CloudAWS sample CRs (GitOps).
+# CloudVirt local-virt is base ZTP via hs-platform-smoke (not samples).
 # Credentials via vaultPath only (Step 0 → sovereign-secrets → PushSecret → Vault).
 # baseDomain uses non-cluster placeholders (no apps./api. hardcoding).
-# Note: CloudOSO/CloudAWS CRDs do not declare toolRbac yet — omit until CRD extended.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudOSO
@@ -36,26 +36,3 @@ spec:
   account: "929186565356"
   vaultPath: aws/accounts/example-admin
   baseDomain: sandbox356.opentlc.com
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudVirt
-metadata:
-  name: workshop-virt
-  namespace: entity-acme-corp
-  annotations:
-    argocd.argoproj.io/sync-wave: "40"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/sample: "true"
-spec:
-  vaultPath: virt/accounts/example-admin
-  baseDomain: virt.example.com
-  storageClass: ocs-external-storagecluster-ceph-rbd
-  enableVRF: false
-  toolRbac:
-    environmentAdminRbac:
-      - acme-platform-admins
-    environmentPoweruserRbac:
-      - acme-infra-team
-    environmentViewerRbac:
-      - acme-viewers

@@ -1,5 +1,6 @@
-# Sample CloudVirt — workshop virt environment (CNV)
-# Applied via gitops/apps/samples (hs-samples), not manual oc apply.
+# Repo-local sample retained for reference. Live CloudVirt is base ZTP:
+#   gitops/apps/platform-smoke/templates/cloudvirt-local.yaml (name: local-virt)
+# Do not apply this file via Argo samples.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
@@ -9,7 +10,7 @@ metadata:
 spec:
   vaultPath: virt/accounts/example-admin
   baseDomain: virt.example.com
-  storageClass: ocs-storagecluster-ceph-rbd
+  storageClass: ocs-external-storagecluster-ceph-rbd
   enableVRF: false
   toolRbac:
     environmentAdminRbac:

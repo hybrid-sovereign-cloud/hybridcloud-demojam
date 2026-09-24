@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hs-samples
-description: Workshop samples including CloudOSO/AWS/Virt and four PlatformOpenshift types
+description: Workshop samples (seed-once); CloudVirt is base ZTP via platform-smoke
 type: application
-version: 0.1.8
+version: 0.1.9
 appVersion: "0.1.0"
