@@ -479,3 +479,5 @@ Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes
 
 
 | DEV-004 | 2026-09-25 | AAPOrg teardown marks deletionComplete while org remains | Teardown looked up Route `sovereign-aap` (missing); DNS fail ignored; still patched deletionComplete | Resolve URL from admin secret.url or Route `aap`; assert org gone before deletionComplete | 1 (fixing) |
+
+| DEV-005 | 2026-09-25 | QuayOrg teardown marks deletionComplete while org remains | Teardown used unset `quay_url` (relative path), ignored DELETE failure; Argo autosync recreated CR | Use obtain_quay_admin_credentials; assert GET 404 before deletionComplete; re-disable Argo autosync live | 1 (fixing) |

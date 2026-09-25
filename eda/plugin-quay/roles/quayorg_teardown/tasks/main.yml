@@ -29,46 +29,42 @@
       ansible.builtin.set_fact:
         fin_org_name: "{{ (fin_entity_name ~ '-' ~ quayorg_cr_name) if (fin_entity_name | default('') | length > 0) else quayorg_cr_name }}"
 
-    - name: Read QuayConfig
-      kubernetes.core.k8s_info:
-        host: "{{ services_api_host }}"
-        api_key: "{{ services_bearer_token }}"
+    - name: Load Quay admin credentials (CSRF/apptoken or seeded Bearer)
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/obtain_quay_admin_credentials.yml"
+
+    - name: Assert Quay URL and API token available for teardown
+      ansible.builtin.assert:
+        that:
+          - (quay_url | default(quay_admin_url | default('')) | length) > 0
+          - (quay_api_token | default('') | length) > 0
+        fail_msg: >-
+          QuayOrg teardown cannot delete org '{{ fin_org_name }}' without quay_url
+          and a Bearer token (seed token or CSRF apptoken via obtain_quay_admin_credentials).
+
+    - name: Normalize quay_url for teardown
+      ansible.builtin.set_fact:
+        quay_url: "{{ (quay_url | default(quay_admin_url)) | regex_replace('/$', '') }}"
+
+    - name: Delete organization from Quay
+      ansible.builtin.uri:
+        url: "{{ quay_url }}/api/v1/organization/{{ fin_org_name }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ quay_api_token }}"
         validate_certs: false
-        api_version: hybridsovereign.redhat/v1alpha1
-        kind: QuayConfig
-        name: "{{ quayorg_spec.quayConfig }}"
-        namespace: "{{ plugin_quay_config_namespace }}"
-      register: _quay_config
-      ignore_errors: true
+        status_code: [200, 204, 404]
+      register: _quay_org_delete
 
-    - name: Delete Quay org
-      when: _quay_config.resources | default([]) | length > 0
-      block:
-        - name: Read Quay admin secret
-          kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            kind: Secret
-            name: "{{ _quay_config.resources[0].spec.secret }}"
-            namespace: "{{ plugin_quay_config_namespace }}"
-          register: _quay_secret
-          no_log: true
-
-        - name: Decode credentials
-          ansible.builtin.set_fact:
-            quay_api_token: "{{ _quay_secret.resources[0].data.token | b64decode }}"
-          no_log: true
-
-        - name: Delete organization from Quay
-          ansible.builtin.uri:
-            url: "{{ quay_url }}/api/v1/organization/{{ fin_org_name }}"
-            method: DELETE
-            headers:
-              Authorization: "Bearer {{ quay_api_token }}"
-            validate_certs: false
-            status_code: [200, 204, 404]
-      ignore_errors: true
+    - name: Verify Quay organization is gone before deletionComplete
+      ansible.builtin.uri:
+        url: "{{ quay_url }}/api/v1/organization/{{ fin_org_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ quay_api_token }}"
+        validate_certs: false
+        status_code: [404]
+      register: _quay_org_gone
+      failed_when: (_quay_org_gone.status | default(0) | int) != 404
 
     - name: Get current timestamp for status
       ansible.builtin.set_fact:
