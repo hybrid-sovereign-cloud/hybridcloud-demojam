@@ -1,8 +1,22 @@
-# Obsolete documentation
+# Obsolete material
 
-Content moved here is **no longer authoritative**. Active install path is root `README.md` and `docs/gitops-install.md` plus `gitops/`.
+Not part of the active runtime. Kept for archaeology only.
 
-Reasons content lands here:
-- Two-cluster (central/services) topology docs
-- Kafka / AMQ Streams / EDA event-bus guides
-- Imperative `oc apply` / Makefile bootstrap runbooks superseded by Argo → `gitops/`
+## Contents
+
+| Path | What |
+|------|------|
+| `docs/`, `architecture/docs/` | Dual-cluster, Kafka/EDA narratives |
+| `architecture/hardeningcheck/` | Retired hardening checklists |
+| `hardening-checks/` | Retired CIS/NIST checklists |
+| `operator/.../amq_publish*` | Kafka publish helpers |
+
+## Active docs
+
+[`docs/README.md`](../docs/README.md) — single hub, Operators → AAP.
+
+## Do not
+
+- Treat central+services topology as current.
+- Wire Kafka publishers back without a new approved spec.
+- Use hardeningcheck as a live gate.

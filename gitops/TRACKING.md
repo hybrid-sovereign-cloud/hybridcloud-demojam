@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Current phase | ZTP hardening |
+| Current phase | ZTP single-hub GitOps |
 | Status | green |
 | Last green checkpoint | Waves 5→60 Synced/Healthy; Argo 2 shards/8Gi; sovereign-ui Prune=false |
 | Blockers | none |
@@ -30,7 +30,6 @@
 | Next action | Push; full wipe; single field-content sync; monitor-only |
 
 
-
 ### 2026-09-20T03:05:00Z — Phase 0/1 — Agent Alpha+Eta
 
 | Field | Value |
@@ -47,7 +46,7 @@
 
 | Field | Value |
 |-------|-------|
-| Change summary | Moved obsolete two-cluster/Kafka/EDA docs into obsolete/ |
+| Change summary | Moved obsolete single-hub/Kafka/EDA docs into obsolete/ |
 | Paths touched | `obsolete/architecture/**`, `obsolete/specs/**` |
 | Cluster actions | none |
 | Rollback | move files back from obsolete/ |

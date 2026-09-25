@@ -595,10 +595,10 @@ Phased delivery to limit risk:
 | Document | Relevance |
 |----------|-----------|
 | [architecture/docs/12-console-plugins.md](../docs/12-console-plugins.md) | Plugin deployment and nav |
-| [architecture/docs/technical/15-sovereign-dashboard.md](../docs/technical/15-sovereign-dashboard.md) | Global admin scope |
-| [architecture/docs/technical/20-tenancy-dashboard.md](../docs/technical/20-tenancy-dashboard.md) | Tenant admin scope |
-| [architecture/docs/concepts/10-component-interaction-map.md](../docs/concepts/10-component-interaction-map.md) | CR dependency graph |
-| [architecture/docs/technical/006-eda-architecture.md](../docs/technical/006-eda-architecture.md) | Pipeline stages |
+| [architecture/docs/technical.md) | Global admin scope |
+| [architecture/docs/technical.md) | Tenant admin scope |
+| [architecture/docs/concepts.md) | CR dependency graph |
+| [architecture/docs/technical.md) | Pipeline stages |
 | `user_dashboard/plugin/console-extensions.json` | Current global nav |
 | `tenancy_dashboard/plugin/console-extensions.json` | Current tenant nav |
 | `tenancy_dashboard/plugin/src/components/ResourceList.tsx` | List pattern baseline |

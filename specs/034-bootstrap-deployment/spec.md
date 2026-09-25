@@ -8,7 +8,7 @@
 
 ## Description
 
-Phased ArgoCD bootstrap deploying all platform components across central and services clusters with sync-wave ordering and verification gates.
+Phased ArgoCD bootstrap deploying all platform components across hub clusters with sync-wave ordering and verification gates.
 
 ## CRD Schema Summary
 

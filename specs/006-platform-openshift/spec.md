@@ -8,7 +8,7 @@
 
 ## Description
 
-PlatformOpenshift provisions OpenShift clusters on OpenStack (CloudOSO) or AWS (CloudAWS). Creates ClusterBuild CR on central cluster and monitors installation.
+PlatformOpenshift provisions OpenShift clusters on OpenStack (CloudOSO) or AWS (CloudAWS). Creates ClusterBuild CR on hub and monitors installation.
 
 ## CRD Schema Summary
 
@@ -28,7 +28,7 @@ PlatformOpenshift provisions OpenShift clusters on OpenStack (CloudOSO) or AWS (
 
 1. Prerequisite: CloudOSO or CloudAWS status.ready == true
 2. Apply PlatformOpenshift CR
-3. Monitor ClusterBuild on central cluster
+3. Monitor ClusterBuild on hub
 
 ## Testing Guide
 

@@ -16,7 +16,7 @@ N/A — scoped to user's entity namespace via RBAC.
 
 ## Deployment Steps
 
-1. Deploy tenancy-dashboard chart on services cluster
+1. Deploy tenancy-dashboard chart on hub
 
 ## Testing Guide
 

@@ -8,7 +8,7 @@
 
 ## Description
 
-Advanced Cluster Management with GitOpsCluster pull model syncing services cluster applications from central ArgoCD.
+Advanced Cluster Management with GitOpsCluster pull model syncing hub applications from the hub ArgoCD.
 
 ## CRD Schema Summary
 
@@ -23,7 +23,7 @@ GitOpsCluster CR: ArgoCD server ref, managed cluster, placement rules.
 
 ## Deployment Steps
 
-1. Phase A4: Deploy RHACM; import services cluster
+1. Phase A4: Deploy RHACM; import hub
 2. Phase F: Create GitOpsCluster CR
 
 ## Testing Guide

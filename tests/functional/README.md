@@ -1,7 +1,7 @@
 # Functional Tests
 
 **Scope**: Hybrid Sovereign operator CR lifecycle and event propagation  
-**Cluster**: Services cluster (`--context=services-admin`) unless noted  
+**Cluster**: Hub (`--context=hub-admin`) unless noted  
 **Prerequisites**: Mega-Phase C complete; primary + namespace operators Synced/Healthy
 
 ---
@@ -9,7 +9,7 @@
 ## Test Environment Setup
 
 ```bash
-export OC_CONTEXT=services-admin
+export OC_CONTEXT=hub-admin
 export TEST_ENTITY=acme-corp
 export TEST_NAMESPACE=entity-acme-corp
 ```

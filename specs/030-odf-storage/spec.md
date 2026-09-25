@@ -22,7 +22,7 @@ StorageCluster CR: mode, resources, encryption, multiCloudGateway.
 
 ## Deployment Steps
 
-1. Phase A3: Deploy ODF (sync-wave 12) on both clusters
+1. Phase A3: Deploy ODF (sync-wave 12) on the hub
 
 ## Testing Guide
 

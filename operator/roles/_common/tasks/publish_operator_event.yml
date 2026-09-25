@@ -1,17 +1,13 @@
 ---
-- name: Build operator event payload for AMQ Streams
-  ansible.builtin.set_fact:
-    amq_event_payload:
-      reason: "{{ operator_event_reason }}"
-      regarding: "{{ operator_event_regarding }}"
-      note: "{{ operator_event_note | default('') }}"
-      reportingController: "{{ operator_reporting_controller | default('hybridsovereign-operator') }}"
-      action: "{{ operator_event_action | default('Create') }}"
-      cluster: services
-      timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+# Kafka / AMQ Streams are retired. Operators launch AAP JobTemplates directly.
+# Keep this task as a no-op so legacy role includes do not fail.
 
-- name: Publish operator event to AMQ Streams
-  ansible.builtin.include_tasks: amq_publish.yml
+- name: Skip AMQ Streams publish (retired)
+  ansible.builtin.debug:
+    msg: >-
+      AMQ/Kafka publish skipped for {{ operator_event_reason | default('event') }}
+      on {{ operator_event_regarding.kind | default('?') }}/{{ operator_event_regarding.name | default('?') }}.
+      Active path: Ansible Operator → AAP JobTemplate.
 
 - name: Emit optional Kubernetes Event for debugging
   kubernetes.core.k8s:
@@ -21,7 +17,7 @@
       kind: Event
       metadata:
         namespace: "{{ operator_event_regarding.namespace }}"
-        generateName: "{{ operator_event_regarding.kind | lower }}-{{ operator_event_regarding.name }}-eda-"
+        generateName: "{{ operator_event_regarding.kind | lower }}-{{ operator_event_regarding.name }}-op-"
       regarding: "{{ operator_event_regarding }}"
       reason: "{{ operator_event_reason }}"
       note: "{{ operator_event_note | default('') | truncate(1024, True, '…') }}"

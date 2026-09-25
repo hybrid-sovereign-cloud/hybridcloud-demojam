@@ -14,7 +14,6 @@ YAML specs under this directory define repeatable verification steps for Hybrid 
 | `security/` | No secrets in Git, Vault-only creds |
 | `personas/` | Keycloak persona UI/API visibility |
 
-Hardening checklist gates live under `architecture/hardeningcheck/` (not duplicated here yet).
 
 ## Spec format
 
@@ -39,5 +38,5 @@ Prefer reusing roles from `tests/global_tests/` for complex Ansible assertions.
 
 | Alias | Context |
 |-------|---------|
-| `central-admin` | Central management cluster |
-| `services-admin` | Services / tenant CR cluster |
+| `hub-admin` | Central management cluster |
+| `hub-admin` | Services / tenant CR cluster |

@@ -8,7 +8,7 @@
 
 ## Description
 
-Platform Vault HA deployment on central and services clusters with k8s auth, OIDC, KV engines, and ESO ClusterSecretStore integration.
+Platform Vault HA deployment on the hub with k8s auth, OIDC, KV engines, and ESO ClusterSecretStore integration.
 
 ## CRD Schema Summary
 
@@ -18,7 +18,7 @@ Vault Helm: Raft HA, ingress, auto-unseal. Jobs: vaultInit, vaultKv, vaultK8sAut
 
 1. Phase A5: Deploy Vault (sync-wave 15)
 2. Phase A6: vault-init, vault-kv, vault-k8s-auth Jobs
-3. Configure ClusterSecretStore with k8s auth on both clusters
+3. Configure ClusterSecretStore with k8s auth on the hub
 
 ## Testing Guide
 

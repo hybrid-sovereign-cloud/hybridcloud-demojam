@@ -1,5 +1,7 @@
 # Point ArgoCD at gitops/
 
+Full workshop and CR usage: [README.md](README.md) · [workshop/](workshop/).
+
 ## Prerequisites (every cluster)
 
 - OpenShift 4.x

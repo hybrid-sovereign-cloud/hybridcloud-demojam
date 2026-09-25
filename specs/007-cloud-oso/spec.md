@@ -8,7 +8,7 @@
 
 ## Description
 
-CloudOSO provisions an OpenStack project/environment for the entity. Creates OSOHelper type:environmentprep Job on central cluster.
+CloudOSO provisions an OpenStack project/environment for the entity. Creates OSOHelper type:environmentprep Job on hub.
 
 Credentials are supplied either via UI (`clouds.yaml` stored as a namespaced `Secret`, referenced by `spec.credentialsSecretRef`) or via Vault (`spec.vaultPath`). Credentials are never inlined on the CR.
 

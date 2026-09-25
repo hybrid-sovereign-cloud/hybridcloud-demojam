@@ -8,7 +8,7 @@
 
 ## Description
 
-Assignment binds Teams to PlatformOpenshift clusters with scoped RBAC. Creates ACM ManagedClusterSetBinding and cluster-scoped RBAC on central cluster.
+Assignment binds Teams to PlatformOpenshift clusters with scoped RBAC. Creates ACM ManagedClusterSetBinding and cluster-scoped RBAC on hub.
 
 ## CRD Schema Summary
 
@@ -27,17 +27,17 @@ Assignment binds Teams to PlatformOpenshift clusters with scoped RBAC. Creates A
 
 1. Prerequisites: Team, PlatformOpenshift, Rbac CRs exist and ready
 2. Apply Assignment CR to entity namespace
-3. Verify central cluster RBAC and ManagedClusterSetBinding
+3. Verify hub RBAC and ManagedClusterSetBinding
 
 ## Testing Guide
 
 - Apply `samples/assignment/ses12-platform-eng.yaml` after ocp-ses12 is ready
-- Verify ACM binding and cluster role bindings on central
+- Verify ACM binding and cluster role bindings on the hub
 
 ## Security Considerations
 
 - AssignmentAdmin RBAC required to create/modify
-- Central cluster SA token delivered via PushSecret from Vault — never in git
+- Hub SA token delivered via PushSecret from Vault — never in git
 
 ## Related Samples
 

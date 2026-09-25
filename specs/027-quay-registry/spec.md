@@ -8,7 +8,7 @@
 
 ## Description
 
-Red Hat Quay registry on central and services clusters with OIDC and Postgres backend.
+Red Hat Quay registry on the hub with OIDC and Postgres backend.
 
 ## CRD Schema Summary
 

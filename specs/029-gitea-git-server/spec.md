@@ -8,7 +8,7 @@
 
 ## Description
 
-Gitea git server on central cluster for IAAC sync, cluster builds, and tenancy repo.
+Gitea git server on hub for IAAC sync, cluster builds, and tenancy repo.
 
 ## CRD Schema Summary
 

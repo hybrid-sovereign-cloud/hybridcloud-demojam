@@ -8,7 +8,7 @@
 
 ## Description
 
-CloudAWS provisions an AWS account environment for the entity. Creates AWSHelper type:environmentprep Job on central cluster.
+CloudAWS provisions an AWS account environment for the entity. Creates AWSHelper type:environmentprep Job on hub.
 
 Credentials are supplied either via UI (stored as a namespaced `Secret`, referenced by `spec.credentialsSecretRef`) or via Vault (`spec.vaultPath`). Credentials are never inlined on the CR.
 
@@ -32,7 +32,7 @@ Create CloudAWS forms accept AWS access key ID + secret access key. On submit th
 
 ## Deployment Steps
 
-1. Apply CloudAWS CR (with credentialsSecretRef or vaultPath); verify AWSHelper Job on central
+1. Apply CloudAWS CR (with credentialsSecretRef or vaultPath); verify AWSHelper Job on the hub
 
 ## Testing Guide
 

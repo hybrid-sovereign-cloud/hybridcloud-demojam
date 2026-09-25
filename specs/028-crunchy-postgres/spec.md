@@ -22,7 +22,7 @@ PostgresCluster CR: instances, backups, pgBouncer, monitoring.
 
 ## Deployment Steps
 
-1. Phase A2: Deploy PGO (sync-wave 11) on both clusters
+1. Phase A2: Deploy PGO (sync-wave 11) on the hub
 
 ## Testing Guide
 

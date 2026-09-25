@@ -8,7 +8,7 @@
 
 ## Description
 
-Red Hat Advanced Cluster Security central deployment with cluster registration and OIDC integration for both clusters.
+Red Hat Advanced Cluster Security central deployment with cluster registration and OIDC integration for the hub.
 
 ## CRD Schema Summary
 
@@ -20,7 +20,7 @@ ACS Central CR; acs-config Job for cluster registration and OIDC.
 
 ## Testing Guide
 
-- Verify both clusters registered; OIDC login works
+- Verify the hub registered; OIDC login works
 
 ## Security Considerations
 

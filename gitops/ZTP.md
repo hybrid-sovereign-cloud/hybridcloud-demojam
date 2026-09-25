@@ -63,7 +63,7 @@ MCE (24) ──► ACM hub (26)
 CRDs (38) ──► Operators (40) ──► Platform configs (42) ──► Samples (60, seed-once)
 AAP baseline ──► hs-aap-config (JTs) ──► Operators launch AAP jobs for configs
 ODF ──► Quay OBC ──► platform-configs Sync hook (plugin secrets)
-RHBK adopt ──► RbacConfig secret (rhbk-services-admin)
+RHBK adopt ──► RbacConfig secret (rhbk-hub-admin)
 CNV adopt ──► CloudVirt local-virt (hs-platform-smoke)
 ```
 
@@ -145,7 +145,7 @@ Required uncommented exports (names; workshop aliases accepted):
 |---------|----------------|------------------|
 | AWS account | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ACCOUNT_ID` | `AWS_ACCESSKEY`, `AWS_SECRET_KEY`, `AWS_ACCOUNT` |
 | OpenStack | `OSO_CLOUDS` (path to `clouds.yaml` file) | — |
-| Cluster admin seed | `OCP_SERVICES_SERVER`, `OCP_SERVICES_USERNAME`, `OCP_SERVICES_PASSWORD` | — |
+| Cluster admin seed | `OCP_HUB_SERVER`, `OCP_HUB_USERNAME`, `OCP_HUB_PASSWORD` | Legacy: `OCP_SERVICES_*`, `OCP_CENTRAL_*` |
 
 Upload into `sovereign-secrets` (do **not** label `gitops-owned`; wipe preserves these names):
 

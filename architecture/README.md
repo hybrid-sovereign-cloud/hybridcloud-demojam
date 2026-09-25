@@ -1,46 +1,24 @@
 # Hybrid Sovereign Cloud — Architecture
 
-C4-model documentation for the `hybridcloud/` monorepo. Start here, then drill down by level.
+**Day-2 usage:** [`../docs/README.md`](../docs/README.md)
 
-## Documentation map (C4-first)
+## Runtime
 
-| Level | Document | Audience |
-|-------|----------|----------|
-| **L1 Context** | [docs/c4/context.md](docs/c4/context.md) | Everyone — actors, externals, two-cluster topology |
-| **L2 Containers** | [docs/c4/containers.md](docs/c4/containers.md) | Architects / operators — deployable units per cluster |
-| **L3 Components** | [docs/c4/components/](docs/c4/components/) | Engineers — operator, events, IAAC, UI, secrets |
-| **L4 Code** | [docs/c4/code/](docs/c4/code/) | Implementers — entity lifecycle and key flows |
-| **Index** | [docs/architecture.md](docs/architecture.md) | Full catalog of concepts, technical, tutorials, ADRs |
-| **Hardening** | [hardeningcheck/](hardeningcheck/) | Security posture retested against live lab |
-| **Specs** | [../specs/README.md](../specs/README.md) | Feature specs `001`–`034` with relevance status |
-| **Mocks** | [mocks/](mocks/) | UI design artifacts (not runtime architecture) |
-| **Archive** | [docs/archive/](docs/archive/) · [hardeningcheck/archive/](hardeningcheck/archive/) | Superseded duplicates and one-shot checklists |
+```text
+One OpenShift hub → ArgoCD (gitops/) → Operators → AAP JobTemplates → spokes
+```
 
-## Platform summary (current)
+## Documents
 
-Two OpenShift clusters, one GitOps control plane:
+| Doc | Path |
+|-----|------|
+| C4 | [docs/c4.md](docs/c4.md) |
+| Concepts | [docs/concepts.md](docs/concepts.md) |
+| Technical | [docs/technical.md](docs/technical.md) |
+| Workshop & tutorials | [docs/workshop-tutorials.md](docs/workshop-tutorials.md) |
+| Index | [docs/architecture.md](docs/architecture.md) |
+| UI mocks | [mocks/](mocks/) |
 
-| Plane | Cluster (lab) | Role |
-|-------|---------------|------|
-| Management | Central (`api.central…`) | ArgoCD app-of-apps, RHACM, Vault HA, Gitea, Keycloak, AMQ Streams, AAP Controller **+ EDA** |
-| Workload | Services (`api.services…`) | Primary + namespace operators, dashboards, console plugins, AAP Controller, IAAC git-sync |
+## Non-negotiables
 
-**Non-negotiables:** no secrets in Git · never delete `sovereign-*` namespaces · post-bootstrap changes only via ArgoCD.
-
-## Live UI pins (services / `sovereign-cloud`)
-
-| App | Image tag | ArgoCD |
-|-----|-----------|--------|
-| Admin dashboard | `sovereign-cloud-dashboard:1.9.4` | Synced / Healthy |
-| Tenant dashboard | `tenancy-dashboard:4.1.8` | Synced / Healthy |
-| Admin console plugin | `sovereign-admin-plugin:1.1.5` | Synced / Healthy |
-| Tenant console plugin | `sovereign-tenant-plugin:1.1.7` | Synced / Healthy |
-
-Pins live in `bootstrap/helm/central/values.yaml`.
-
-## How to keep this accurate
-
-1. Topology or placement change in `bootstrap/` → update L1/L2 C4 docs the same PR.
-2. Operator / EDA / UI behavior change → update the matching L3 component + hardening check.
-3. End of a work cycle → retest [hardeningcheck/security-state.md](hardeningcheck/security-state.md).
-4. Do not resurrect archived docs; link from archive READMEs if historical context is needed.
+No secrets in Git · never delete `sovereign-*` namespaces · platform via GitOps only.

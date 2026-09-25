@@ -1,7 +1,7 @@
 # Sample Custom Resources
 
 Sanitized sample CRs migrated from frozen sovereign operator repos and bootstrap samples.
-These are intended for **manual apply** on the services cluster — they are **not** managed by ArgoCD.
+These are intended for **manual apply** on the hub — they are **not** managed by ArgoCD.
 
 ## Prerequisites
 
@@ -14,13 +14,13 @@ These are intended for **manual apply** on the services cluster — they are **n
 ### Single sample
 
 ```bash
-oc apply -f samples/entity/acme-corp.yaml --context=services-admin
+oc apply -f samples/entity/acme-corp.yaml --context=hub-admin
 ```
 
 ### All samples (kustomize)
 
 ```bash
-oc apply -k samples/ --context=services-admin
+oc apply -k samples/ --context=hub-admin
 ```
 
 ### Recommended apply order

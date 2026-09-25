@@ -10,7 +10,7 @@
 
 | Persona | Keycloak User (example) | Group / Role Binding | Cluster Access |
 |---------|-------------------------|----------------------|------------------|
-| **Platform Admin** | `test-platform-admin` | `hybridsovereign-platform-admins` | `cluster-admin` or equivalent on both clusters |
+| **Platform Admin** | `test-platform-admin` | `hybridsovereign-platform-admins` | `cluster-admin` or equivalent on the hub |
 | **Entity Admin** | `test-entity-admin` | `acme-entity-admin` (via Rbac CR) | `edit` in `entity-acme-corp` |
 | **Entity Viewer** | `test-entity-viewer` | `acme-auditor` | `view` in `entity-acme-corp` |
 | **Team Admin** | `test-team-lead` | `acme-team-admin` + team membership | `edit` on Team CR + related resources |

@@ -23,7 +23,7 @@
 ### TC-E2E-001: MTV VMware Provider Ready
 
 ```bash
-oc get provider vmware-vcenter -n openshift-mtv --context=central-admin \
+oc get provider vmware-vcenter -n openshift-mtv --context=hub-admin \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
 ```
 
@@ -32,7 +32,7 @@ oc get provider vmware-vcenter -n openshift-mtv --context=central-admin \
 ### TC-E2E-002: MTV VM Inventory Populated
 
 ```bash
-oc describe provider vmware-vcenter -n openshift-mtv --context=central-admin | grep -A10 Inventory
+oc describe provider vmware-vcenter -n openshift-mtv --context=hub-admin | grep -A10 Inventory
 ```
 
 **Expected**: Test VMs listed from vCenter
@@ -40,7 +40,7 @@ oc describe provider vmware-vcenter -n openshift-mtv --context=central-admin | g
 ### TC-E2E-003: CloudOSO Environment Ready
 
 ```bash
-oc get cloudoso <env-name> -n entity-acme-corp --context=services-admin \
+oc get cloudoso <env-name> -n entity-acme-corp --context=hub-admin \
   -o jsonpath='{.status.ready}'
 ```
 
@@ -61,7 +61,7 @@ oc get cloudoso <env-name> -n entity-acme-corp --context=services-admin \
 ### TC-E2E-005: Apply OpenStackMigration Sample
 
 ```bash
-oc apply -f samples/openstackmigration/website.yaml -n entity-acme-corp --context=services-admin
+oc apply -f samples/openstackmigration/website.yaml -n entity-acme-corp --context=hub-admin
 ```
 
 **Expected**: CR accepted; `status` shows `Reconciling`
@@ -69,7 +69,7 @@ oc apply -f samples/openstackmigration/website.yaml -n entity-acme-corp --contex
 ### TC-E2E-006: EDA Rulebook Activation
 
 ```bash
-oc get edaactivation -n aap-eda --context=services-admin | grep openstack
+oc get edaactivation -n aap-eda --context=hub-admin | grep openstack
 ```
 
 **Expected**: Activation Running; Job spawned for migration playbook
@@ -77,7 +77,7 @@ oc get edaactivation -n aap-eda --context=services-admin | grep openstack
 ### TC-E2E-007: Ansible Job Completion (Discovery Only)
 
 ```bash
-oc get jobs -n sovereign-cloud-jobs --context=services-admin | grep migration
+oc get jobs -n sovereign-cloud-jobs --context=hub-admin | grep migration
 oc logs job/<migration-job-name> -n sovereign-cloud-jobs
 ```
 
@@ -92,7 +92,7 @@ Verify OpenStackMigration status change emits event on `hybridsovereign-events`.
 ### TC-E2E-009: Migration Logs to S3 (PushSecret)
 
 ```bash
-oc get pushsecret -n sovereign-cloud-jobs --context=services-admin
+oc get pushsecret -n sovereign-cloud-jobs --context=hub-admin
 ```
 
 **Expected**: Log bundle pushed to Vault/S3 path per operator design
@@ -150,7 +150,7 @@ Optional advanced test after TC-E2E-012 passes.
 ### TC-E2E-015: OpenStackMigration Delete
 
 ```bash
-oc delete openstackmigration <name> -n entity-acme-corp --context=services-admin
+oc delete openstackmigration <name> -n entity-acme-corp --context=hub-admin
 ```
 
 **Expected**: Finalizer clears; temporary resources removed
@@ -185,7 +185,6 @@ All credentials: Vault paths only (`central/vmware-credentials`, entity-scoped O
 
 ## Related Artifacts
 
-- `hardening-checks/reports/migration-hardening-gap-analysis.md` — GAP-006
 - `tests/functional/README.md` — Entity/Team baseline
 - `tests/connectivity/README.md` — MTV/Kafka connectivity
 - `samples/openstackmigration/` — 4 sanitized samples

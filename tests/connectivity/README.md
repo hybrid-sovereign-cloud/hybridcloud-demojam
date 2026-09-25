@@ -1,7 +1,7 @@
 # Cluster Connectivity Tests
 
-**Scope**: Network and API connectivity between central cluster, services cluster, and platform dependencies  
-**Prerequisites**: Mega-Phase A (foundation) complete; RHACM imported services cluster
+**Scope**: Network and API connectivity between hub, hub, and platform dependencies  
+**Prerequisites**: Mega-Phase A (foundation) complete; RHACM imported hub
 
 ---
 
@@ -9,8 +9,8 @@
 
 | Context | API Server (example) | Role |
 |---------|---------------------|------|
-| `central-admin` | `api.central.LAB_DOMAIN` | Bootstrap, Vault, RHBK, ACM, CNV, MTV |
-| `services-admin` | `api.shc-services.LAB_DOMAIN` | Tenant operators, entity namespaces, dashboards |
+| `hub-admin` | `api.central.LAB_DOMAIN` | Bootstrap, Vault, RHBK, ACM, CNV, MTV |
+| `hub-admin` | `api.shc-services.LAB_DOMAIN` | Tenant operators, entity namespaces, dashboards |
 
 Set contexts via `oc config` or inventory in test runner.
 
@@ -21,8 +21,8 @@ Set contexts via `oc config` or inventory in test runner.
 ### TC-CONN-001: Central API Reachability
 
 ```bash
-oc whoami --context=central-admin
-oc get nodes --context=central-admin
+oc whoami --context=hub-admin
+oc get nodes --context=hub-admin
 ```
 
 **Expected**: Authenticated; all nodes Ready
@@ -30,8 +30,8 @@ oc get nodes --context=central-admin
 ### TC-CONN-002: Services API Reachability
 
 ```bash
-oc whoami --context=services-admin
-oc get nodes --context=services-admin
+oc whoami --context=hub-admin
+oc get nodes --context=hub-admin
 ```
 
 **Expected**: Authenticated; all nodes Ready
@@ -39,16 +39,16 @@ oc get nodes --context=services-admin
 ### TC-CONN-003: RHACM Managed Cluster Import
 
 ```bash
-oc get managedcluster --context=central-admin
-oc get managedcluster <services-cluster-name> -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterImportComplete")].status}'
+oc get managedcluster --context=hub-admin
+oc get managedcluster <managed-spoke-name> -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterImportComplete")].status}'
 ```
 
 **Expected**: `True`; cluster shows Available
 
-### TC-CONN-004: ArgoCD → Services Cluster Deploy
+### TC-CONN-004: ArgoCD → Hub Deploy
 
 ```bash
-oc get application -n openshift-gitops --context=central-admin | grep services
+oc get application -n openshift-gitops --context=hub-admin | grep services
 ```
 
 **Expected**: Services-targeted Applications `Synced` / `Healthy`
@@ -57,7 +57,7 @@ oc get application -n openshift-gitops --context=central-admin | grep services
 
 ```bash
 # From sovereign-cloud-jobs pod or port-forward — do not print token
-oc exec -n sovereign-cloud deploy/vault --context=central-admin -- vault status
+oc exec -n sovereign-cloud deploy/vault --context=hub-admin -- vault status
 ```
 
 **Expected**: Sealed=false; HA peers healthy
@@ -66,7 +66,7 @@ oc exec -n sovereign-cloud deploy/vault --context=central-admin -- vault status
 
 ```bash
 # Ansible Job using vault_k8s_auth succeeds
-oc get job -n sovereign-cloud-jobs --context=services-admin | grep vault-k8s-auth
+oc get job -n sovereign-cloud-jobs --context=hub-admin | grep vault-k8s-auth
 ```
 
 **Expected**: Job Completed
@@ -83,7 +83,7 @@ curl -sk -o /dev/null -w "%{http_code}" https://<rhbk-host>/realms/master/.well-
 
 ```bash
 # From any platform pod
-oc run pull-test --image=quay.BASE_DOMAIN/hybrid-sovereign/namespace-operator:<tag> --restart=Never --context=services-admin
+oc run pull-test --image=quay.BASE_DOMAIN/hybrid-sovereign/namespace-operator:<tag> --restart=Never --context=hub-admin
 oc get pod pull-test -o jsonpath='{.status.phase}'
 ```
 
@@ -100,7 +100,7 @@ curl -sk -o /dev/null -w "%{http_code}" https://<gitea-host>/api/v1/version
 ### TC-CONN-010: Kafka Bootstrap (AMQ Streams)
 
 ```bash
-oc get kafka hybridsovereign-kafka -n amq-streams --context=central-admin -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+oc get kafka hybridsovereign-kafka -n amq-streams --context=hub-admin -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
 ```
 
 **Expected**: `True`
@@ -108,7 +108,7 @@ oc get kafka hybridsovereign-kafka -n amq-streams --context=central-admin -o jso
 ### TC-CONN-011: Kafka Client (operators → AMQ; event-forwarder retired)
 
 ```bash
-oc logs -l app.kubernetes.io/name=event-forwarder -n sovereign-cloud-jobs --context=central-admin --tail=50
+oc logs -l app.kubernetes.io/name=event-forwarder -n sovereign-cloud-jobs --context=hub-admin --tail=50
 ```
 
 **Expected**: No connection refused; no auth errors
@@ -125,18 +125,18 @@ dig +short <lab-ingress-host>
 ### TC-CONN-013: EDA → AAP Connectivity
 
 ```bash
-oc get edaactivation -n aap-eda --context=services-admin
+oc get edaactivation -n aap-eda --context=hub-admin
 ```
 
 **Expected**: Activations `Running`; rulebooks reach AAP API
 
-### TC-CONN-014: ACM Policy → Services Cluster
+### TC-CONN-014: ACM Policy → Hub
 
 ```bash
-oc get policy -n sovereign-cloud --context=central-admin
+oc get policy -n sovereign-cloud --context=hub-admin
 ```
 
-**Expected**: Policies propagate; `PolicyReport` shows compliance on services
+**Expected**: Policies propagate; `PolicyReport` shows compliance on the hub
 
 ### TC-CONN-015: Central → Services API via ServiceAccount
 
@@ -153,14 +153,14 @@ oc get policy -n sovereign-cloud --context=central-admin
 
 ```mermaid
 flowchart TB
-  subgraph central [Central Cluster]
+  subgraph central [Hub]
     ArgoCD[ArgoCD]
     Vault[Vault]
     RHBK[RHBK]
     Kafka[AMQ Streams]
     ACM[RHACM]
   end
-  subgraph services [Services Cluster]
+  subgraph services [Hub]
     Operators[Hybrid Operators]
     Entities[entity-* namespaces]
     EDA[EDA]

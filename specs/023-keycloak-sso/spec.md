@@ -21,7 +21,7 @@ RHBK instance CR; Jobs for realms, groups, clients, RBAC, OAuth integration.
 
 ## Testing Guide
 
-- OAuth login on both clusters; verify group membership drives RBAC
+- OAuth login on the hub; verify group membership drives RBAC
 
 ## Security Considerations
 

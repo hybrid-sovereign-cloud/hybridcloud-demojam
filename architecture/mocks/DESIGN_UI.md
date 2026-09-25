@@ -1177,7 +1177,7 @@ Export CSV for capacity planning.
 
 **Route (admin dashboard):** `/networking/uihealth`  
 **Kind:** `UIHealthChecker`  
-**Doc:** [57-hybridvpc-uihealth.md](../docs/technical/57-hybridvpc-uihealth.md)
+**Doc:** [57-hybridvpc-uihealth.md](../docs/technical.md)
 
 `UIHealthChecker` is a **declarative URL registry**. As soon as the CR exists, `spec.url` is available — there is **no** operator reconcile loop, EDA job, or `reconciling` status for liveness.
 
@@ -1456,7 +1456,7 @@ stateDiagram-v2
 | EDA job URL | `status.edaJobs` | EdaJobsChips (existing) |
 | AAP stdout | AAP UI | linked from chips |
 
-**Runbook links** in failure alerts → `../docs/technical/` (to be added: `57-hybridvpc-runbook.md`).
+**Runbook links** in failure alerts → `../docs/technical.md` (to be added: `57-hybridvpc-runbook.md`).
 
 ---
 
@@ -1537,10 +1537,10 @@ stateDiagram-v2
 ### Appendix D — Related documentation
 
 - [DESIGN.md](./DESIGN.md) — EVPN networking primer and role contract  
-- [architecture/docs/technical/15-sovereign-dashboard.md](../docs/technical/15-sovereign-dashboard.md)  
-- [architecture/docs/technical/20-tenancy-dashboard.md](../docs/technical/20-tenancy-dashboard.md)  
-- [architecture/docs/technical/006-eda-architecture.md](../docs/technical/006-eda-architecture.md)  
-- [architecture/docs/technical/24-tenancy-operators.md](../docs/technical/24-tenancy-operators.md)  
+- [architecture/docs/technical.md)  
+- [architecture/docs/technical.md)  
+- [architecture/docs/technical.md)  
+- [architecture/docs/technical.md)  
 
 ---
 

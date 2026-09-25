@@ -36,9 +36,9 @@ Use this checklist before merging bootstrap changes, operator releases, or migra
 
 **Vault path conventions**:
 
-- Central: `central/data/<component>`
+- Hub: `central/data/<component>`
 - Entity-scoped: `entity-<name>/data/<component>`
-- Services cluster bootstrap: seeded via init Jobs only
+- Hub bootstrap: seeded via init Jobs only
 
 ---
 
@@ -75,7 +75,7 @@ Use this checklist before merging bootstrap changes, operator releases, or migra
 | # | Check | Evidence | Status |
 |---|-------|----------|--------|
 | 5.1 | No automation deletes `sovereign-*` or `entity-*` namespaces | Teardown roles use `state: absent` only on owned resources | ☐ |
-| 5.2 | Central cluster does NOT host `sovereign-cloud` or `sovereign-cloud-plugins` tenant workloads | Cluster topology doc + `oc get ns` on central | ☐ |
+| 5.2 | Hub does NOT host `sovereign-cloud` or `sovereign-cloud-plugins` tenant workloads | Cluster topology doc + `oc get ns` on the hub | ☐ |
 | 5.3 | Entity finalizer removes namespace operator before namespace deletion | Entity teardown playbook | ☐ |
 | 5.4 | ArgoCD prune disabled or scoped for tenant namespaces | Application `syncPolicy` review | ☐ |
 | 5.5 | `sovereign-namespaces` chart creates namespaces additively only | `bootstrap/helm/charts/sovereign-namespaces/` | ☐ |
@@ -119,7 +119,6 @@ Use this checklist before merging bootstrap changes, operator releases, or migra
 hybridsovereign-kafka-kafka-bootstrap.amq-streams.svc:9093
 ```
 
-**Gap note**: Default `event-forwarder/values.yaml` uses plaintext `:9092` for lab; central `values.yaml` must override to TLS before production gate (see `hardening-checks/reports/migration-hardening-gap-analysis.md`).
 
 ---
 

@@ -11,7 +11,7 @@
 | Gate | Command / Check | Pass Criteria |
 |------|-----------------|---------------|
 | G-00 | `make check-env` in `bootstrap/` | All required env vars present |
-| G-01 | `./tests/argocd-deploy/verify-sync.sh --context central-admin` | All non-excluded Apps Synced/Healthy |
+| G-01 | `./tests/argocd-deploy/verify-sync.sh --context hub-admin` | All non-excluded Apps Synced/Healthy |
 | G-02 | `./tests/run-tests.sh` | helm lint + YAML validation PASS |
 | G-03 | No secrets in diff | `git diff` free of credential literals |
 
@@ -33,7 +33,7 @@
 | Step | Verification | Gate |
 |------|--------------|------|
 | PGO subscription | `oc get csv -n openshift-operators \| grep crunchy` | Succeeded |
-| PostgresCluster | `oc get postgrescluster -A` | Ready on central + services |
+| PostgresCluster | `oc get postgrescluster -A` | Ready on the hub + services |
 
 ### Phase A3: ODF Storage
 
@@ -53,7 +53,7 @@
 
 | Step | Verification | Gate |
 |------|--------------|------|
-| ManagedCluster import | `oc get managedcluster` | Services cluster Available |
+| ManagedCluster import | `oc get managedcluster` | Hub Available |
 | GitOpsCluster | ACM console shows Imported | True |
 
 ### Phase A5–A6: Vault
@@ -87,7 +87,7 @@
 | Step | Verification | Gate |
 |------|--------------|------|
 | Central deployed | ACS Central pod Running | Console accessible |
-| acs-config Job | Completed | SecuredCluster on services |
+| acs-config Job | Completed | SecuredCluster on the hub |
 
 ### Phase B2: AAP Instance
 
@@ -151,7 +151,7 @@
 
 | Step | Verification | Gate |
 |------|--------------|------|
-| iaac pod | Running in services cluster | Gitea sync active |
+| iaac pod | Running in hub | Gitea sync active |
 
 ### Phase C5–C6: Entity E2E
 
@@ -199,8 +199,8 @@
 
 | Step | Verification | Gate |
 |------|--------------|------|
-| Policies | `oc get policy -n sovereign-cloud` | Compliant on services |
-| Placement | Policies target services cluster | Applied |
+| Policies | `oc get policy -n sovereign-cloud` | Compliant on the hub |
+| Placement | Policies target hub | Applied |
 
 **Mega-Phase F Gate**: PolicyReport compliance ≥ baseline
 
@@ -248,8 +248,6 @@
 | Step | Verification | Gate |
 |------|--------------|------|
 | Security review | `tests/security/SECURITY_REVIEW.md` | All sections PASS |
-| CIS checklist | `hardening-checks/cis-benchmark/checklist.md` | P0 implemented |
-| NIST checklist | `hardening-checks/nist-controls/checklist.md` | P0 implemented |
 | Gap analysis | P0 gaps closed or ADR filed | GAP-001 tracked |
 | Full test suite | All `tests/*/README.md` suites | Documented results |
 
@@ -261,7 +259,7 @@
 
 ```bash
 # After each phase commit+push:
-./tests/argocd-deploy/verify-sync.sh --context central-admin
+./tests/argocd-deploy/verify-sync.sh --context hub-admin
 
 # Hard refresh stale app:
 oc annotate application <app> -n openshift-gitops \
