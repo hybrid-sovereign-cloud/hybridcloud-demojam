@@ -74,7 +74,8 @@
   --pf-v6-c-form-control--PaddingBottom: 0.25rem;
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link {
+/* Nav link density only — do NOT force colors here (leaks into OCP console chrome). */
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link {
   font-size: var(--sc-font-sm);
   padding-block: 0.35rem;
   padding-inline: 0.75rem;
@@ -321,6 +322,12 @@ select.sc-entity-select,
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--pf-t--global--text--color--subtle, #6a6e73);
+}
+
+html.pf-v6-theme-dark .sc-standalone-shell .sc-sidebar-title,
+html.pf-v5-theme-dark .sc-standalone-shell .sc-sidebar-title,
+[data-theme='dark'] .sc-standalone-shell .sc-sidebar-title {
   color: #c7c7c7;
 }
 
@@ -343,32 +350,26 @@ select.sc-entity-select,
   background: none;
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover .sc-nav-link__icon,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current .sc-nav-link__icon,
-.pf-v6-c-page__sidebar .sc-nav-link[aria-current='page'] .sc-nav-link__icon {
+/*
+ * Standalone dashboards only (.sc-standalone-shell).
+ * Never style bare .pf-v6-c-page__sidebar — that is the OpenShift console
+ * perspective nav and must follow the console Light/Dark preference.
+ */
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover .sc-nav-link__icon,
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current .sc-nav-link__icon,
+.sc-standalone-shell .pf-v6-c-page__sidebar .sc-nav-link[aria-current='page'] .sc-nav-link__icon {
   opacity: 1;
   color: inherit;
   background: none;
 }
 
-.pf-v6-c-page__sidebar {
-  --pf-v6-c-page__sidebar--BackgroundColor: #212427;
-}
-
-.pf-v6-c-page__sidebar .pf-v6-c-nav {
-  --pf-v6-c-nav__link--Color: #fff;
-  --pf-v6-c-nav__link--hover--BackgroundColor: #3c3f42;
-  --pf-v6-c-nav__link--m-current--BackgroundColor: #3c3f42;
-  --pf-v6-c-nav__link--m-current--Color: #fff;
-}
-
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
-.pf-v6-c-page__sidebar .sc-nav-link[aria-current='page'] {
-  box-shadow: inset 3px 0 0 var(--sc-brand-red);
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+.sc-standalone-shell .pf-v6-c-page__sidebar .sc-nav-link[aria-current='page'] {
+  box-shadow: inset 3px 0 0 var(--sc-brand-red, #ee0000);
   font-weight: 600;
 }
 
-.sc-nav-separator {
+.sc-standalone-shell .sc-nav-separator {
   list-style: none;
   margin: 0.75rem 1rem 0.25rem;
   padding-top: 0.75rem;
@@ -376,27 +377,26 @@ select.sc-entity-select,
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
-  border-top: 1px solid #3c3f42;
+  color: var(--pf-t--global--text--color--subtle, #6a6e73);
+  border-top: 1px solid var(--pf-t--global--border--color--default, #d2d2d2);
 }
 
-/* Remove per-item divider lines — only section headers should separate groups */
-.pf-v6-c-page__sidebar .pf-v6-c-nav__item,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__list > .pf-v6-c-nav__item,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__list > li {
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__item,
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__list > .pf-v6-c-nav__item,
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__list > li {
   border: none !important;
   box-shadow: none !important;
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__item + .pf-v6-c-nav__item,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__list > li + li:not(.sc-nav-separator) {
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__item + .pf-v6-c-nav__item,
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__list > li + li:not(.sc-nav-separator) {
   border-top: none !important;
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__section-title,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__section > .pf-v6-c-nav__section-title {
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__section-title,
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__section > .pf-v6-c-nav__section-title {
   border-top: none;
-  color: #a3a3a3;
+  color: var(--pf-t--global--text--color--subtle, #6a6e73);
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -404,10 +404,39 @@ select.sc-entity-select,
   padding-block: 0.75rem 0.25rem;
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__section + .pf-v6-c-nav__section {
+.sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__section + .pf-v6-c-nav__section {
   margin-top: 0.35rem;
-  border-top: 1px solid #3c3f42;
+  border-top: 1px solid var(--pf-t--global--border--color--default, #d2d2d2);
   padding-top: 0.15rem;
+}
+
+/* Dark chrome for standalone dashboards only when theme is dark */
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page__sidebar,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page__sidebar,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page__sidebar {
+  --pf-v6-c-page__sidebar--BackgroundColor: var(--pf-v6-global--BackgroundColor--dark-300, #212427);
+}
+
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page__sidebar .pf-v6-c-nav,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page__sidebar .pf-v6-c-nav,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav {
+  --pf-v6-c-nav__link--Color: #fff;
+  --pf-v6-c-nav__link--hover--BackgroundColor: #3c3f42;
+  --pf-v6-c-nav__link--m-current--BackgroundColor: #3c3f42;
+  --pf-v6-c-nav__link--m-current--Color: #fff;
+}
+
+.sc-standalone-shell.pf-v6-theme-dark .sc-nav-separator,
+.sc-standalone-shell[data-theme='dark'] .sc-nav-separator,
+html.pf-v6-theme-dark .sc-standalone-shell .sc-nav-separator,
+html.pf-v5-theme-dark .sc-standalone-shell .sc-nav-separator,
+[data-theme='dark'] .sc-standalone-shell .sc-nav-separator {
+  color: #a3a3a3;
+  border-top-color: #3c3f42;
 }
 
 /* Page header — ListPage pattern */
@@ -1074,17 +1103,33 @@ select.sc-entity-select,
   background: var(--sc-border);
 }
 
-/* Standalone shell — PatternFly Page integration */
-.pf-v6-c-page {
+/* Standalone shell — PatternFly Page integration (theme follows console / provider) */
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page {
   --pf-v6-c-page__sidebar--BackgroundColor: var(--pf-v6-global--BackgroundColor--dark-300, #212427);
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link {
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page__sidebar .pf-v6-c-nav__link,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page__sidebar .pf-v6-c-nav__link,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link {
   color: var(--pf-v6-global--Color--light-100, #fff);
 }
 
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
-.pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover {
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+.sc-standalone-shell.pf-v6-theme-dark .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+.sc-standalone-shell[data-theme='dark'] .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+html.pf-v6-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link.pf-m-current,
+[data-theme='dark'] .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__link:hover {
   background: var(--pf-v6-global--BackgroundColor--dark-200, #3c3f42);
 }
 

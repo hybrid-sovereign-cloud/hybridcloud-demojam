@@ -141,6 +141,7 @@ function ThemeToggle(): React.ReactElement {
 function AdminNav(): React.ReactElement {
   const location = useLocation();
   const { t } = useTranslation();
+  const { mode } = useTheme();
   const groups = React.useMemo(() => {
     const result: { titleKey?: string; items: Extract<NavEntry, { type: 'link' }>[] }[] = [];
     let current: { titleKey?: string; items: Extract<NavEntry, { type: 'link' }>[] } = { items: [] };
@@ -157,7 +158,7 @@ function AdminNav(): React.ReactElement {
   }, []);
 
   return (
-    <Nav theme="dark" aria-label={t('nav.adminNav')}>
+    <Nav theme={mode} aria-label={t('nav.adminNav')}>
       {groups.map((group, gi) => (
         <NavList key={group.titleKey ?? `group-${gi}`}>
           {group.titleKey ? (
@@ -190,6 +191,7 @@ function AdminNav(): React.ReactElement {
 function AdminLayout(): React.ReactElement {
   const [isSidebarOpen, setSidebarOpen] = React.useState(true);
   const { t } = useTranslation();
+  const { mode } = useTheme();
 
   const header = (
     <Masthead className="sc-pf-masthead">
@@ -243,7 +245,7 @@ function AdminLayout(): React.ReactElement {
   );
 
   const sidebar = (
-    <PageSidebar theme="dark" isSidebarOpen={isSidebarOpen} id="admin-sidebar">
+    <PageSidebar theme={mode} isSidebarOpen={isSidebarOpen} id="admin-sidebar">
       <PageSidebarBody>
         <div className="sc-sidebar-title">{t('nav.sovereignAdmin')}</div>
         <AdminNav />
@@ -252,7 +254,7 @@ function AdminLayout(): React.ReactElement {
   );
 
   return (
-    <Page header={header} sidebar={sidebar} isManagedSidebar>
+    <Page className="sc-standalone-shell" header={header} sidebar={sidebar} isManagedSidebar>
       <PageSection isFilled className="sc-page-section sc-page-section--dashboard">
         <div className="sc-page">
           <Routes>

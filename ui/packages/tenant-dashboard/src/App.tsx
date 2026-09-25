@@ -165,6 +165,7 @@ function TenantLayout(): React.ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { mode } = useTheme();
   const [isSidebarOpen, setSidebarOpen] = React.useState(true);
   const {
     namespace: tenantNamespace,
@@ -229,10 +230,10 @@ function TenantLayout(): React.ReactElement {
   );
 
   const sidebar = (
-    <PageSidebar theme="dark" isSidebarOpen={isSidebarOpen} id="tenant-sidebar">
+    <PageSidebar theme={mode} isSidebarOpen={isSidebarOpen} id="tenant-sidebar">
       <PageSidebarBody>
         <div className="sc-sidebar-title">{t('nav.sovereignCloud')}</div>
-        <Nav theme="dark" aria-label={t('nav.tenantNav')}>
+        <Nav theme={mode} aria-label={t('nav.tenantNav')}>
           {navGroups.map((group, gi) => (
             <NavList key={group.titleKey ?? `group-${gi}`}>
               {group.titleKey ? (
@@ -269,7 +270,7 @@ function TenantLayout(): React.ReactElement {
   );
 
   return (
-    <Page header={header} sidebar={sidebar} isManagedSidebar>
+    <Page className="sc-standalone-shell" header={header} sidebar={sidebar} isManagedSidebar>
       <PageSection padding={{ default: 'noPadding' }} className="sc-ns-section">
         <div className="sc-page">
           <NamespaceContextBar
