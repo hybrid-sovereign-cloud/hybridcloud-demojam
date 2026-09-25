@@ -159,7 +159,7 @@ spec:
         - name: PLUGIN_PACKAGE
           value: admin-console-plugin
         - name: REBUILD_ID
-          value: "cloud-creds-ui-20260924"
+          value: "light-nav-20260925"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
@@ -192,7 +192,7 @@ spec:
         - name: PLUGIN_PACKAGE
           value: tenant-console-plugin
         - name: REBUILD_ID
-          value: "cloud-creds-ui-20260924"
+          value: "light-nav-20260925"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
