@@ -20,6 +20,16 @@
 
 ## Change Log
 
+### 2026-09-25 — DEV: Vault HA uses integrated raft (not file)
+
+| Field | Value |
+|-------|-------|
+| Change summary | Fix plugin-vault HA path: `spec.ha: true` was deploying 3 replicas with `storage "file"`, which is not shared — only pod-0 initializes; others stay uninitialized and route 503s. HA now uses integrated raft + `VAULT_CLUSTER_ADDR` + `retry_join`; `ha: false` keeps single-replica file storage. |
+| Paths touched | `eda/plugin-vault/roles/vault_provision/tasks/deploy_resources.yml`, `eda/rulebooks/roles/vault_provision/tasks/deploy_resources.yml`, samples comments, this file |
+| Rollback | Revert this commit; recreate Vault CR / wipe STS+PVCs if storage backend already flipped |
+| Status | green (code) |
+| Next action | Rebuild/redeploy vault EDA DE if roles are image-baked; re-provision affected Vault CRs |
+
 ### 2026-09-25 — Remove obsolete tree and Kafka/AMQ artifacts
 
 | Field | Value |

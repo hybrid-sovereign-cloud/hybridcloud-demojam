@@ -15,6 +15,7 @@ spec:
   config: keycloak-sovereign-tenants-services
   description: Vault administrators
 ---
+# ha: true requires integrated raft (plugin-vault HA path). File storage is ha: false only.
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Vault
 metadata:

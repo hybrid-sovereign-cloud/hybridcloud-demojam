@@ -105,7 +105,9 @@
                   storage: 1Gi
   when: not vault_ha_enabled
 
-- name: Deploy Vault StatefulSet (HA - 3 replicas)
+# HA requires integrated raft: file storage is local to each PVC, so replicas
+# never share state (only pod-0 initializes; others stay uninitialized).
+- name: Deploy Vault StatefulSet (HA - 3 replicas, integrated raft)
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -123,6 +125,7 @@
       spec:
         serviceName: "{{ vault_svc_name }}-internal"
         replicas: 3
+        podManagementPolicy: Parallel
         selector:
           matchLabels:
             app.kubernetes.io/name: "{{ vault_instance_name }}"
@@ -150,19 +153,34 @@
                         address = "[::]:8200"
                         cluster_address = "[::]:8201"
                       }
-                      storage "file" {
+                      storage "raft" {
                         path = "/vault/data"
+                        retry_join {
+                          leader_api_addr = "http://{{ vault_instance_name }}-0.{{ vault_svc_name }}-internal.{{ vault_cr_namespace }}.svc:8200"
+                        }
+                        retry_join {
+                          leader_api_addr = "http://{{ vault_instance_name }}-1.{{ vault_svc_name }}-internal.{{ vault_cr_namespace }}.svc:8200"
+                        }
+                        retry_join {
+                          leader_api_addr = "http://{{ vault_instance_name }}-2.{{ vault_svc_name }}-internal.{{ vault_cr_namespace }}.svc:8200"
+                        }
                       }
-                  - name: VAULT_API_ADDR
-                    value: "http://$(POD_IP):8200"
-                  - name: SKIP_SETCAP
-                    value: "true"
-                  - name: SKIP_CHOWN
-                    value: "true"
+                  - name: HOSTNAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.name
                   - name: POD_IP
                     valueFrom:
                       fieldRef:
                         fieldPath: status.podIP
+                  - name: VAULT_API_ADDR
+                    value: "http://$(POD_IP):8200"
+                  - name: VAULT_CLUSTER_ADDR
+                    value: "http://$(HOSTNAME).{{ vault_svc_name }}-internal.{{ vault_cr_namespace }}.svc:8201"
+                  - name: SKIP_SETCAP
+                    value: "true"
+                  - name: SKIP_CHOWN
+                    value: "true"
                 ports:
                   - containerPort: 8200
                     name: http
@@ -212,6 +230,8 @@
           app.kubernetes.io/name: "{{ vault_instance_name }}"
       spec:
         clusterIP: None
+        # Required so raft peers can resolve/join before Ready
+        publishNotReadyAddresses: true
         selector:
           app.kubernetes.io/name: "{{ vault_instance_name }}"
         ports:

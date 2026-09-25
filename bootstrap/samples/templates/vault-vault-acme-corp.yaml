@@ -1,4 +1,8 @@
 {{- if .Values.samples.vault.vault_acme_corp.enabled }}
+{{/*
+  ha: true → plugin-vault deploys 3 replicas with integrated raft (not file).
+  File storage is valid only for ha: false (single replica).
+*/}}
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Vault
 metadata:

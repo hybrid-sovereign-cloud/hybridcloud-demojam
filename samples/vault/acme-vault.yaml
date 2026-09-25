@@ -2,6 +2,10 @@
 # Source: plugin_vault/config/samples/vault-acme-corp.yaml
 # Apply manually to services cluster (NOT via ArgoCD):
 #   oc apply -f samples/vault/acme-vault.yaml --context=services-admin
+#
+# spec.ha: true provisions a 3-replica StatefulSet with integrated raft storage
+# (VAULT_CLUSTER_ADDR + retry_join). Do not use HA with file storage — local
+# file backend is single-replica only (ha: false).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Vault
