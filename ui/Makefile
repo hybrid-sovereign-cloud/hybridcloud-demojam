@@ -5,7 +5,7 @@ NPM := npm
 REGISTRY ?= $(OCI_HOST)/hybrid-sovereign
 ADMIN_DASH_TAG ?= 2.0.21
 TENANT_DASH_TAG ?= 5.0.21
-ADMIN_PLUGIN_TAG ?= 1.2.29
+ADMIN_PLUGIN_TAG ?= 1.2.30
 TENANT_PLUGIN_TAG ?= 1.3.24
 
 .PHONY: help install build build-shared build-admin build-tenant \

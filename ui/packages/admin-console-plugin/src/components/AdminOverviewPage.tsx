@@ -290,7 +290,11 @@ const AdminOverviewPage: React.FC = () => {
             <Card className="sc-panel">
               <CardBody>
                 <SectionErrorBoundary title="Live topology unavailable">
-                  <EntityTopology />
+                  <EntityTopology
+                    resources={items}
+                    resourcesLoading={loading}
+                    resourcesError={error}
+                  />
                 </SectionErrorBoundary>
               </CardBody>
             </Card>

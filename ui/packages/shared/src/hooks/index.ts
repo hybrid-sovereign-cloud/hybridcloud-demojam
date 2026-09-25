@@ -18,8 +18,8 @@ export type {
   UseK8sResourceOptions,
   UseK8sResourceResult,
 } from './k8s';
-export { useOverviewCRs } from './overviewCrs';
-export type { OverviewCRsResult } from './overviewCrs';
+export { useOverviewCRs, PLATFORM_NS, PLUGINS_NS } from './overviewCrs';
+export type { OverviewCRsResult, UseOverviewCRsOptions } from './overviewCrs';
 export {
   usePermissions,
   useCanListKind,

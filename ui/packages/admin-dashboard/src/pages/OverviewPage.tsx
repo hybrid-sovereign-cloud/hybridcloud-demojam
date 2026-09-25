@@ -301,7 +301,11 @@ export function OverviewPage(): React.ReactElement {
           </Flex>
           <Card className="sc-panel">
             <CardBody>
-              <EntityTopology />
+              <EntityTopology
+                resources={items}
+                resourcesLoading={loading}
+                resourcesError={error}
+              />
             </CardBody>
           </Card>
         </>

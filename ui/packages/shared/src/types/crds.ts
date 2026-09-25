@@ -11,6 +11,8 @@ export interface OperatorStatus {
   lastReconciledAt?: string;
   message?: string;
   conditions?: StatusCondition[];
+  /** Entity CR: provisioned tenant namespace (e.g. entity-acme-corp) */
+  entity?: string;
 }
 
 export interface StatusCondition {

@@ -93,7 +93,7 @@ spec:
         - name: APP_PACKAGE
           value: admin-dashboard
         - name: REBUILD_ID
-          value: "team-submit-fix-20260922"
+          value: "overview-ns-20260925"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
@@ -159,7 +159,7 @@ spec:
         - name: PLUGIN_PACKAGE
           value: admin-console-plugin
         - name: REBUILD_ID
-          value: "light-nav-20260925"
+          value: "overview-ns-20260925"
   triggers:
     - type: ConfigChange
   runPolicy: Serial
