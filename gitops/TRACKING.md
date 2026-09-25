@@ -477,3 +477,5 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 
 Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes builder SA in sovereign-cloud.
 
+
+| DEV-004 | 2026-09-25 | AAPOrg teardown marks deletionComplete while org remains | Teardown looked up Route `sovereign-aap` (missing); DNS fail ignored; still patched deletionComplete | Resolve URL from admin secret.url or Route `aap`; assert org gone before deletionComplete | 1 (fixing) |

@@ -61,7 +61,33 @@
             aap_password: "{{ _aap_secret.resources[0].data.password | b64decode }}"
           no_log: true
 
-        - name: Discover AAP gateway Route from services cluster
+        - name: Prefer AAP URL from admin secret when present
+          when: (_aap_secret.resources[0].data.url | default('') | length) > 0
+          ansible.builtin.set_fact:
+            aap_gateway_internal_url: "{{ _aap_secret.resources[0].data.url | b64decode | regex_replace('/$', '') }}"
+          no_log: true
+
+        - name: Discover AAP gateway Route named aap
+          when: (aap_gateway_internal_url | default('') | length) == 0
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: route.openshift.io/v1
+            kind: Route
+            name: aap
+            namespace: aap
+          register: aap_gw_route_aap
+
+        - name: Use Route aap host when discovered
+          when:
+            - (aap_gateway_internal_url | default('') | length) == 0
+            - (aap_gw_route_aap.resources | default([]) | length) > 0
+          ansible.builtin.set_fact:
+            aap_gateway_internal_url: "https://{{ aap_gw_route_aap.resources[0].spec.host }}"
+
+        - name: Discover AAP gateway Route named sovereign-aap
+          when: (aap_gateway_internal_url | default('') | length) == 0
           kubernetes.core.k8s_info:
             host: "{{ services_api_host }}"
             api_key: "{{ services_bearer_token }}"
@@ -70,12 +96,20 @@
             kind: Route
             name: sovereign-aap
             namespace: aap
-          register: aap_gw_route
+          register: aap_gw_route_sovereign
 
-        - name: Override aap_gateway_internal_url with discovered Route
+        - name: Use Route sovereign-aap host when discovered
+          when:
+            - (aap_gateway_internal_url | default('') | length) == 0
+            - (aap_gw_route_sovereign.resources | default([]) | length) > 0
           ansible.builtin.set_fact:
-            aap_gateway_internal_url: "https://{{ aap_gw_route.resources[0].spec.host }}"
-          when: aap_gw_route.resources | length > 0
+            aap_gateway_internal_url: "https://{{ aap_gw_route_sovereign.resources[0].spec.host }}"
+
+        - name: Assert AAP gateway URL resolved for teardown
+          ansible.builtin.assert:
+            that:
+              - (aap_gateway_internal_url | default('') | length) > 0
+            fail_msg: AAPOrg teardown cannot resolve AAP gateway URL (secret.url or Route aap/sovereign-aap)
 
         - name: Find org in gateway
           ansible.builtin.uri:
@@ -97,7 +131,7 @@
             force_basic_auth: true
             validate_certs: false
             status_code: [200, 204, 404]
-          when: _gw_org_lookup.json.results | length > 0
+          when: (_gw_org_lookup.json.results | default([]) | length) > 0
 
         - name: Delete authenticator maps
           ansible.builtin.uri:
@@ -109,8 +143,10 @@
             validate_certs: false
             status_code: [200]
           register: _auth_maps
+          failed_when: false
 
         - name: Delete each authenticator map
+          when: (_auth_maps.json.results | default([]) | length) > 0
           ansible.builtin.uri:
             url: "{{ aap_gateway_internal_url }}/api/gateway/v1/authenticator_maps/{{ item.id }}/"
             method: DELETE
@@ -120,7 +156,23 @@
             validate_certs: false
             status_code: [200, 204, 404]
           loop: "{{ _auth_maps.json.results | default([]) }}"
-      ignore_errors: true
+
+        - name: Verify org gone from gateway
+          ansible.builtin.uri:
+            url: "{{ aap_gateway_internal_url }}/api/gateway/v1/organizations/?name={{ fin_org_name | urlencode }}"
+            method: GET
+            user: "{{ aap_username }}"
+            password: "{{ aap_password }}"
+            force_basic_auth: true
+            validate_certs: false
+            status_code: [200]
+          register: _gw_org_verify
+
+        - name: Fail teardown if org still present
+          ansible.builtin.assert:
+            that:
+              - (_gw_org_verify.json.results | default([]) | length) == 0
+            fail_msg: "AAPOrg teardown left organization {{ fin_org_name }} in AAP"
 
     - name: Get current timestamp for status
       ansible.builtin.set_fact:
