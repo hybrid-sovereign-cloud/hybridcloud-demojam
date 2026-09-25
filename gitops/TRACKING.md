@@ -487,3 +487,5 @@ Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes
 | DEV-007 | 2026-09-25 | Assignment ACM Policy NonCompliant: Argo/Istio CRDs missing on spoke | Policy enforces AppProject/ArgoCD/SMCP but hosted spoke has no GitOps/Maistra operators | Platform or Assignment must install GitOps + OpenShift Service Mesh operators before CR objects | 1 (open) |
 
 | DEV-007b | 2026-09-25 | Assignment spoke lacks GitOps/Maistra operators | sovereign-assignment chart emitted Argo/SMCP without Subscriptions | Vendor chart; add 00-operators Subscriptions; chart 0.2.4; wait retries 60 | 1 (fixing) |
+
+| DEV-008 | 2026-09-25 | RHOSO PlatformOpenshift used Route53 when JT BASE_DOMAIN is AWS sandbox | use_designate_dns compared CloudOSO.baseDomain to JT BASE_DOMAIN | Select Designate via designateZoneId/credentialsSecretRef; zone=CloudOSO baseDomain | 1 (fixing) |

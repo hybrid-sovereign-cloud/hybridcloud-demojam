@@ -11,11 +11,11 @@
     cb_app_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_name: "{{ ansible_operator_meta.name }}"
     cb_cluster_domain: >-
-      {{ (oso_env_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
+      {{ (oso_domain | default(oso_env_name ~ '.' ~ cb_base_domain, true))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
     cb_install_base_domain: >-
-      {{ (oso_env_name ~ '.' ~ (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
+      {{ (oso_domain | default(oso_env_name ~ '.' ~ cb_base_domain, true))
          if (use_designate_dns | default(false) | bool)
          else (cb_slug ~ '.' ~ cb_base_domain) }}
     cb_image_set: "{{ platform_spec.openstack.ocpImageSet | default(default_ocp_image_set) }}"

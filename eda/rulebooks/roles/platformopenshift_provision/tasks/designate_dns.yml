@@ -106,7 +106,7 @@
         auth=auth,
         region_name=cloud_cfg.get('region_name', 'regionOne'),
         identity_api_version='3')
-    zone_name = '{{ BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true) }}.'
+    zone_name = '{{ cb_base_domain }}.'
     zone = conn.dns.find_zone(zone_name)
     if zone is None:
         raise SystemExit(f'Designate zone {zone_name} not found')
