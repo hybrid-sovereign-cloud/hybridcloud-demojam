@@ -35,7 +35,7 @@
     aws_slug: "{{ cloudaws_raw.json.status.slug }}"
     aws_domain: "{{ cloudaws_raw.json.status.domain }}"
     aws_account: "{{ cloudaws_raw.json.spec.account }}"
-    aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath }}"
+    aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath | default('', true) }}"
     aws_base_domain: "{{ cloudaws_raw.json.spec.baseDomain }}"
 
 - name: Provision AWS cluster build on central cluster

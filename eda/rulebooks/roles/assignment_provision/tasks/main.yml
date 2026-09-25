@@ -130,6 +130,14 @@
         assignment_ready: "{{ (team_is_ready | bool) and (openshift_is_ready | bool) }}"
         assignment_status_transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
+    # Single-cluster / missing env: fall back to the services API host for ACM calls.
+    - name: Ensure central API server for ACM Policy provision
+      ansible.builtin.set_fact:
+        central_api_server: >-
+          {{ (CENTRAL_API_SERVER | default(lookup('env', 'CENTRAL_API_SERVER') | default('', true), true) | trim)
+             if ((CENTRAL_API_SERVER | default(lookup('env', 'CENTRAL_API_SERVER') | default('', true), true) | trim) | length > 0)
+             else (services_api_host | default('') | regex_replace('/$', '')) }}
+
     - name: Provision via ACM Policy on central cluster
       ansible.builtin.include_tasks: provision_acm.yml
       when: assignment_ready | bool

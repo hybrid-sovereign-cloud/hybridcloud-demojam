@@ -35,7 +35,7 @@
     aws_slug: "{{ cloudaws_raw.json.status.slug }}"
     aws_domain: "{{ cloudaws_raw.json.status.domain }}"
     aws_account: "{{ cloudaws_raw.json.spec.account }}"
-    aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath }}"
+    aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath | default('', true) }}"
     aws_base_domain: "{{ cloudaws_raw.json.spec.baseDomain }}"
 
 - name: Provision AWS cluster build on central cluster
@@ -75,7 +75,7 @@
   ignore_errors: true
 
 - name: Update PlatformOpenshift status
-  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
   vars:
     cr_api_version: hybridsovereign.redhat/v1alpha1
     cr_plural: platformopenshifts
@@ -127,7 +127,7 @@
   when: cb_cluster_installed | default(false) | bool
 
 - name: Update PlatformOpenshift status with OIDC info
-  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
   vars:
     cr_api_version: hybridsovereign.redhat/v1alpha1
     cr_plural: platformopenshifts

@@ -7,10 +7,28 @@
         assignment_operator_namespace: sovereign-cloud
         acm_central_sa_secret_name: assignment-acm-creator-sa
         acm_policy_namespace: sovereign-cloud-helpers
-        central_api_server: "{{ lookup('env', 'CENTRAL_API_SERVER') }}"
+        central_api_server: >-
+          {{ (CENTRAL_API_SERVER | default(lookup('env', 'CENTRAL_API_SERVER') | default('', true), true) | trim) }}
 
     - name: Resolve services cluster API connection from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/resolve_services_cluster_connection.yml"
+
+    # Single-cluster / missing env: fall back to the services API host for ACM calls.
+    - name: Ensure central API server for ACM Policy teardown
+      ansible.builtin.set_fact:
+        central_api_server: >-
+          {{ central_api_server
+             if (central_api_server | default('') | length > 0)
+             else (services_api_host | default('') | regex_replace('/$', '')) }}
+
+    - name: Require central API server for ACM teardown
+      ansible.builtin.assert:
+        that:
+          - central_api_server | length > 0
+          - central_api_server is match('^https?://')
+        fail_msg: >-
+          CENTRAL_API_SERVER is unset/empty and services_api_host fallback failed
+          (got '{{ central_api_server | default('') }}').
 
     - name: Read Assignment CR status from services cluster
       kubernetes.core.k8s_info:
