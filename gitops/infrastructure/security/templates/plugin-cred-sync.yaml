@@ -120,17 +120,37 @@ spec:
               if oc -n quay get route quay-quay >/dev/null 2>&1; then
                 QUAY_URL="https://$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}')"
               fi
-              QUAY_PASS=""
-              if oc get secret quay-quay-registry-managed-secret-keys -n quay >/dev/null 2>&1; then
-                QUAY_PASS=$(oc get secret quay-quay-registry-managed-secret-keys -n quay -o jsonpath='{.data.SECRET_KEY}' | base64 -d | head -c 32)
+              # Placeholder until Quay API initialize runs (hs-platform-configs PreSync owns real bootstrap).
+              # Never seed registry SECRET_KEY as the Database admin password.
+              QUAY_PASS="quay-bootstrap-pending"
+              if oc get secret quay-admin-credentials -n sovereign-cloud-plugins >/dev/null 2>&1; then
+                CUR=$(oc get secret quay-admin-credentials -n sovereign-cloud-plugins -o jsonpath='{.data.password}' | base64 -d || true)
+                TOK=$(oc get secret quay-admin-credentials -n sovereign-cloud-plugins -o jsonpath='{.data.token}' | base64 -d || true)
+                if [ -n "$CUR" ] && [ "$CUR" != "quay-bootstrap-pending" ]; then
+                  QUAY_PASS="$CUR"
+                fi
+                if [ -n "$TOK" ]; then
+                  oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
+                    --from-literal=username=quayadmin \
+                    --from-literal=password="$QUAY_PASS" \
+                    --from-literal=url="$QUAY_URL" \
+                    --from-literal=token="$TOK" \
+                    --dry-run=client -o yaml | oc apply -f -
+                else
+                  oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
+                    --from-literal=username=quayadmin \
+                    --from-literal=password="$QUAY_PASS" \
+                    --from-literal=url="$QUAY_URL" \
+                    --dry-run=client -o yaml | oc apply -f -
+                fi
+              else
+                oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
+                  --from-literal=username=quayadmin \
+                  --from-literal=password="$QUAY_PASS" \
+                  --from-literal=url="$QUAY_URL" \
+                  --dry-run=client -o yaml | oc apply -f -
               fi
-              [ -n "$QUAY_PASS" ] || QUAY_PASS="quay-bootstrap-pending"
-              oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
-                --from-literal=username=quayadmin \
-                --from-literal=password="$QUAY_PASS" \
-                --from-literal=url="$QUAY_URL" \
-                --dry-run=client -o yaml | oc apply -f -
-              echo "synced quay-admin-credentials"
+              echo "synced quay-admin-credentials (bootstrap pending until Quay initialize)"
 
               oc create secret generic rhbk-admin -n sovereign-secrets \
                 --from-literal=username="$KC_USER" \
@@ -250,14 +270,28 @@ spec:
               else:
                   print("WARN: no openshift token/password; skip openshift-*-kubeadmin seed")
 
-              def user_put(path, user, pw, url):
+              def user_put(path, user, pw, url, token=""):
                   if not user or not pw:
                       return
-                  put_kv(path, {"username": user, "password": pw, "url": url})
+                  data = {"username": user, "password": pw, "url": url}
+                  if token:
+                      data["token"] = token
+                  put_kv(path, data)
 
               user_put("rhbk-services-admin", os.environ["KC_USER"], os.environ["KC_PASS"], os.environ["KC_URL"])
               user_put("aap-admin", os.environ["AAP_USER"], os.environ["AAP_PASS"], os.environ["AAP_URL"])
-              user_put("quay-admin", "quayadmin", os.environ["QUAY_PASS"], os.environ["QUAY_URL"])
+              quay_tok = ""
+              try:
+                  quay_tok = subprocess.check_output(
+                      ["oc", "-n", "sovereign-cloud-plugins", "get", "secret", "quay-admin-credentials",
+                       "-o", "jsonpath={.data.token}"],
+                      text=True, stderr=subprocess.DEVNULL,
+                  ).strip()
+                  if quay_tok:
+                      quay_tok = subprocess.check_output(["base64", "-d"], input=quay_tok, text=True)
+              except Exception:
+                  quay_tok = ""
+              user_put("quay-admin", "quayadmin", os.environ["QUAY_PASS"], os.environ["QUAY_URL"], quay_tok)
               print("vault KV platform seed complete")
               PY
 ---

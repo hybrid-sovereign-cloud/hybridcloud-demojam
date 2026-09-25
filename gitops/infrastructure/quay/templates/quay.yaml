@@ -44,8 +44,31 @@ spec:
   generateBucketName: quay-datastore
   storageClassName: openshift-storage.noobaa.io
 ---
-# QuayRegistry with managed objectstorage initially; config Job will switch to ODF
-# when config-bundle exists. Minimal managed components for first bring-up.
+# Minimal config bundle: enable first-user initialize + superuser for API bootstrap.
+# Operator merges managed component settings (DB, redis, storage, hostname) into this.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: quay-config-bundle
+  namespace: quay
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+stringData:
+  config.yaml: |
+    FEATURE_USER_INITIALIZE: true
+    FEATURE_SUPERUSERS_FULL_ACCESS: true
+    FEATURE_USER_CREATION: false
+    FEATURE_TEAM_SYNCING: true
+    FEATURE_NONSUPERUSER_TEAM_SYNCING_SETUP: false
+    TEAM_RESYNC_STALE_TIME: "60m"
+    SUPER_USERS:
+      - quayadmin
+    AUTHENTICATION_TYPE: Database
+---
+# QuayRegistry with managed objectstorage initially. Minimal managed components for first bring-up.
 apiVersion: quay.redhat.com/v1
 kind: QuayRegistry
 metadata:
@@ -58,6 +81,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "20"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
+  configBundleSecret: quay-config-bundle
   components:
     - kind: objectstorage
       managed: true

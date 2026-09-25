@@ -41,10 +41,13 @@
         msg: QuayOrg {{ quayorg_cr_name }} not found in {{ quayorg_cr_namespace }}
       when: _quayorg_cr.resources | length == 0
 
-    - name: Set generation fact
+    - name: Load quayorg_spec from live CR
       ansible.builtin.set_fact:
+        quayorg_spec: "{{ _quayorg_cr.resources[0].spec | default({}) }}"
+        quayorg_quay_config_name: "{{ _quayorg_cr.resources[0].spec['quayConfig'] | default('') }}"
         quayorg_generation: "{{ _quayorg_cr.resources[0].metadata.generation | default(0) | int }}"
 
+    # ZTP race: QuayOrg often reconciles while QuayConfig AAP job is still running.
     - name: Wait for QuayConfig ready
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
@@ -52,7 +55,7 @@
         validate_certs: false
         api_version: hybridsovereign.redhat/v1alpha1
         kind: QuayConfig
-        name: "{{ quayorg_spec.quayConfig }}"
+        name: "{{ quayorg_quay_config_name }}"
         namespace: "{{ plugin_quay_config_namespace }}"
       register: _quay_config
       until: >-
@@ -63,12 +66,12 @@
 
     - name: Fail if QuayConfig not found
       ansible.builtin.fail:
-        msg: "QuayConfig {{ quayorg_spec.quayConfig }} not found in {{ plugin_quay_config_namespace }}"
+        msg: "QuayConfig {{ quayorg_quay_config_name }} not found in {{ plugin_quay_config_namespace }}"
       when: _quay_config.resources | length == 0
 
     - name: Fail if QuayConfig not ready after wait
       ansible.builtin.fail:
-        msg: "QuayConfig {{ quayorg_spec.quayConfig }} is not ready after waiting"
+        msg: "QuayConfig {{ quayorg_quay_config_name }} is not ready after waiting"
       when: not (_quay_config.resources[0].status.ready | default(false) | bool)
 
     - name: Read entity Namespace
@@ -113,12 +116,43 @@
           email: "{{ org_name }}@sovereign.local"
           description: "Sovereign tenant org for entity {{ entity_name }}"
         validate_certs: false
-        status_code: [200, 201, 400]
+        status_code: [200, 201, 400, 409]
       register: _org_create
       retries: 3
       delay: 10
-      until: _org_create.status | default(0) != 503
-      ignore_errors: true
+      until: (_org_create.status | default(0) | int) != 503
+      failed_when: >-
+        (_org_create.status | default(0) | int) not in [200, 201, 409]
+        and not (
+          (_org_create.status | default(0) | int) == 400
+          and (
+            ('exist' in (_org_create.json.message | default('') | lower))
+            or ('exist' in (_org_create.json.error_message | default('') | lower))
+            or ('exist' in (_org_create.json.error | default('') | lower))
+          )
+        )
+
+    - name: Verify Quay organization exists before marking ready
+      ansible.builtin.uri:
+        url: "{{ quay_url }}/api/v1/organization/{{ org_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ quay_api_token }}"
+        validate_certs: false
+        status_code: [200]
+      register: _org_get
+      retries: 5
+      delay: 5
+      until: (_org_get.status | default(0) | int) == 200
+
+    - name: Assert Quay organization GET succeeded
+      ansible.builtin.assert:
+        that:
+          - (_org_get.status | default(0) | int) == 200
+        fail_msg: >-
+          Quay org '{{ org_name }}' was not found after create
+          (GET /api/v1/organization/{{ org_name }} status={{ _org_get.status | default('none') }}).
+          Refusing to mark QuayOrg ready.
 
     - name: Resolve admin RBAC groups
       kubernetes.core.k8s_info:
@@ -196,7 +230,6 @@
           description: Admin team mapped from Keycloak RBAC groups
         validate_certs: false
         status_code: [200, 201, 400]
-      ignore_errors: true
 
     - name: Create creator team in Quay
       ansible.builtin.uri:
@@ -211,7 +244,6 @@
           description: Creator team mapped from Keycloak RBAC groups
         validate_certs: false
         status_code: [200, 201, 400]
-      ignore_errors: true
 
     - name: Create member team in Quay
       ansible.builtin.uri:
@@ -226,7 +258,6 @@
           description: Member team mapped from Keycloak RBAC groups
         validate_certs: false
         status_code: [200, 201, 400]
-      ignore_errors: true
 
     - name: Sync admin team with OIDC group
       ansible.builtin.uri:

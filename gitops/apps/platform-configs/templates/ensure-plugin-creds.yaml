@@ -98,33 +98,160 @@ spec:
               echo "ok aap-admin-credentials → $AAP_URL"
 
               # --- Quay (provisioned by hs-quay wave 30; must exist before this PreSync) ---
+              # Do NOT use registry SECRET_KEY as the admin password — Database auth needs a
+              # real user. Prefer existing token; else CSRF signin; else /api/v1/user/initialize.
               QUAY_URL="https://quay-quay-quay.${APPS_DOMAIN}"
               if oc -n quay get route quay-quay >/dev/null 2>&1; then
                 QUAY_URL="https://$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}')"
               fi
-              QUAY_PASS=""
+              echo "waiting for Quay API at $QUAY_URL"
               for i in $(seq 1 90); do
-                if oc get secret quay-quay-registry-managed-secret-keys -n quay >/dev/null 2>&1; then
-                  QUAY_PASS=$(oc get secret quay-quay-registry-managed-secret-keys -n quay -o jsonpath='{.data.SECRET_KEY}' | base64 -d | head -c 32)
-                  [ -n "$QUAY_PASS" ] && break
-                fi
-                # Prefer already-synced plugin secret if Quay managed secret layout differs
-                if oc get secret quay-admin-credentials -n sovereign-cloud-plugins >/dev/null 2>&1; then
-                  CUR=$(oc get secret quay-admin-credentials -n sovereign-cloud-plugins -o jsonpath='{.data.password}' | base64 -d || true)
-                  if [ -n "$CUR" ] && [ "$CUR" != "quay-bootstrap-pending" ]; then
-                    QUAY_PASS="$CUR"
-                    break
-                  fi
-                fi
-                echo "  waiting Quay admin secret (${i}/90)"
+                code=$(curl -sk -o /dev/null -w '%{http_code}' "$QUAY_URL/csrf_token" || true)
+                [ "$code" = "200" ] && break
+                echo "  waiting Quay csrf_token (${i}/90) http=$code"
                 sleep 10
               done
-              [ -n "$QUAY_PASS" ] && [ "$QUAY_PASS" != "quay-bootstrap-pending" ] \
-                || { echo "FATAL: Quay admin password not available after wait" >&2; exit 1; }
-              oc create secret generic quay-admin-credentials -n sovereign-cloud-plugins \
-                --from-literal=username=quayadmin \
-                --from-literal=password="$QUAY_PASS" \
-                --from-literal=url="$QUAY_URL" \
-                --dry-run=client -o yaml | oc apply -f -
+              code=$(curl -sk -o /dev/null -w '%{http_code}' "$QUAY_URL/csrf_token" || true)
+              [ "$code" = "200" ] || { echo "FATAL: Quay API not ready at $QUAY_URL" >&2; exit 1; }
+
+              export QUAY_URL
+              python3 - <<'PY'
+              import json, os, ssl, subprocess, sys, urllib.error, urllib.request
+              from http.cookiejar import CookieJar
+
+              base = os.environ["QUAY_URL"].rstrip("/")
+              ctx = ssl._create_unverified_context()
+
+              def secret_field(name, key):
+                  try:
+                      b = subprocess.check_output(
+                          ["oc", "-n", "sovereign-cloud-plugins", "get", "secret", name,
+                           "-o", "jsonpath={.data." + key + "}"],
+                          text=True, stderr=subprocess.DEVNULL,
+                      ).strip()
+                      if not b:
+                          return ""
+                      return subprocess.check_output(["base64", "-d"], input=b, text=True)
+                  except Exception:
+                      return ""
+
+              def apply_secret(user, password, token):
+                  cmd = [
+                      "oc", "create", "secret", "generic", "quay-admin-credentials",
+                      "-n", "sovereign-cloud-plugins",
+                      f"--from-literal=username={user}",
+                      f"--from-literal=password={password}",
+                      f"--from-literal=url={base}",
+                      f"--from-literal=token={token}",
+                      "--dry-run=client", "-o", "yaml",
+                  ]
+                  yaml = subprocess.check_output(cmd)
+                  subprocess.run(["oc", "apply", "-f", "-"], input=yaml, check=True)
+
+              def bearer_ok(token):
+                  if not token:
+                      return False
+                  req = urllib.request.Request(
+                      base + "/api/v1/user/",
+                      headers={"Authorization": f"Bearer {token}"},
+                  )
+                  try:
+                      with urllib.request.urlopen(req, context=ctx, timeout=30) as r:
+                          return r.status == 200
+                  except Exception:
+                      return False
+
+              def call(opener, method, path, body=None, csrf=None):
+                  data = None if body is None else json.dumps(body).encode()
+                  req = urllib.request.Request(base + path, data=data, method=method)
+                  req.add_header("Content-Type", "application/json")
+                  req.add_header("X-Requested-With", "XMLHttpRequest")
+                  if csrf:
+                      req.add_header("X-CSRF-Token", csrf)
+                  try:
+                      with opener.open(req, timeout=60) as resp:
+                          return resp.status, json.loads(resp.read().decode() or "{}")
+                  except urllib.error.HTTPError as e:
+                      try:
+                          payload = json.loads(e.read().decode() or "{}")
+                      except Exception:
+                          payload = {}
+                      return e.code, payload
+
+              def csrf_signin_apptoken(user, password):
+                  jar = CookieJar()
+                  opener = urllib.request.build_opener(
+                      urllib.request.HTTPSHandler(context=ctx),
+                      urllib.request.HTTPCookieProcessor(jar),
+                  )
+                  st, body = call(opener, "GET", "/csrf_token")
+                  if st != 200 or not body.get("csrf_token"):
+                      return ""
+                  csrf = body["csrf_token"]
+                  st, body = call(opener, "POST", "/api/v1/signin",
+                                  {"username": user, "password": password}, csrf=csrf)
+                  if st != 200 or not body.get("success"):
+                      return ""
+                  st, body = call(opener, "GET", "/csrf_token")
+                  csrf = body.get("csrf_token") or csrf
+                  st, body = call(opener, "POST", "/api/v1/user/apptoken",
+                                  {"title": "sovereign-ztp-bootstrap"}, csrf=csrf)
+                  tok = body.get("token")
+                  if isinstance(tok, dict):
+                      return tok.get("token") or ""
+                  return tok if isinstance(tok, str) else ""
+
+              def initialize_admin(user, password):
+                  req = urllib.request.Request(
+                      base + "/api/v1/user/initialize",
+                      data=json.dumps({
+                          "username": user,
+                          "password": password,
+                          "email": f"{user}@sovereign.local",
+                          "access_token": True,
+                      }).encode(),
+                      method="POST",
+                      headers={"Content-Type": "application/json"},
+                  )
+                  try:
+                      with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+                          return r.status, json.loads(r.read().decode() or "{}")
+                  except urllib.error.HTTPError as e:
+                      try:
+                          return e.code, json.loads(e.read().decode() or "{}")
+                      except Exception:
+                          return e.code, {}
+
+              user = secret_field("quay-admin-credentials", "username") or "quayadmin"
+              password = secret_field("quay-admin-credentials", "password")
+              token = secret_field("quay-admin-credentials", "token")
+
+              if bearer_ok(token):
+                  apply_secret(user, password or "unset", token)
+                  print("ok quay-admin-credentials (existing token)")
+                  sys.exit(0)
+
+              if password and password != "quay-bootstrap-pending":
+                  token = csrf_signin_apptoken(user, password)
+                  if bearer_ok(token):
+                      apply_secret(user, password, token)
+                      print("ok quay-admin-credentials (csrf+apptoken)")
+                      sys.exit(0)
+
+              # Fresh registry: create first superuser via initialize API
+              import secrets
+              password = secrets.token_urlsafe(24)
+              st, body = initialize_admin(user, password)
+              token = body.get("access_token") or body.get("token") or ""
+              if isinstance(token, dict):
+                  token = token.get("token") or ""
+              if st in (200, 201) and bearer_ok(token):
+                  apply_secret(user, password, token)
+                  print("ok quay-admin-credentials (user/initialize)")
+                  sys.exit(0)
+
+              print(f"FATAL: Quay admin bootstrap failed status={st} keys={list(body.keys())}", file=sys.stderr)
+              sys.exit(1)
+              PY
               echo "ok quay-admin-credentials → $QUAY_URL"
               echo "ZTP Sync: plugin secrets ready"

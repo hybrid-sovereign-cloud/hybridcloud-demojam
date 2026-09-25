@@ -20,6 +20,18 @@
 
 ## Change Log
 
+### 2026-09-25 — Fix QuayOrg false-success (CSRF auth + org GET assert)
+
+| Field | Value |
+|-------|-------|
+| Change summary | QuayOrg marked `ready=true` without creating the org: `/api/v1/signin` needs CSRF and returns no `access_token`; code fell back to password-as-Bearer (401) and `ignore_errors` on create. Fixed CSRF→apptoken Bearer obtain, removed password-as-Bearer, assert GET org 200 before ready. Quay config enables `FEATURE_USER_INITIALIZE`; cred sync seeds real admin+token (not SECRET_KEY). |
+| Root cause | (1) signin without CSRF → fail → password used as Bearer → 401; (2) org/team URI tasks `ignore_errors: true`; (3) no post-create GET verification; (4) cred bootstrap stored registry SECRET_KEY as admin password |
+| Paths touched | `eda/common/tasks/obtain_quay_admin_credentials.yml`, `eda/rulebooks/common/tasks/obtain_quay_admin_credentials.yml`, `eda/{rulebooks,plugin-quay}/roles/quayorg_provision/tasks/main.yml`, `gitops/infrastructure/quay/**`, `gitops/infrastructure/security/templates/plugin-cred-sync.yaml`, `gitops/apps/platform-configs/templates/ensure-plugin-creds.yaml`, this file |
+| Rollback | Revert this commit; re-annotate QuayOrg after prior playbooks restore |
+| Status | green (code) |
+| DE rebuild | **Not required** for AAP JT path (`scm_update_on_launch` on HybridSovereign EDA). Optional `make -C eda/plugin-quay de-plugin-quay-build-push` only if EDA `run_playbook` activations bake roles from the DE image. |
+| Next action | Push main; Argo sync `hs-quay` + re-run platform-configs PreSync for admin initialize; annotate QuayOrg to requeue AAP job 87 successor |
+
 ### 2026-09-25 — DEV: Vault HA uses integrated raft (not file)
 
 | Field | Value |
