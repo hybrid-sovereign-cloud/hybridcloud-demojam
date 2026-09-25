@@ -10,7 +10,7 @@
         central_api_server: "{{ lookup('env', 'CENTRAL_API_SERVER') }}"
 
     - name: Resolve services cluster API connection from Vault
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
+      ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/resolve_services_cluster_connection.yml"
 
     - name: Read Assignment CR status from services cluster
       kubernetes.core.k8s_info:

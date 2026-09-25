@@ -65,14 +65,39 @@
     path: /tmp/sovereign-assignment-chart/sovereign-assignment
     state: absent
 
+# de-cloudoso may omit helm; bootstrap into /tmp when missing.
+- name: Ensure helm CLI is available
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if command -v helm >/dev/null 2>&1; then
+      command -v helm
+      exit 0
+    fi
+    curl -fsSL -o /tmp/helm.tgz https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz
+    tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+    mv /tmp/linux-amd64/helm /tmp/helm
+    chmod 755 /tmp/helm
+    echo /tmp/helm
+  args:
+    executable: /bin/bash
+  register: helm_bin_path
+  changed_when: false
+
+- name: Set helm binary path
+  ansible.builtin.set_fact:
+    helm_bin: "{{ helm_bin_path.stdout | trim }}"
+
 - name: Pull sovereign-assignment chart for local templating
   ansible.builtin.command:
-    cmd: >-
-      helm pull
-      oci://{{ oci_registry_host }}/hybrid-sovereign/sovereign-assignment
-      --version {{ sovereign_assignment_chart_version }}
-      --untar
-      --destination /tmp/sovereign-assignment-chart/
+    argv:
+      - "{{ helm_bin }}"
+      - pull
+      - "oci://{{ oci_registry_host }}/hybrid-sovereign/sovereign-assignment"
+      - --version
+      - "{{ sovereign_assignment_chart_version }}"
+      - --untar
+      - --destination
+      - /tmp/sovereign-assignment-chart/
 
 - name: Build helm projects arguments
   ansible.builtin.set_fact:
@@ -86,7 +111,7 @@
 - name: Render sovereign-assignment chart templates
   ansible.builtin.shell:
     cmd: >-
-      helm template sovereign-assignment
+      {{ helm_bin }} template sovereign-assignment
       /tmp/sovereign-assignment-chart/sovereign-assignment
       --set entity={{ acm_entity | quote }}
       --set team={{ acm_team | quote }}
