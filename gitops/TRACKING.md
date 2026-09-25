@@ -481,3 +481,7 @@ Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes
 | DEV-004 | 2026-09-25 | AAPOrg teardown marks deletionComplete while org remains | Teardown looked up Route `sovereign-aap` (missing); DNS fail ignored; still patched deletionComplete | Resolve URL from admin secret.url or Route `aap`; assert org gone before deletionComplete | 1 (fixing) |
 
 | DEV-005 | 2026-09-25 | QuayOrg teardown marks deletionComplete while org remains | Teardown used unset `quay_url` (relative path), ignored DELETE failure; Argo autosync recreated CR | Use obtain_quay_admin_credentials; assert GET 404 before deletionComplete; re-disable Argo autosync live | 1 (fixing) |
+
+| DEV-006 | 2026-09-25 | Vault HA raft followers stay sealed (1/3 Ready) | Followers retry_join but wait for unseal keys; only leader voter in raft config | Need auto-unseal or join-token unseal path for non-leader pods after raft migrate | 1 (open) |
+
+| DEV-007 | 2026-09-25 | Assignment ACM Policy NonCompliant: Argo/Istio CRDs missing on spoke | Policy enforces AppProject/ArgoCD/SMCP but hosted spoke has no GitOps/Maistra operators | Platform or Assignment must install GitOps + OpenShift Service Mesh operators before CR objects | 1 (open) |
