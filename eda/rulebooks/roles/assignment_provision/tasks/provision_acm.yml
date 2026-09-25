@@ -252,7 +252,8 @@
         map(attribute='compliant') | list | first | default('') == 'Compliant'
       )
     )
-  retries: 24
+  # Operators (GitOps / Service Mesh) must install CRDs before AppProject/SMCP comply.
+  retries: 60
   delay: 10
   no_log: true
 

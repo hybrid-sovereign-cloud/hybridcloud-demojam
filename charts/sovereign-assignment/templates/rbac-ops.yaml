@@ -1,0 +1,50 @@
+{{- if ne .Values.toolRbac.assignmentOpsGroup "" }}
+{{- $devopsNs := printf "%s-%s-devops" .Values.entity .Values.team }}
+{{- $istioNs := printf "%s-%s-istio" .Values.entity .Values.team }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: assignment-ops-edit
+  namespace: {{ $devopsNs }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: {{ .Values.toolRbac.assignmentOpsGroup }}
+{{- if $.Values.features.istio }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: assignment-ops-edit
+  namespace: {{ $istioNs }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: {{ .Values.toolRbac.assignmentOpsGroup }}
+{{- end }}
+{{- range .Values.projects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: assignment-ops-view
+  namespace: {{ $.Values.entity }}-{{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: {{ $.Values.toolRbac.assignmentOpsGroup }}
+{{- end }}
+{{- end }}

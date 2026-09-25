@@ -1,6 +1,6 @@
 ##@ Build Artifacts
 
-SOVEREIGN_ASSIGNMENT_CHART_REPO ?= ../Assignment/charts/sovereign-assignment
+SOVEREIGN_ASSIGNMENT_CHART_REPO ?= ../charts/sovereign-assignment
 
 .PHONY: upload-sovereign-assignment-chart
 upload-sovereign-assignment-chart: check-env ## Package and push sovereign-assignment chart to OCI registry

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.entity }}-{{ .Values.team }}-devops
+  labels:
+    team: {{ printf "%s-%s" .Values.entity .Values.team | quote }}
+    hybridsovereign.redhat/entity: {{ .Values.entity | quote }}
+    hybridsovereign.redhat/team: {{ .Values.team | quote }}
+    hybridsovereign.redhat/assignment-devops: "true"

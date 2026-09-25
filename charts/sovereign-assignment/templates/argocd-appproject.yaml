@@ -1,0 +1,19 @@
+{{- if .Values.features.gitops }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.entity }}-{{ .Values.team }}-project
+  namespace: {{ .Values.entity }}-{{ .Values.team }}-devops
+spec:
+  description: "Team project scope for {{ .Values.entity }}/{{ .Values.team }} — restricts ArgoCD to team namespaces"
+  sourceRepos:
+    - "*"
+  destinations:
+    {{- range .Values.projects }}
+    - namespace: {{ $.Values.entity }}-{{ . }}
+      server: https://kubernetes.default.svc
+    {{- end }}
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+{{- end }}

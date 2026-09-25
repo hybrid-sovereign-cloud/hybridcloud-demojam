@@ -1,0 +1,18 @@
+{{- if .Values.features.gitops }}
+apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+metadata:
+  name: {{ .Values.entity }}-{{ .Values.team }}-argocd
+  namespace: {{ .Values.entity }}-{{ .Values.team }}-devops
+spec:
+  server:
+    route:
+      enabled: true
+      tls:
+        termination: reencrypt
+        insecureEdgeTerminationPolicy: Redirect
+  rbac:
+    policy: |
+      g, system:cluster-admins, role:admin
+  sourceNamespaces: []
+{{- end }}

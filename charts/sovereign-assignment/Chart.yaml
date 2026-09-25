@@ -1,0 +1,18 @@
+apiVersion: v2
+appVersion: 0.2.3
+description: Team environment chart for Hybrid Sovereign Cloud. Deployed to spoke
+  OCP clusters by the Assignment operator via ACM ConfigurationPolicy. Creates the
+  team devops namespace (with scoped ArgoCD instance), per-project namespaces, Istio
+  namespace with ServiceMeshControlPlane, and RBAC RoleBindings for the four assignment
+  access levels.
+keywords:
+- openshift
+- assignment
+- argocd
+- istio
+- rbac
+maintainers:
+- name: hybrid-sovereign-cloud
+name: sovereign-assignment
+type: application
+version: 0.2.4

@@ -1,0 +1,13 @@
+entity: ""
+team: ""
+projects: []
+
+features:
+  istio: true
+  gitops: true
+
+toolRbac:
+  assignmentAdminGroup: ""
+  assignmentDeveloperGroup: ""
+  assignmentViewerGroup: ""
+  assignmentOpsGroup: ""

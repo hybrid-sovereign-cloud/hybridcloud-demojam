@@ -485,3 +485,5 @@ Wipe preserves dockercfg/builder SAs; skips emptying external-secrets; refreshes
 | DEV-006 | 2026-09-25 | Vault HA raft followers stay sealed (1/3 Ready) | Followers retry_join but wait for unseal keys; only leader voter in raft config | Need auto-unseal or join-token unseal path for non-leader pods after raft migrate | 1 (open) |
 
 | DEV-007 | 2026-09-25 | Assignment ACM Policy NonCompliant: Argo/Istio CRDs missing on spoke | Policy enforces AppProject/ArgoCD/SMCP but hosted spoke has no GitOps/Maistra operators | Platform or Assignment must install GitOps + OpenShift Service Mesh operators before CR objects | 1 (open) |
+
+| DEV-007b | 2026-09-25 | Assignment spoke lacks GitOps/Maistra operators | sovereign-assignment chart emitted Argo/SMCP without Subscriptions | Vendor chart; add 00-operators Subscriptions; chart 0.2.4; wait retries 60 | 1 (fixing) |

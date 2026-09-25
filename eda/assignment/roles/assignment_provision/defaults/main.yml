@@ -5,7 +5,7 @@ acm_policy_namespace: sovereign-cloud-helpers
 central_api_server: >-
   {{ (CENTRAL_API_SERVER | default(lookup('env', 'CENTRAL_API_SERVER') | default('', true), true) | trim) }}
 oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
-sovereign_assignment_chart_version: "0.2.3"
+sovereign_assignment_chart_version: "0.2.4"
 assignment_acm_policy_name: ""
 assignment_provisioned: false
 

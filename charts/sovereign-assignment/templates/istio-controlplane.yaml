@@ -1,0 +1,31 @@
+{{- if .Values.features.istio }}
+apiVersion: maistra.io/v2
+kind: ServiceMeshControlPlane
+metadata:
+  name: basic
+  namespace: {{ .Values.entity }}-{{ .Values.team }}-istio
+spec:
+  version: v2.6
+  profiles:
+    - default
+  tracing:
+    type: None
+  addons:
+    kiali:
+      enabled: false
+    grafana:
+      enabled: false
+    prometheus:
+      enabled: false
+---
+apiVersion: maistra.io/v1
+kind: ServiceMeshMemberRoll
+metadata:
+  name: default
+  namespace: {{ .Values.entity }}-{{ .Values.team }}-istio
+spec:
+  members:
+    {{- range .Values.projects }}
+    - {{ $.Values.entity }}-{{ . }}
+    {{- end }}
+{{- end }}

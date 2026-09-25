@@ -1,0 +1,32 @@
+{{- if or .Values.features.gitops .Values.features.istio }}
+# Install operators before ArgoCD / ServiceMesh CRs (same ConfigurationPolicy).
+# openshift-operators Namespace is present on all OpenShift spokes.
+{{- if .Values.features.gitops }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-gitops-operator
+  namespace: openshift-operators
+spec:
+  channel: latest
+  installPlanApproval: Automatic
+  name: openshift-gitops-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+{{- end }}
+{{- if .Values.features.istio }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: servicemeshoperator
+  namespace: openshift-operators
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: servicemeshoperator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+{{- end }}
+{{- end }}
