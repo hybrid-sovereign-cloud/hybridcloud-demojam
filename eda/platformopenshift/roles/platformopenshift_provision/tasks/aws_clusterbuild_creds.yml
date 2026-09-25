@@ -32,6 +32,31 @@
           }}
       no_log: true
 
+    # mce-cluster-build ExternalSecret reads providerCredsVault; seed Vault from the entity Secret.
+    - name: Set providerCreds Vault path for credentialsSecretRef CloudAWS
+      ansible.builtin.set_fact:
+        cb_provider_creds_vault: "aws/accounts/{{ aws_account }}/{{ aws_slug }}/provider-creds"
+        vault_root_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+      no_log: true
+
+    - name: Write AWS provider credentials to Vault for Hive ExternalSecret
+      ansible.builtin.uri:
+        url: "{{ vault_init_addr }}/v1/hybridsovereign/data/{{ cb_provider_creds_vault }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          data:
+            AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+            AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+            ACCOUNT_ID: "{{ aws_account_id }}"
+            aws_access_key_id: "{{ aws_access_key_id }}"
+            aws_secret_access_key: "{{ aws_secret_access_key }}"
+        status_code: [200, 204]
+        validate_certs: false
+      no_log: true
+
 - name: Load AWS credentials from Vault via ExternalSecret
   when: (aws_credentials_secret_name | default('') | length) == 0
   block:
