@@ -37,6 +37,7 @@
     aws_account: "{{ cloudaws_raw.json.spec.account }}"
     aws_vault_path: "{{ cloudaws_raw.json.spec.vaultPath | default('', true) }}"
     aws_base_domain: "{{ cloudaws_raw.json.spec.baseDomain }}"
+    aws_credentials_secret_name: "{{ (cloudaws_raw.json.spec.credentialsSecretRef | default({})).name | default('') }}"
 
 - name: Provision AWS cluster build on central cluster
   ansible.builtin.include_tasks: aws_clusterbuild.yml
