@@ -44,7 +44,7 @@
         cloudaws_generation: "{{ cloudaws_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
         cloudaws_spec: "{{ cloudaws_cr_lookup.resources[0].spec | default({}) }}"
         aws_account: "{{ cloudaws_cr_lookup.resources[0].spec.account }}"
-        aws_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath }}"
+        aws_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath | default('', true) }}"
         aws_base_domain: "{{ cloudaws_cr_lookup.resources[0].spec.baseDomain }}"
         ep_existing_slug: "{{ cloudaws_cr_lookup.resources[0].status.slug | default('') }}"
       when: cloudaws_ns_lookup.resources | length > 0

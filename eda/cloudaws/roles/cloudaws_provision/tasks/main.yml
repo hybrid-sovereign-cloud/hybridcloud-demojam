@@ -10,20 +10,7 @@
           namespace: "{{ event_payload.regarding.namespace }}"
 
     - name: Resolve services cluster API connection from Vault
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
-
-    - name: Announce AAP job started in CR status
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
-      vars:
-        cr_api_version: hybridsovereign.redhat/v1alpha1
-        cr_plural: cloudawss
-        cr_name: "{{ cloudaws_cr_name }}"
-        cr_namespace: "{{ cloudaws_cr_namespace }}"
-        cr_status_body:
-          status: reconciling
-          ready: false
-          message: "AAP job started"
-      when: lookup('env', 'TOWER_JOB_ID') | length > 0
+      ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/resolve_services_cluster_connection.yml"
 
     - name: Read CloudAWS CR from services cluster
       kubernetes.core.k8s_info:
@@ -57,7 +44,7 @@
         cloudaws_generation: "{{ cloudaws_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
         cloudaws_spec: "{{ cloudaws_cr_lookup.resources[0].spec | default({}) }}"
         aws_account: "{{ cloudaws_cr_lookup.resources[0].spec.account }}"
-        aws_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath }}"
+        aws_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath | default('', true) }}"
         aws_base_domain: "{{ cloudaws_cr_lookup.resources[0].spec.baseDomain }}"
         ep_existing_slug: "{{ cloudaws_cr_lookup.resources[0].status.slug | default('') }}"
       when: cloudaws_ns_lookup.resources | length > 0
@@ -79,7 +66,7 @@
         cloudaws_status_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
     - name: Update CloudAWS status as ready on services cluster
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
       vars:
         cr_api_version: hybridsovereign.redhat/v1alpha1
         cr_plural: cloudawss
@@ -109,7 +96,7 @@
 
   rescue:
     - name: Mark CloudAWS as failed on services cluster
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      ansible.builtin.include_tasks: "{{ role_path }}/../../common/tasks/patch_cr_status.yml"
       vars:
         cr_api_version: hybridsovereign.redhat/v1alpha1
         cr_plural: cloudawss
