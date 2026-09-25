@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import * as React from 'react';
 import { PageSection, Tabs, Tab, TabTitleText } from '@patternfly/react-core';
 import { PageHeader, useTranslation } from '@hybridsovereign/shared';

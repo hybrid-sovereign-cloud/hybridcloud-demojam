@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import * as React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, PageSection } from '@patternfly/react-core';

@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import { makeTenantDetailPage } from './TenantTeamDetailPage';
 
 export const TenantProjectDetailPage = makeTenantDetailPage('Project', 'Projects', 'projects');

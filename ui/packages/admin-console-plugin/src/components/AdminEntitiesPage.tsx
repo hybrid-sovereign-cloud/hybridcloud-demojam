@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageSection, Button } from '@patternfly/react-core';
@@ -12,19 +13,11 @@ import {
   KIND_PLURALS,
   useK8sResourceList,
   K8sResource,
-  configureK8sClient,
   ResourceListTable,
   filterResourcesByQuery,
   useTranslation,
 } from '@hybridsovereign/shared';
-import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
 import '@hybridsovereign/shared/styles/openshift.css';
-
-configureK8sClient({
-  baseUrl: '/api/kubernetes',
-  fetchFn: consoleFetch as unknown as typeof fetch,
-  apiStyle: 'raw',
-});
 
 type SovereignResource = K8sResource & {
   status?: OperatorStatus;

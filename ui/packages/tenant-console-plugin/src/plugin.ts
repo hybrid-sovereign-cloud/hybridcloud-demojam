@@ -1,18 +1,6 @@
-import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
-import { configureK8sClient, configurePermissionsClient } from '@hybridsovereign/shared';
+import './consoleK8sBootstrap';
 
 // Do not call initI18n() here — shared react-i18next would stomp console i18n.
-
-configureK8sClient({
-  baseUrl: '/api/kubernetes',
-  fetchFn: consoleFetch as unknown as typeof fetch,
-  apiStyle: 'raw',
-});
-
-configurePermissionsClient('/api/kubernetes', {
-  style: 'ssar',
-  fetchFn: consoleFetch as unknown as typeof fetch,
-});
 
 export { default as TenantOverviewPage } from './components/TenantOverviewPage';
 export { default as TenantTeamsPage } from './components/TenantTeamsPage';

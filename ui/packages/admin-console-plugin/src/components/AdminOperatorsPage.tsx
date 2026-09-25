@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import * as React from 'react';
 import { PageSection } from '@patternfly/react-core';
 import { useTranslation } from '@hybridsovereign/shared';

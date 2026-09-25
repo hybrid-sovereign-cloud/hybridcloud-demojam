@@ -1,6 +1,6 @@
 {
   "name": "@hybridsovereign/admin-console-plugin",
-  "version": "1.2.30",
+  "version": "1.2.31",
   "private": true,
   "description": "OpenShift Console dynamic plugin for Hybrid Sovereign admin views",
   "main": "dist/plugin-entry.js",
@@ -11,7 +11,7 @@
   },
   "consolePlugin": {
     "name": "sovereign-admin-plugin",
-    "version": "1.2.30",
+    "version": "1.2.31",
     "displayName": "Sovereign Cloud",
     "description": "Sovereign Cloud admin perspective \u2014 Entities, Personas, Services, Operators",
     "exposedModules": {

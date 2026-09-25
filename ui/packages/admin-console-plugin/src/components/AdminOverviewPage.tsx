@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import * as React from 'react';
 import { useMemo, Component, type ReactNode } from 'react';
 import {

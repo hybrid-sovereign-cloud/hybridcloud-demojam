@@ -1,3 +1,4 @@
+import '../consoleK8sBootstrap';
 import { makeAdminDetailPage } from './AdminResourceDetailPage';
 
 export const AdminPersonaDetailPage = makeAdminDetailPage(
