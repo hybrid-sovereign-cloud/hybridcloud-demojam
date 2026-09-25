@@ -270,11 +270,17 @@ async function k8sFetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function normalizeListPayload<T>(data: unknown): T[] {
-  if (Array.isArray(data)) return data as T[];
-  if (data && typeof data === 'object' && Array.isArray((data as { items?: T[] }).items)) {
-    return (data as { items: T[] }).items;
+  let items: unknown[] = [];
+  if (Array.isArray(data)) items = data;
+  else if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown[] }).items)) {
+    items = (data as { items: unknown[] }).items;
   }
-  return [];
+  // Drop holes / non-objects / entries without metadata.name (dashboard proxies sometimes emit sparse lists).
+  return items.filter((item): item is T => {
+    if (!item || typeof item !== 'object') return false;
+    const name = (item as { metadata?: { name?: unknown } }).metadata?.name;
+    return typeof name === 'string' && name.length > 0;
+  });
 }
 
 /** Create a core/v1 Secret in a namespace (credentials for CloudAWS / CloudOSO). */

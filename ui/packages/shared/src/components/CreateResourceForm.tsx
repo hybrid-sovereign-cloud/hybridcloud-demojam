@@ -281,21 +281,50 @@ export function CreateResourceForm({
   const gateways = useK8sResourceList<K8sResource>('CloudGateway', { namespace: 'sovereign-cloud', enabled: type === 'transportlink' });
 
 
-  const names = (items: K8sResource[]) => items.map((i) => ({ value: i.metadata.name, label: i.metadata.name }));
+  const names = (items: K8sResource[] | undefined | null) =>
+    (items ?? [])
+      .map((i) => i?.metadata?.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0)
+      .map((n) => ({ value: n, label: n }));
+
+  const firstName = (items: K8sResource[] | undefined | null): string | undefined =>
+    names(items)[0]?.value;
 
   useEffect(() => {
-    if (type === 'persona' && !namespace && !entityName && entities.items[0]) {
-      setEntityName(entities.items[0].metadata.name);
+    if (type === 'persona' && !namespace && !entityName) {
+      const n = firstName(entities.items);
+      if (n) setEntityName(n);
     }
     if (type === 'rbac' || type === 'vault') {
-      if (!rbacConfig && rbacConfigs.items[0]) setRbacConfig(rbacConfigs.items[0].metadata.name);
+      if (!rbacConfig) {
+        const n = firstName(rbacConfigs.items);
+        if (n) setRbacConfig(n);
+      }
     }
-    if (type === 'aaporg' && !aapConfig && aapConfigs.items[0]) setAapConfig(aapConfigs.items[0].metadata.name);
-    if (type === 'quayorg' && !quayConfig && quayConfigs.items[0]) setQuayConfig(quayConfigs.items[0].metadata.name);
-    if (type === 'assignment' && !teamRef && teams.items[0]) setTeamRef(teams.items[0].metadata.name);
-    if (type === 'persona' && !rbacRef && rbacs.items[0]) setRbacRef(rbacs.items[0].metadata.name);
-    if (type === 'vaultkv' && !vaultRef && vaults.items[0]) setVaultRef(vaults.items[0].metadata.name);
-    if (type === 'migration' && !cloudosoRef && cloudosos.items[0]) setCloudosoRef(cloudosos.items[0].metadata.name);
+    if (type === 'aaporg' && !aapConfig) {
+      const n = firstName(aapConfigs.items);
+      if (n) setAapConfig(n);
+    }
+    if (type === 'quayorg' && !quayConfig) {
+      const n = firstName(quayConfigs.items);
+      if (n) setQuayConfig(n);
+    }
+    if (type === 'assignment' && !teamRef) {
+      const n = firstName(teams.items);
+      if (n) setTeamRef(n);
+    }
+    if (type === 'persona' && !rbacRef) {
+      const n = firstName(rbacs.items);
+      if (n) setRbacRef(n);
+    }
+    if (type === 'vaultkv' && !vaultRef) {
+      const n = firstName(vaults.items);
+      if (n) setVaultRef(n);
+    }
+    if (type === 'migration' && !cloudosoRef) {
+      const n = firstName(cloudosos.items);
+      if (n) setCloudosoRef(n);
+    }
   }, [
     type,
     namespace,
