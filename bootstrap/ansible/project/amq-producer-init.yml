@@ -1,7 +1,0 @@
----
-- name: Seed AMQ producer and consumer credentials in Vault
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  roles:
-    - amq-producer-init

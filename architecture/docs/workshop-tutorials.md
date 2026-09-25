@@ -900,7 +900,7 @@ Applications are organized into three directories under `bootstrap/helm/central/
 | `servicesCluster/` | Hub | Vault-services, RHBK-services, AAP, Gitea |
 | `hybridSovereignOperators/` | Hub | Custom operators, plugins, dashboards |
 
-See [obsolete 30-app-of-apps](../../../obsolete/docs/technical/30-app-of-apps-structure.md) for historical layout; live path is `gitops/`.
+Live deploy path is `gitops/`.
 
 ---
 

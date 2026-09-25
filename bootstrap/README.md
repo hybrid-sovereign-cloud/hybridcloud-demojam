@@ -80,4 +80,3 @@ Prefer documenting new day-2 flows under [`../docs/`](../docs/).
 
 - [docs/README.md](../docs/README.md)
 - [gitops/ZTP.md](../gitops/ZTP.md)
-- Obsolete dual-cluster notes: [`../obsolete/`](../obsolete/)

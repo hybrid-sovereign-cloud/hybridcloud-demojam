@@ -114,7 +114,6 @@
 
 | Step | Verification | Gate |
 |------|--------------|------|
-| Kafka cluster | `oc get kafka hybridsovereign-kafka -n amq-streams` | Ready |
 | Topics | `hybridsovereign-events`, `hybridsovereign-audit` | Created |
 
 ### Phase B6: MTV
@@ -166,12 +165,9 @@
 
 ## Mega-Phase D — Event System
 
-**Specs**: 016 (AMQ Streams). Spec 015 Event Forwarder is **retired** (`eventForwarder.enabled: false`).
 
 | Step | Verification | Gate |
 |------|--------------|------|
-| amq-streams / Kafka | Running | Operators publish directly to Kafka |
-| event-forwarder | Absent / disabled | Do **not** require Deployment Running |
 | TC-F007 | Entity event on topic | PASS |
 | EDA activations | Running | rulebooks consume Kafka |
 

@@ -10,7 +10,6 @@ Design specs for platform features. **Day-2 usage** (simple flows, workshop, how
 |--------|---------|
 | **KEEP** | Spec matches current implementation |
 | **UPDATE** | Spec still needed but details drift from live deploy |
-| **ARCHIVE** | Superseded — see `archive/` |
 
 ## Index
 
@@ -30,9 +29,6 @@ Design specs for platform features. **Day-2 usage** (simple flows, workshop, how
 | 012 | [Plugin RBAC](./012-plugin-rbac/spec.md) | RbacConfig, Rbac | KEEP | |
 | 013 | [Plugin Vault](./013-plugin-vault/spec.md) | Vault, VaultKV | KEEP | |
 | 014 | [IAAC Git Sync](./014-iaac-git-sync/spec.md) | iaacGitSync STS | UPDATE | Live path is Python StatefulSet; Go `pluginIaac` disabled |
-| 015 | ~~Event Forwarder~~ | — | ARCHIVE | Retired → [archive/015](./archive/015-event-forwarder/spec.md) |
-| 016 | ~~AMQ Streams~~ | Kafka | ARCHIVE | Retired — operators → AAP directly; see `obsolete/` |
-| 017 | ~~VM Migration (VMware)~~ | — | ARCHIVE | Duplicate of 009/032 → [archive/017](./archive/017-vm-migration-vmware/spec.md) |
 | 018 | [Admin Dashboard UI](./018-admin-dashboard-ui/spec.md) | Deployment | KEEP | `ui/packages/admin-dashboard` |
 | 019 | [Tenant Dashboard UI](./019-tenant-dashboard-ui/spec.md) | Deployment | KEEP | |
 | 020 | [Admin Console Plugin](./020-admin-console-plugin/spec.md) | ConsolePlugin | KEEP | |
@@ -51,7 +47,7 @@ Design specs for platform features. **Day-2 usage** (simple flows, workshop, how
 | 033 | [Unified Operator](./033-unified-operator/spec.md) | All CRDs | KEEP | |
 | 034 | [Bootstrap Deployment](./034-bootstrap-deployment/spec.md) | App-of-apps | KEEP | Runtime: `gitops/` |
 
-**Summary**: KEEP / UPDATE / ARCHIVE — see table. Usage docs: [`../docs/`](../docs/).
+**Summary**: Usage docs: [`../docs/`](../docs/).
 
 ## Conventions
 

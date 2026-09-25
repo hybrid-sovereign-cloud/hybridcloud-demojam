@@ -44,7 +44,6 @@ Git → ArgoCD → Operators → AAP JobTemplates → AWS / RHOSO / Virt spokes
 
 - ZTP: [`gitops/ZTP.md`](gitops/ZTP.md)
 - Specs: [`specs/README.md`](specs/README.md)
-- Obsolete: [`obsolete/`](obsolete/)
 
 ## Local development
 

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: amq-streams
-description: Red Hat AMQ Streams (Kafka) for hybridsovereign event bus
-type: application
-version: 0.2.4
-appVersion: "2.9.0"

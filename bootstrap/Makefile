@@ -87,7 +87,6 @@ include make/init-central-secrets.mk
 include make/init-central-applicationset.mk
 include make/init-services-pull-secrets.mk
 include make/init-services-argocd-sa.mk
-include make/upload-event-forwarder-chart.mk
 include make/init-services-gitea-secret.mk
 include make/init-central-gitea-secret.mk
 include make/install-rbac-samples.mk
@@ -96,7 +95,6 @@ include make/eda-sync.mk
 include make/upload-cnv-chart.mk
 include make/upload-mtv-chart.mk
 include make/upload-dns-forwarder-chart.mk
-include make/upload-amq-streams-chart.mk
 include make/upload-primary-operator-chart.mk
 include make/upload-iaac-chart.mk
 include make/lab-config.mk
@@ -140,7 +138,6 @@ UPLOAD_TARGETS := \
   upload-cnv-chart \
   upload-mtv-chart \
   upload-dns-forwarder-chart \
-  upload-amq-streams-chart \
   upload-primary-operator-chart \
   upload-iaac-chart
 

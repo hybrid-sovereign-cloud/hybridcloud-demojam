@@ -181,11 +181,8 @@ print_manual_gates() {
   GATE-M07  Security review sign-off
             Complete tests/security/SECURITY_REVIEW.md checklist
 
-  GATE-M08  Hardening gap review
-            Review hardening-checks/reports/migration-hardening-gap-analysis.md
-
 EOF
-  log_skip "manual gates documented (8 gates)"
+  log_skip "manual gates documented (7 gates)"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

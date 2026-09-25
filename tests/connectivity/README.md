@@ -97,21 +97,7 @@ curl -sk -o /dev/null -w "%{http_code}" https://<gitea-host>/api/v1/version
 
 **Expected**: HTTP 200
 
-### TC-CONN-010: Kafka Bootstrap (AMQ Streams)
 
-```bash
-oc get kafka hybridsovereign-kafka -n amq-streams --context=hub-admin -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-```
-
-**Expected**: `True`
-
-### TC-CONN-011: Kafka Client (operators → AMQ; event-forwarder retired)
-
-```bash
-oc logs -l app.kubernetes.io/name=event-forwarder -n sovereign-cloud-jobs --context=hub-admin --tail=50
-```
-
-**Expected**: No connection refused; no auth errors
 
 ### TC-CONN-012: DNS Forwarder / Lab Ingress
 

@@ -98,30 +98,6 @@ Use this checklist before merging bootstrap changes, operator releases, or migra
 
 ---
 
-## 7. Kafka TLS Path
-
-> **Note (2026-07-28):** Event forwarder is retired (`eventForwarder.enabled: false`). Apply Kafka TLS / SASL checks to operator producers and EDA consumers instead of the forwarder Deployment.
-
-| # | Check | Evidence | Status |
-|---|-------|----------|--------|
-| 7.1 | AMQ Streams Kafka cluster deployed with TLS listener enabled | `bootstrap/helm/charts/amq-streams/` Kafka CR | ☐ |
-| 7.2 | Bootstrap address for TLS uses port `9093` (or TLS-specific service) not plaintext `9092` in production | `event-forwarder` values + central overrides | ☐ |
-| 7.3 | Event forwarder SASL/TLS credentials sourced via ExternalSecret (`event-forwarder-token`) | `event-forwarder/templates/externalsecret.yaml` | ☐ |
-| 7.4 | Vault path `central/event-forwarder` holds Kafka user token/password | Vault KV audit (no value dump) | ☐ |
-| 7.5 | EDA rulebooks connect to Kafka with TLS trust store mounted or system CA | EDA decision environment config | ☐ |
-| 7.6 | Topics `hybridsovereign-events` and `hybridsovereign-audit` have replication ≥ 3 | `amq-streams/values.yaml` topics block | ☐ |
-| 7.7 | NetworkPolicy restricts Kafka broker access to `amq-streams`, `sovereign-cloud-jobs`, EDA namespaces | NP manifests if deployed | ☐ |
-| 7.8 | No Kafka credentials in event-forwarder Deployment env literals | Deployment template review | ☐ |
-
-**Target TLS bootstrap** (production):
-
-```
-hybridsovereign-kafka-kafka-bootstrap.amq-streams.svc:9093
-```
-
-
----
-
 ## Sign-Off
 
 | Role | Name | Date | Result |
@@ -130,4 +106,4 @@ hybridsovereign-kafka-kafka-bootstrap.amq-streams.svc:9093
 | Security reviewer | | | |
 | Release manager | | | |
 
-**Gate criteria**: All sections 1–7 must be PASS (or documented N/A with ADR) before Mega-Phase J completion.
+**Gate criteria**: Sections above must be PASS (or documented N/A) before release.

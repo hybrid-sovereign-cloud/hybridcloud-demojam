@@ -6,7 +6,6 @@ YAML specs under this directory define repeatable verification steps for Hybrid 
 
 | Directory | Scope |
 |-----------|--------|
-| `phase1-amq-events/` | Kafka bus, operator publish, central EDA |
 | `phase2-virtualization/` | CNV, MTV, VMware provider |
 | `phase3-ui-rbac/` | Dashboard RBAC visibility matrix |
 | `phase4-platform-status/` | PlatformOpenshift Hive polling |
@@ -29,7 +28,6 @@ Each spec references `_schema.yaml`. Required fields:
 ```bash
 # Example: run Phase 1 smoke spec
 cd hybridcloud/tests/specs
-yq '.steps[].command' phase1-amq-events/smoke-team-cr.yaml | while read -r cmd; do eval "$cmd"; done
 ```
 
 Prefer reusing roles from `tests/global_tests/` for complex Ansible assertions.

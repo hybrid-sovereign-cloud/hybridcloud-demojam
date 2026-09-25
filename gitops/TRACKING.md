@@ -20,6 +20,15 @@
 
 ## Change Log
 
+### 2026-09-25 — Remove obsolete tree and Kafka/AMQ artifacts
+
+| Field | Value |
+|-------|-------|
+| Change summary | Deleted `obsolete/`, `specs/archive`, `specs/016-amq-streams`, AMQ Streams + event-forwarder charts, hardening Makefile targets |
+| Paths touched | `obsolete/**` (removed), `bootstrap/helm/charts/{amq-streams,event-forwarder}`, `architecture/Makefile`, docs/tests refs |
+| Rollback | Restore from git history prior to this commit |
+
+
 ### 2026-09-20T19:00:00Z — ZTP durable Vault KV seed (pre wipe-2)
 
 | Field | Value |
