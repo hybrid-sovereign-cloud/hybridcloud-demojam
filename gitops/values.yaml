@@ -75,6 +75,7 @@ namespaces:
   - sovereign-secrets
   - sovereign-cloud
   - sovereign-cloud-plugins
+  - sovereign-cloud-jobs  # ACM spoke-sso ensure Job (hs-acm Sync hooks)
   - sovereign-ui
   - vault
   - quay
