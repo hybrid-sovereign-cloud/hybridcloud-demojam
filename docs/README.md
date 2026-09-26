@@ -36,8 +36,10 @@ You (Git / UI / oc)
 | Add a new RHOSO cloud | [how-to/add-cloudoso.md](how-to/add-cloudoso.md) |
 | Add a new Virt cluster | [how-to/add-cloudvirt.md](how-to/add-cloudvirt.md) |
 | Specs (design) | [../specs/README.md](../specs/README.md) |
-| C4 architecture | [../architecture/docs/c4.md](../architecture/docs/c4.md) |
-| Concepts / technical / tutorials | [../architecture/docs/architecture.md](../architecture/docs/architecture.md) |
+| C4 architecture | [architecture/c4.md](architecture/c4.md) |
+| Concepts / technical / tutorials | [architecture/architecture.md](architecture/architecture.md) |
+| ZTP / GitOps install | [ztp.md](ztp.md) / [gitops-install.md](gitops-install.md) |
+| Prebuilt images | `quay.io/gauravshankar/*` (see root README) |
 | Bootstrap / ops | [../bootstrap/README.md](../bootstrap/README.md) |
 
 ## Rules (always)

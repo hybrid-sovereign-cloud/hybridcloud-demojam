@@ -1,4 +1,4 @@
-# Console plugins from local ImageStreams
+# Console plugins from quay.io/gauravshankar (prebuilt; no hs-builds)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -39,7 +39,7 @@ spec:
       serviceAccountName: sovereign-admin-plugin
       containers:
         - name: plugin
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-admin-plugin:latest
+          image: quay.io/gauravshankar/sovereign-admin-plugin:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 9001
@@ -84,7 +84,7 @@ spec:
       serviceAccountName: sovereign-tenant-plugin
       containers:
         - name: plugin
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-tenant-plugin:latest
+          image: quay.io/gauravshankar/sovereign-tenant-plugin:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 9001

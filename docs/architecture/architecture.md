@@ -2,7 +2,7 @@
 
 **Last reviewed:** 2026-09-25
 
-> **Day-2 usage:** [`../../docs/README.md`](../../docs/README.md)
+> **Day-2 usage:** [`../../docs/README.md`](../README.md)
 
 ## Core documents (one each)
 

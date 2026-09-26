@@ -1,9 +1,9 @@
-# Shared operator base + UI/plugin/gitea ImageStreams and BuildConfigs
-# Bases: registry.redhat.io / registry.access.redhat.com where applicable.
-# Output: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/*
+# OPTIONAL air-gap only — not used in default ZTP.
+# Default: provision.builds=false; Deployments pull quay.io/gauravshankar/*.
+# Enable hs-builds only when the hub cannot reach Quay and must build locally.
 apiVersion: v2
 name: hs-builds
-description: OpenShift BuildConfigs and ImageStreams for hybridsovereign
+description: Optional OpenShift BuildConfigs/ImageStreams for air-gap (disabled by default)
 type: application
-version: 0.1.12
+version: 0.1.13
 appVersion: "0.1.0"

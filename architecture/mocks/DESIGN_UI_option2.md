@@ -1086,8 +1086,8 @@ spec:
 - [DESIGN.md](./DESIGN.md) — EVPN networking primer  
 - [DESIGN_UI.md](./DESIGN_UI.md) — Hybrid multi-cloud UI (superset)  
 - [DESIGN_UI_Existing.md](./DESIGN_UI_Existing.md) — Console plugin baseline  
-- [architecture/docs/technical.md)  
-- [architecture/docs/technical.md)  
+- [docs/architecture/technical.md)  
+- [docs/architecture/technical.md)  
 
 ### Appendix E — `console-extensions.json` fragment (tenant)
 

@@ -26,7 +26,7 @@ vault_init_secret_namespace: "vault"
 vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault.vault.svc:8200', true) }}"
 vault_kv_mount: hybridsovereign
 
-oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
+oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.io/gauravshankar' }}"
 mce_cluster_build_chart_version: "0.2.3"
 
 eda_dashboard_host: ""

@@ -6,6 +6,8 @@ export { EntityTopology } from './EntityTopology';
 export type { EntityTopologyProps, TopologyNode } from './EntityTopology';
 export { RbacGroupsEditor } from './RbacGroupsEditor';
 export type { RbacGroupsEditorProps } from './RbacGroupsEditor';
+export { RbacMultiSelect } from './RbacMultiSelect';
+export type { RbacMultiSelectProps } from './RbacMultiSelect';
 export { PageHeader } from './PageHeader';
 export type { PageHeaderProps, PageHeaderCrumb } from './PageHeader';
 export { StatusBadge, normalizeHealth } from './StatusBadge';

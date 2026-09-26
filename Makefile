@@ -11,14 +11,15 @@ REQUIRED_VARS := \
 OCI_HOST := $(shell echo "$(OCI_REGISTRY)" | sed -E 's|^https?://||' | cut -d'/' -f1)
 OCI_NAMESPACE := $(shell echo "$(OCI_REGISTRY)" | sed -E 's|^https?://||' | sed -n 's|.*/organization/||p' | cut -d'/' -f1)
 ifeq ($(OCI_NAMESPACE),)
-  OCI_NAMESPACE := hybrid-sovereign
+  OCI_NAMESPACE := gauravshankar
 endif
 
 include make/help.mk
 include make/check-env.mk
 include bootstrap/make/*.mk
+include Makefile.ztp-images.mk
 
-.PHONY: help check-env lint-all build-operators build-iaac upload-hybrid-charts
+.PHONY: help check-env lint-all build-operators build-iaac upload-hybrid-charts push-ztp-images
 help:
 	@$(MAKE) -f make/help.mk help
 
@@ -27,11 +28,11 @@ build-operators:
 	$(MAKE) -C operator/namespace operator-build-push
 
 build-iaac:
-	podman build -t $(OCI_HOST)/hybrid-sovereign/iaac-git-sync:0.1.0 -f iaac/Dockerfile iaac/
-	podman push $(OCI_HOST)/hybrid-sovereign/iaac-git-sync:0.1.0
+	podman build -t $(OCI_HOST)/iaac-git-sync:0.1.0 -f iaac/Dockerfile iaac/
+	podman push $(OCI_HOST)/iaac-git-sync:0.1.0
 
 upload-hybrid-charts:
-	$(MAKE) -C bootstrap upload-amq-streams-chart upload-primary-operator-chart upload-iaac-chart
+	$(MAKE) -C bootstrap upload-primary-operator-chart upload-iaac-chart
 
 test:
 	./tests/run-tests.sh

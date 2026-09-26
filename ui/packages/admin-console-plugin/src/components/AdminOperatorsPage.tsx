@@ -18,6 +18,7 @@ const AdminOperatorsPage: React.FC = () => {
           secondaryKind="RbacConfig"
           listPath="/hybridsovereign/operators/rbacs"
           secondaryListPath="/hybridsovereign/operators/rbacconfigs"
+          createPath="/hybridsovereign/create/rbac"
         />
       </div>
     </PageSection>

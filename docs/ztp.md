@@ -35,20 +35,20 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 | 0 | AppProject + Namespaces | Foundation | — |
 | 5 | `hs-argocd-capacity` | Scale GitOps controller/repo | GitOps installed |
 | 10 | `hs-eso` | External Secrets Operator | OLM |
-| 15 | `hs-builds` | ImageStreams + BuildConfigs | `sovereign-cloud` NS |
+| 15 | `hs-builds` | **Off by default** (`provision.builds: false`) — optional air-gap ImageStreams | — |
 | 20 | `hs-vault` | Vault STS + init + unseal CronJob | Storage class |
 | 22 | `hs-security` | ClusterSecretStore / PushSecrets | Vault **unsealed** |
 | 23 | `hs-ingress` | `WildcardsAllowed` on hub IngressController (HCP KubeVirt passthrough) | Ingress operator |
 | 24 | `hs-mce` | Multicluster Engine OLM | OLM |
 | 26 | `hs-acm` | ACM hub (`MultiClusterHub`) | MCE installing |
 | 30 | `hs-quay` | QuayRegistry + OBC | ODF/NooBaa |
-| 31 | `hs-gitea` | Gitea | Storage |
+| 31 | `hs-gitea` | Gitea (`docker.io/gitea/gitea:1.22.3-rootless`) | Storage |
 | 35 | `hs-aap-config` | JobTemplates / adopt AAP | AAP baseline |
 | 38 | `hs-crds` | hybridsovereign CRDs only | — |
-| 40 | `hs-operators` | Operator Deployments + image-wait | CRDs + operator image |
+| 40 | `hs-operators` | Operator Deployments pull `quay.io/gauravshankar/hybridsovereign-ansible-operator` | CRDs + public Quay |
 | 42 | `hs-platform-configs` | **ZTP prerequisite:** RbacConfig + AAPConfig + QuayConfig | Operators + AAP JTs + RHBK/AAP/Quay secrets |
 | 46 | `hs-platform-smoke` | Always-on ACME Entity + **local CloudVirt** + dummy tool CRs | Platform configs ready; CNV adopted |
-| 50 | `hs-ui` | Dashboards + plugins + OAuth | UI ImageStreams |
+| 50 | `hs-ui` | Dashboards + plugins from `quay.io/gauravshankar/*` | Public Quay |
 | 60 | `hs-samples` | Workshop sample CRs (**seed-once**: no selfHeal / no prune) | Entity + platform configs |
 
 Parent sync **waits for prior-wave Application health** before creating the next Application CR.
@@ -123,16 +123,16 @@ See `gitops/issues.md` for the live wipe-cycle log (ZTP-001…016).
 | Failure | Why | Mitigation in-repo |
 |---------|-----|--------------------|
 | Shared Namespace | Parent + child both own NS | NS only in parent; `Prune=false` on NS |
-| Operators before image | Builds not finished | `image-wait` Sync hook in `hs-operators` |
+| Operators need image | Quay unreachable | Pre-pull `quay.io/gauravshankar/*` or set `provision.builds: true` for air-gap |
 | Vault sealed after reboot | One-shot init Job | `vault-unseal` CronJob (ZTP-016) |
 | CRD tracking forever | SSA + annotation-only | Embed tracking-id + instance label; `hs-crds` Replace |
 | ACM/MCE uninstall stuck | Dead webhooks / finalizers | Wipe F3/F4 + per-app `ztp-app.sh cleanup hs-mce|hs-acm` |
 | Full wipe destroys Projects | Bare `projects` plural | **Only** `./scripts/ztp-wipe.sh` FQ deletes |
 
-## Operator image gate
+## Prebuilt images (default)
 
-`gitops/custom-operators/image-wait.yaml` Sync hook blocks Deployments until
-`imagestream/hybridsovereign-ansible-operator:latest` exists.
+Day-0 Deployments pull public images from `quay.io/gauravshankar/` (see root README).
+`provision.builds: false` — no ImageStream wait. Rebuild with `make push-ztp-images`.
 
 ## Step 0 — Manual secrets (only human / pre-GitOps step)
 

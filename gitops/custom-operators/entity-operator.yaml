@@ -95,7 +95,7 @@ spec:
       serviceAccountName: hybridsovereign-entity-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES

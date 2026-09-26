@@ -1,7 +1,7 @@
 CHART_NAME    ?= sovereign-assignment
 CHART_VERSION ?= $(shell grep '^version:' Chart.yaml | awk '{print $$2}')
-OCI_REGISTRY_HOST ?= quay.signal9.gg
-OCI_CHART_REF ?= oci://$(OCI_REGISTRY_HOST)/hybrid-sovereign
+OCI_REGISTRY_HOST ?= quay.io/gauravshankar
+OCI_CHART_REF ?= oci://$(OCI_REGISTRY_HOST)
 
 .PHONY: upload-chart
 upload-chart: ## Package and push the sovereign-assignment Helm chart to OCI
@@ -15,7 +15,7 @@ upload-chart: ## Package and push the sovereign-assignment Helm chart to OCI
 	helm push /tmp/$(CHART_NAME)-$(CHART_VERSION).tgz $(OCI_CHART_REF)
 	@rm -f /tmp/$(CHART_NAME)-$(CHART_VERSION).tgz
 	@echo "── Setting chart repository visibility to public ──"
-	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/hybrid-sovereign/$(CHART_NAME)/changevisibility" \
+	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/gauravshankar/$(CHART_NAME)/changevisibility" \
 		-H "Authorization: Bearer $(OCI_REGISTRY_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"visibility":"public"}' 2>/dev/null || true

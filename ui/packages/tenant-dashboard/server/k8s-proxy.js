@@ -783,13 +783,33 @@ export function createK8sHandlers(apiServer) {
         return res.status(400).json({ message: "spec is required" });
       }
       const { type } = spec;
-      if (type !== "aws" && type !== "openstack") {
-        return res.status(400).json({ message: "spec.type must be aws or openstack" });
+      if (type !== "aws" && type !== "openstack" && type !== "hosted") {
+        return res.status(400).json({ message: "spec.type must be aws, openstack, or hosted" });
       }
 
       function toPositiveInt(raw, fallback) {
         const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
         return Number.isFinite(n) && n >= 1 ? n : fallback;
+      }
+
+      function sanitizeToolRbac(raw) {
+        if (!raw || typeof raw !== "object") return undefined;
+        const out = {};
+        for (const key of [
+          "clusterAdminRbac",
+          "clusterOperatorRbac",
+          "clusterDeveloperRbac",
+          "clusterViewerRbac",
+        ]) {
+          const list = raw[key];
+          if (!Array.isArray(list)) continue;
+          const cleaned = list
+            .filter((v) => typeof v === "string")
+            .map((v) => v.trim())
+            .filter(Boolean);
+          if (cleaned.length) out[key] = cleaned;
+        }
+        return Object.keys(out).length ? out : undefined;
       }
 
       let platformSpec;
@@ -823,6 +843,18 @@ export function createK8sHandlers(apiServer) {
                 : "m5.large",
           },
         };
+      } else if (type === "hosted") {
+        const hosted = spec.hosted;
+        if (!hosted || typeof hosted.environment !== "string" || !hosted.environment.trim()) {
+          return res.status(400).json({ message: "spec.hosted.environment is required" });
+        }
+        platformSpec = {
+          type: "hosted",
+          hosted: {
+            environment: hosted.environment.trim(),
+            nodePoolReplicas: toPositiveInt(hosted.nodePoolReplicas, 2),
+          },
+        };
       } else {
         const os = spec.openstack;
         if (!os || typeof os.environment !== "string" || !os.environment.trim()) {
@@ -849,6 +881,9 @@ export function createK8sHandlers(apiServer) {
           },
         };
       }
+
+      const toolRbac = sanitizeToolRbac(spec.toolRbac);
+      if (toolRbac) platformSpec.toolRbac = toolRbac;
 
       const platform = {
         apiVersion: "hybridsovereign.redhat/v1alpha1",

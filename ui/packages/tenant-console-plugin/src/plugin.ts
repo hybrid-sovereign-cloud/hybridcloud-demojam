@@ -34,3 +34,5 @@ export { default as TenantVaultDetailPage } from './components/TenantVaultDetail
 export { default as TenantVaultKVDetailPage } from './components/TenantVaultKVDetailPage';
 export { default as TenantAAPOrgDetailPage } from './components/TenantAAPOrgDetailPage';
 export { default as TenantQuayOrgDetailPage } from './components/TenantQuayOrgDetailPage';
+export { default as TenantHybridNetworkDetailPage } from './components/TenantHybridNetworkDetailPage';
+export { default as TenantNetworkPlacementDetailPage } from './components/TenantNetworkPlacementDetailPage';

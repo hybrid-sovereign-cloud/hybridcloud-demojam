@@ -2,63 +2,38 @@
   {
     "type": "console.navigation/href",
     "properties": {
-      "id": "hybridsovereign-tenant-overview",
-      "section": "hybridsovereign-tenancy-read-section",
-      "perspective": "hybridsovereign",
-      "name": "Entity Overview",
-      "href": "/hybridsovereign/tenant/overview",
-      "insertBefore": "hybridsovereign-teams"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
       "id": "hybridsovereign-tenant-cloudoso",
-      "section": "hybridsovereign-tenancy-read-section",
+      "section": "hybridsovereign-iaas-platform-section",
       "perspective": "hybridsovereign",
-      "name": "Cloud OSO",
-      "href": "/hybridsovereign/tenant/cloudoso",
-      "insertAfter": "hybridsovereign-clouds"
+      "name": "Openstack",
+      "href": "/hybridsovereign/tenant/cloudoso"
     }
   },
   {
     "type": "console.navigation/href",
     "properties": {
       "id": "hybridsovereign-tenant-cloudaws",
-      "section": "hybridsovereign-tenancy-read-section",
+      "section": "hybridsovereign-iaas-platform-section",
       "perspective": "hybridsovereign",
-      "name": "Cloud AWS",
-      "href": "/hybridsovereign/tenant/cloudaws",
-      "insertAfter": "hybridsovereign-tenant-cloudoso"
+      "name": "AWS",
+      "href": "/hybridsovereign/tenant/cloudaws"
     }
   },
   {
     "type": "console.navigation/href",
     "properties": {
       "id": "hybridsovereign-tenant-cloudvirt",
-      "section": "hybridsovereign-tenancy-read-section",
+      "section": "hybridsovereign-iaas-platform-section",
       "perspective": "hybridsovereign",
-      "name": "Cloud Virt",
-      "href": "/hybridsovereign/tenant/cloudvirt",
-      "insertAfter": "hybridsovereign-tenant-cloudaws"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-migrations",
-      "section": "hybridsovereign-tenancy-read-section",
-      "perspective": "hybridsovereign",
-      "name": "Migrate to OpenStack",
-      "href": "/hybridsovereign/tenant/migrations",
-      "insertAfter": "hybridsovereign-tenant-cloudvirt"
+      "name": "Openshift Virt",
+      "href": "/hybridsovereign/tenant/cloudvirt"
     }
   },
   {
     "type": "console.navigation/href",
     "properties": {
       "id": "hybridsovereign-tenant-networks",
-      "section": "hybridsovereign-networking-section",
+      "section": "hybridsovereign-iaas-networking-section",
       "perspective": "hybridsovereign",
       "name": "Hybrid Networks",
       "href": "/hybridsovereign/tenant/networks"
@@ -68,10 +43,60 @@
     "type": "console.navigation/href",
     "properties": {
       "id": "hybridsovereign-tenant-placements",
-      "section": "hybridsovereign-networking-section",
+      "section": "hybridsovereign-iaas-networking-section",
       "perspective": "hybridsovereign",
       "name": "Network Placements",
       "href": "/hybridsovereign/tenant/placements"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "hybridsovereign-tenant-rbac",
+      "section": "hybridsovereign-access-section",
+      "perspective": "hybridsovereign",
+      "name": "RBAC",
+      "href": "/hybridsovereign/tenant/rbac"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "hybridsovereign-tenant-vaults",
+      "section": "hybridsovereign-services-section",
+      "perspective": "hybridsovereign",
+      "name": "Vault",
+      "href": "/hybridsovereign/tenant/vaults"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "hybridsovereign-tenant-vaultkvs",
+      "section": "hybridsovereign-services-section",
+      "perspective": "hybridsovereign",
+      "name": "Vault KVs",
+      "href": "/hybridsovereign/tenant/vaultkvs"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "hybridsovereign-tenant-aaporgs",
+      "section": "hybridsovereign-services-section",
+      "perspective": "hybridsovereign",
+      "name": "AAP Orgs",
+      "href": "/hybridsovereign/tenant/aaporgs"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "hybridsovereign-tenant-quayorgs",
+      "section": "hybridsovereign-services-section",
+      "perspective": "hybridsovereign",
+      "name": "Quay Orgs",
+      "href": "/hybridsovereign/tenant/quayorgs"
     }
   },
   {
@@ -87,6 +112,16 @@
   {
     "type": "console.page/route",
     "properties": {
+      "exact": false,
+      "path": "/hybridsovereign/tenant/networks/:name",
+      "component": {
+        "$codeRef": "TenantHybridNetworkDetailPage"
+      }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
       "path": "/hybridsovereign/tenant/placements",
       "component": {
         "$codeRef": "TenantNetworkPlacementsPage"
@@ -95,79 +130,13 @@
     }
   },
   {
-    "type": "console.navigation/section",
+    "type": "console.page/route",
     "properties": {
-      "id": "hybridsovereign-access-section",
-      "perspective": "hybridsovereign",
-      "name": "Access Control"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-personas",
-      "section": "hybridsovereign-access-section",
-      "perspective": "hybridsovereign",
-      "name": "Personas",
-      "href": "/hybridsovereign/tenant/personas"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-rbac",
-      "section": "hybridsovereign-access-section",
-      "perspective": "hybridsovereign",
-      "name": "RBAC",
-      "href": "/hybridsovereign/tenant/rbac"
-    }
-  },
-  {
-    "type": "console.navigation/section",
-    "properties": {
-      "id": "hybridsovereign-integrations-section",
-      "perspective": "hybridsovereign",
-      "name": "Integrations"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-vaults",
-      "section": "hybridsovereign-integrations-section",
-      "perspective": "hybridsovereign",
-      "name": "Vaults",
-      "href": "/hybridsovereign/tenant/vaults"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-vaultkvs",
-      "section": "hybridsovereign-integrations-section",
-      "perspective": "hybridsovereign",
-      "name": "Vault KVs",
-      "href": "/hybridsovereign/tenant/vaultkvs"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-aaporgs",
-      "section": "hybridsovereign-integrations-section",
-      "perspective": "hybridsovereign",
-      "name": "AAP Orgs",
-      "href": "/hybridsovereign/tenant/aaporgs"
-    }
-  },
-  {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "hybridsovereign-tenant-quayorgs",
-      "section": "hybridsovereign-integrations-section",
-      "perspective": "hybridsovereign",
-      "name": "Quay Orgs",
-      "href": "/hybridsovereign/tenant/quayorgs"
+      "exact": false,
+      "path": "/hybridsovereign/tenant/placements/:name",
+      "component": {
+        "$codeRef": "TenantNetworkPlacementDetailPage"
+      }
     }
   },
   {

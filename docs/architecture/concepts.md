@@ -1,6 +1,6 @@
 # Hybrid Sovereign Cloud — Concepts
 
-Stakeholder and onboarding concepts for the **single-hub** platform. C4: [`c4.md`](c4.md). Usage: [`../../docs/README.md`](../../docs/README.md).
+Stakeholder and onboarding concepts for the **single-hub** platform. C4: [`c4.md`](c4.md). Usage: [`../../docs/README.md`](../README.md).
 
 ## Table of contents
 
@@ -18,8 +18,8 @@ Stakeholder and onboarding concepts for the **single-hub** platform. C4: [`c4.md
 
 ## Platform Overview
 
-Authoritative topology: **[C4 Architecture](../c4.md)**.  
-Day-2 usage: **[docs/README.md](../../../docs/README.md)**.
+Authoritative topology: **[C4 Architecture](c4.md)**.  
+Day-2 usage: **[docs/README.md](../README.md)**.
 
 ### What is this?
 
@@ -64,9 +64,9 @@ There is no separate central vs hub.
 
 ### Next
 
-- [C4 Architecture](../c4.md)  
+- [C4 Architecture](c4.md)  
 - [How it works](02-how-it-works.md)  
-- [Workshop](../../../docs/workshop/README.md)
+- [Workshop](../workshop/README.md)
 
 ---
 
@@ -172,7 +172,7 @@ Older “single hub” splits are retired — everything that used to be split n
 
 ### Install (GitOps)
 
-Point OpenShift GitOps at this repo’s `gitops/` path (see [docs/gitops-install.md](../../../docs/gitops-install.md)). After sync, ArgoCD owns the hub platform.
+Point OpenShift GitOps at this repo’s `gitops/` path (see [docs/gitops-install.md](../gitops-install.md)). After sync, ArgoCD owns the hub platform.
 
 Legacy `make init-central-argo` / bootstrap Helm paths are historical; runtime is **`gitops/`**.
 
@@ -207,7 +207,7 @@ flowchart LR
     JT --> Spoke[Spoke / cloud APIs]
 ```
 
-Detail: [docs/flow](../../../docs/flow.md).
+Detail: [docs/flow](../flow.md).
 
 ---
 
@@ -248,7 +248,7 @@ Platform and component repositories enforce the same posture:
 |---------|-------------|
 | **AGENTS.md** | Every repo ships **`AGENTS.md`** documenting **Secret Management**: never commit credentials; use Vault and operators |
 | **`.gitignore`** | Common secret filenames and env dumps are blocked by **shared `.gitignore` patterns** |
-| **Runtime delivery** | All cluster secrets flow through **Vault** plus **ExternalSecret** / **PushSecret** — see [Platform secrets flow](../technical.md) |
+| **Runtime delivery** | All cluster secrets flow through **Vault** plus **ExternalSecret** / **PushSecret** — see [Platform secrets flow](technical.md) |
 
 **No secrets are ever stored in Git.**
 
@@ -323,7 +323,7 @@ graph TD
 | PlatformOpenshift | Provision spoke (`openstack` \| `aws` \| `hosted`) |
 | Entity / Team / Project / Assignment | Tenancy and access |
 
-Usage: [docs/usage/crds](../../../docs/usage/crds/README.md).
+Usage: [docs/usage/crds](../usage/crds/README.md).
 
 ---
 
@@ -405,7 +405,7 @@ Designed for production-scale tenants:
 **Audience:** Technical leadership, architects, onboarding engineers  
 **Last updated:** 2026-09-25
 
-Five focused diagrams. Day-2 usage: [`../../../docs/README.md`](../../../docs/README.md).
+Five focused diagrams. Day-2 usage: [`../../../docs/README.md`](../README.md).
 
 ---
 

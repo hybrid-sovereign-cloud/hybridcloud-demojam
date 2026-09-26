@@ -136,6 +136,8 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
           showNamespace
           linkMode="anchor"
           detailHref={(item) => consoleAdminDetailHref(listPath, kind, item)}
+          enableDelete
+          onDeleted={refresh}
         />
         {secondaryKind && (
           <div style={{ marginTop: '1rem' }}>
@@ -151,6 +153,8 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
               showNamespace
               linkMode="anchor"
               detailHref={(item) => consoleAdminDetailHref(secondaryPath, secondaryKind, item)}
+              enableDelete
+              onDeleted={refresh}
             />
           </div>
         )}
@@ -168,6 +172,8 @@ export const AdminResourceListPage: React.FC<AdminResourceListPageProps> = ({
               showNamespace
               linkMode="anchor"
               detailHref={(item) => consoleAdminDetailHref(tertiaryPath, tertiaryKind, item)}
+              enableDelete
+              onDeleted={refresh}
             />
           </div>
         )}

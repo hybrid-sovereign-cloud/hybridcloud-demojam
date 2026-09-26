@@ -2,11 +2,17 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Alert,
+  Button,
   Label,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalVariant,
   Spinner,
   Tooltip,
 } from '@patternfly/react-core';
-import { ExternalLinkAltIcon } from '@patternfly/react-icons';
+import { ExternalLinkAltIcon, TrashIcon } from '@patternfly/react-icons';
 import { Table, Thead, Tr, Th, Tbody, Td, ExpandableRowContent } from '@patternfly/react-table';
 import { useTranslation } from '../i18n';
 import type { HybridSovereignKind, K8sResource } from '../types/crds';
@@ -23,6 +29,7 @@ import {
   ListLinkMode,
   resourceSearchBlob,
 } from '../list/listColumns';
+import { deleteDashboardResource } from '../hooks/k8s';
 
 export interface ResourceListTableProps {
   kind: HybridSovereignKind;
@@ -36,6 +43,10 @@ export interface ResourceListTableProps {
   emptyMessage?: string;
   /** Pre-filtered items; when set, skip internal search blob (caller already filtered) */
   searchQuery?: string;
+  /** Show a Delete action per row (console + standalone list pages) */
+  enableDelete?: boolean;
+  /** Called after a successful delete so the parent can refresh */
+  onDeleted?: () => void;
 }
 
 function isMarker(v: unknown): v is CellMarker {
@@ -144,12 +155,38 @@ export function ResourceListTable({
   linkMode = 'router',
   showNamespace = false,
   emptyMessage,
+  enableDelete = false,
+  onDeleted,
 }: ResourceListTableProps): React.ReactElement {
   const { t } = useTranslation();
   const columns = useMemo(() => getListColumns(kind, { showNamespace }), [kind, showNamespace]);
   const [sortId, setSortId] = useState<string>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [pendingDelete, setPendingDelete] = useState<K8sResource | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const colSpan = columns.length + 1 + (enableDelete ? 1 : 0);
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteDashboardResource(
+        kind,
+        pendingDelete.metadata.name,
+        pendingDelete.metadata.namespace,
+      );
+      setPendingDelete(null);
+      onDeleted?.();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const healthCounts = useMemo(() => {
     const counts = { ready: 0, failed: 0, pending: 0, reconciling: 0 };
@@ -273,12 +310,13 @@ export function ResourceListTable({
                   {t(col.labelKey, { defaultValue: col.id })}
                 </Th>
               ))}
+              {enableDelete ? <Th screenReaderText={t('common.actions', { defaultValue: 'Actions' })} /> : null}
             </Tr>
           </Thead>
           {sorted.length === 0 ? (
             <Tbody>
               <Tr>
-                <Td colSpan={columns.length + 1}>
+                <Td colSpan={colSpan}>
                   {emptyMessage ?? t('pages.noMatch', { kind })}
                 </Td>
               </Tr>
@@ -339,9 +377,24 @@ export function ResourceListTable({
                         </Td>
                       );
                     })}
+                    {enableDelete ? (
+                      <Td dataLabel={t('common.actions', { defaultValue: 'Actions' })} isActionCell>
+                        <Button
+                          variant="plain"
+                          icon={<TrashIcon />}
+                          aria-label={`Delete ${item.metadata.name}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setDeleteError(null);
+                            setPendingDelete(item);
+                          }}
+                        />
+                      </Td>
+                    ) : null}
                   </Tr>
                   <Tr isExpanded={isOpen}>
-                    <Td colSpan={columns.length + 1} noPadding>
+                    <Td colSpan={colSpan} noPadding>
                       {isOpen ? (
                         <ExpandableRowContent>
                           <div className="sc-list-expand">
@@ -376,6 +429,19 @@ export function ResourceListTable({
                                   {t('common.view')} →
                                 </Link>
                               )}
+                              {enableDelete ? (
+                                <Button
+                                  variant="link"
+                                  isDanger
+                                  icon={<TrashIcon />}
+                                  onClick={() => {
+                                    setDeleteError(null);
+                                    setPendingDelete(item);
+                                  }}
+                                >
+                                  {t('common.delete', { defaultValue: 'Delete' })}
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         </ExpandableRowContent>
@@ -388,6 +454,34 @@ export function ResourceListTable({
           )}
         </Table>
       </div>
+
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={!!pendingDelete}
+        onClose={() => (!deleting ? setPendingDelete(null) : undefined)}
+      >
+        <ModalHeader title={`Delete ${kind}?`} />
+        <ModalBody>
+          {deleteError && (
+            <Alert variant="danger" title="Delete failed" isInline className="sc-mb">
+              {deleteError}
+            </Alert>
+          )}
+          This will permanently delete <strong>{pendingDelete?.metadata.name}</strong>
+          {pendingDelete?.metadata.namespace
+            ? <> from namespace <strong>{pendingDelete.metadata.namespace}</strong></>
+            : null}
+          .
+        </ModalBody>
+        <ModalFooter>
+          <Button key="confirm" variant="danger" isDisabled={deleting} onClick={() => void confirmDelete()}>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
+          <Button key="cancel" variant="link" isDisabled={deleting} onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
     </>
   );
 }

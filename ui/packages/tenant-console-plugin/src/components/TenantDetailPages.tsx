@@ -26,5 +26,15 @@ export const TenantAAPOrgDetailPage = makeTenantDetailPage('AAPOrg', 'AAP Orgs',
 export const TenantQuayOrgDetailPage = makeTenantDetailPage('QuayOrg', 'Quay Orgs', 'quayorgs');
 export const TenantPersonaDetailPage = makeTenantDetailPage('Persona', 'Personas', 'personas');
 export const TenantRbacDetailPage = makeTenantDetailPage('Rbac', 'RBAC', 'rbac');
+export const TenantHybridNetworkDetailPage = makeTenantDetailPage(
+  'HybridNetwork',
+  'Hybrid Networks',
+  'networks',
+);
+export const TenantNetworkPlacementDetailPage = makeTenantDetailPage(
+  'NetworkPlacement',
+  'Network Placements',
+  'placements',
+);
 
 export { default as TenantTeamDetailPage } from './TenantTeamDetailPage';

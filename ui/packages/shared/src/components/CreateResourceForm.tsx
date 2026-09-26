@@ -16,6 +16,7 @@ import {
 import { createDashboardResource, createNamespaceSecret, useK8sResourceList } from '../hooks/k8s';
 import { HybridSovereignKind, K8sResource } from '../types';
 import { PageHeader } from './PageHeader';
+import { RbacMultiSelect } from './RbacMultiSelect';
 
 export type SelfServiceFormType =
   | 'team'
@@ -191,10 +192,10 @@ export function CreateResourceForm({
   const [haEnabled, setHaEnabled] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [projectRefs, setProjectRefs] = useState('');
-  const [assignAdmin, setAssignAdmin] = useState('');
-  const [assignDev, setAssignDev] = useState('');
-  const [assignViewer, setAssignViewer] = useState('');
-  const [assignOps, setAssignOps] = useState('');
+  const [assignAdmin, setAssignAdmin] = useState<string[]>([]);
+  const [assignDev, setAssignDev] = useState<string[]>([]);
+  const [assignViewer, setAssignViewer] = useState<string[]>([]);
+  const [assignOps, setAssignOps] = useState<string[]>([]);
   const [osoProject, setOsoProject] = useState('');
   const [vaultPath, setVaultPath] = useState('oso/accounts/shc_admin');
   const [baseDomain, setBaseDomain] = useState('');
@@ -216,10 +217,11 @@ export function CreateResourceForm({
   const [cpCount, setCpCount] = useState('3');
   const [workerCount, setWorkerCount] = useState('3');
   const [nodePoolReplicas, setNodePoolReplicas] = useState('2');
-  const [rbacMulti, setRbacMulti] = useState('');
-  const [rbacOperator, setRbacOperator] = useState('');
-  const [rbacViewer, setRbacViewer] = useState('');
-  const [networkViewerRbac, setNetworkViewerRbac] = useState('');
+  const [rbacMulti, setRbacMulti] = useState<string[]>([]);
+  const [rbacOperator, setRbacOperator] = useState<string[]>([]);
+  const [rbacViewer, setRbacViewer] = useState<string[]>([]);
+  const [networkViewerRbac, setNetworkViewerRbac] = useState<string[]>([]);
+  const [personaRbacs, setPersonaRbacs] = useState<string[]>([]);
 
   const type = formType;
   const title = FORM_TITLES[type] ?? 'Create Resource';
@@ -313,9 +315,12 @@ export function CreateResourceForm({
       const n = firstName(teams.items);
       if (n) setTeamRef(n);
     }
-    if (type === 'persona' && !rbacRef) {
+    if (type === 'persona' && personaRbacs.length === 0 && !rbacRef) {
       const n = firstName(rbacs.items);
-      if (n) setRbacRef(n);
+      if (n) {
+        setPersonaRbacs([n]);
+        setRbacRef(n);
+      }
     }
     if (type === 'vaultkv' && !vaultRef) {
       const n = firstName(vaults.items);
@@ -342,6 +347,7 @@ export function CreateResourceForm({
     quayConfig,
     teamRef,
     rbacRef,
+    personaRbacs,
     vaultRef,
     cloudosoRef,
   ]);
@@ -369,11 +375,12 @@ export function CreateResourceForm({
           : projectRef
             ? [projectRef]
             : [];
+        // Assignment CRD toolRbac fields are single strings — use first selected.
         const toolRbac: Record<string, string> = {};
-        if (assignAdmin) toolRbac.assignmentAdmin = assignAdmin;
-        if (assignDev) toolRbac.assignmentDeveloper = assignDev;
-        if (assignViewer) toolRbac.assignmentViewer = assignViewer;
-        if (assignOps) toolRbac.assignmentOps = assignOps;
+        if (assignAdmin[0]) toolRbac.assignmentAdmin = assignAdmin[0];
+        if (assignDev[0]) toolRbac.assignmentDeveloper = assignDev[0];
+        if (assignViewer[0]) toolRbac.assignmentViewer = assignViewer[0];
+        if (assignOps[0]) toolRbac.assignmentOps = assignOps[0];
         return {
           team: teamRef,
           projects: projectsList,
@@ -413,9 +420,9 @@ export function CreateResourceForm({
           storageClass: virtStorageClass || undefined,
         };
       case 'platformopenshift': {
-        const adminList = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-        const operatorList = rbacOperator.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-        const viewerList = rbacViewer.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const adminList = rbacMulti;
+        const operatorList = rbacOperator;
+        const viewerList = rbacViewer;
         const toolRbac =
           adminList.length || operatorList.length || viewerList.length
             ? {
@@ -462,13 +469,14 @@ export function CreateResourceForm({
       case 'migration':
         return { source, vmName, cloudoso: cloudosoRef, providerNamespace: 'openshift-mtv' };
       case 'persona':
-        return { rbac: rbacRef, type: personaType };
+        // Persona CRD rbac is a single string — use first selected.
+        return { rbac: personaRbacs[0] || rbacRef, type: personaType };
       case 'rbac':
         return { config: rbacConfig, description };
       case 'vault':
         return { ha: haEnabled, rbacConfig };
       case 'vaultkv': {
-        const list = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const list = rbacMulti;
         return {
           vault: vaultRef,
           vaultAdminRbac: list,
@@ -478,7 +486,7 @@ export function CreateResourceForm({
         };
       }
       case 'aaporg': {
-        const list = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const list = rbacMulti;
         return {
           aapConfig,
           aapAdminRbac: list,
@@ -487,7 +495,7 @@ export function CreateResourceForm({
         };
       }
       case 'quayorg': {
-        const list = rbacMulti.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        const list = rbacMulti;
         return {
           quayConfig,
           quayAdminRbac: list,
@@ -498,9 +506,7 @@ export function CreateResourceForm({
       case 'hybridnetwork':
         return {
           description,
-          networkViewerRbac: networkViewerRbac
-            ? networkViewerRbac.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)
-            : [],
+          networkViewerRbac,
         };
       case 'networkplacement':
         return {
@@ -570,7 +576,7 @@ export function CreateResourceForm({
       return false;
     if (type === 'cloudvirt' && (!(virtVaultPath || vaultPath) || !(virtBaseDomain || baseDomain))) return false;
     if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef || cloudVirtRef)) return false;
-    if (type === 'persona' && (!rbacRef || !personaType)) return false;
+    if (type === 'persona' && (!(personaRbacs[0] || rbacRef) || !personaType)) return false;
     if (type === 'vaultkv' && !vaultRef) return false;
     if (type === 'migration' && (!vmName || !cloudosoRef)) return false;
     if ((type === 'vault' || type === 'rbac') && !rbacConfig) return false;
@@ -729,10 +735,38 @@ export function CreateResourceForm({
                     options={names(platforms.items)}
                     placeholder="Optional"
                   />
-                  <RefSelect id="assign-admin" label="Assignment admin RBAC" value={assignAdmin} onChange={setAssignAdmin} options={names(rbacs.items)} placeholder="Optional" />
-                  <RefSelect id="assign-dev" label="Assignment developer RBAC" value={assignDev} onChange={setAssignDev} options={names(rbacs.items)} placeholder="Optional" />
-                  <RefSelect id="assign-viewer" label="Assignment viewer RBAC" value={assignViewer} onChange={setAssignViewer} options={names(rbacs.items)} placeholder="Optional" />
-                  <RefSelect id="assign-ops" label="Assignment ops RBAC" value={assignOps} onChange={setAssignOps} options={names(rbacs.items)} placeholder="Optional" />
+                  <RbacMultiSelect
+                    id="assign-admin"
+                    label="Assignment admin RBAC"
+                    value={assignAdmin}
+                    onChange={setAssignAdmin}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  <RbacMultiSelect
+                    id="assign-dev"
+                    label="Assignment developer RBAC"
+                    value={assignDev}
+                    onChange={setAssignDev}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  <RbacMultiSelect
+                    id="assign-viewer"
+                    label="Assignment viewer RBAC"
+                    value={assignViewer}
+                    onChange={setAssignViewer}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  <RbacMultiSelect
+                    id="assign-ops"
+                    label="Assignment ops RBAC"
+                    value={assignOps}
+                    onChange={setAssignOps}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
                 </>
               )}
 
@@ -911,23 +945,30 @@ export function CreateResourceForm({
                       <TextInput id="plat-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} />
                     </FormGroup>
                   )}
-                  <FormGroup label="Cluster admin RBAC (comma-separated Rbac names)" fieldId="plat-rbac-admin">
-                    <TextArea
-                      id="plat-rbac-admin"
-                      value={rbacMulti}
-                      onChange={(_e, v) => setRbacMulti(v)}
-                      rows={2}
-                      placeholder={names(rbacs.items)
-                        .map((r) => r.value)
-                        .join(', ')}
-                    />
-                  </FormGroup>
-                  <FormGroup label="Cluster operator RBAC" fieldId="plat-rbac-op">
-                    <TextArea id="plat-rbac-op" value={rbacOperator} onChange={(_e, v) => setRbacOperator(v)} rows={2} />
-                  </FormGroup>
-                  <FormGroup label="Cluster viewer RBAC" fieldId="plat-rbac-view">
-                    <TextArea id="plat-rbac-view" value={rbacViewer} onChange={(_e, v) => setRbacViewer(v)} rows={2} />
-                  </FormGroup>
+                  <RbacMultiSelect
+                    id="plat-rbac-admin"
+                    label="Cluster admin RBAC"
+                    value={rbacMulti}
+                    onChange={setRbacMulti}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
+                  <RbacMultiSelect
+                    id="plat-rbac-op"
+                    label="Cluster operator RBAC"
+                    value={rbacOperator}
+                    onChange={setRbacOperator}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
+                  <RbacMultiSelect
+                    id="plat-rbac-view"
+                    label="Cluster viewer RBAC"
+                    value={rbacViewer}
+                    onChange={setRbacViewer}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
                 </>
               )}
 
@@ -941,12 +982,23 @@ export function CreateResourceForm({
                       onChange={(v) => {
                         setEntityName(v);
                         setRbacRef('');
+                        setPersonaRbacs([]);
                       }}
                       options={names(entities.items)}
                       isRequired
                     />
                   )}
-                  <RefSelect id="rbac" label="RBAC" value={rbacRef} onChange={setRbacRef} options={names(rbacs.items)} isRequired />
+                  <RbacMultiSelect
+                    id="rbac"
+                    label="RBAC"
+                    value={personaRbacs}
+                    onChange={(next) => {
+                      setPersonaRbacs(next);
+                      setRbacRef(next[0] ?? '');
+                    }}
+                    options={names(rbacs.items)}
+                    isRequired
+                  />
                   <RefSelect
                     id="persona-type"
                     label="Type"
@@ -988,9 +1040,14 @@ export function CreateResourceForm({
               {type === 'vaultkv' && (
                 <>
                   <RefSelect id="vault-ref" label="Vault" value={vaultRef} onChange={setVaultRef} options={names(vaults.items)} isRequired />
-                  <FormGroup label="RBAC groups (comma-separated)" fieldId="vaultkv-rbac">
-                    <TextArea id="vaultkv-rbac" value={rbacMulti} onChange={(_e, v) => setRbacMulti(v)} rows={2} />
-                  </FormGroup>
+                  <RbacMultiSelect
+                    id="vaultkv-rbac"
+                    label="RBAC groups"
+                    value={rbacMulti}
+                    onChange={setRbacMulti}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
                 </>
               )}
 
@@ -1004,9 +1061,14 @@ export function CreateResourceForm({
                     options={names(aapConfigs.items)}
                     isRequired
                   />
-                  <FormGroup label="RBAC groups (comma-separated)" fieldId="aap-rbac">
-                    <TextArea id="aap-rbac" value={rbacMulti} onChange={(_e, v) => setRbacMulti(v)} rows={2} />
-                  </FormGroup>
+                  <RbacMultiSelect
+                    id="aap-rbac"
+                    label="RBAC groups"
+                    value={rbacMulti}
+                    onChange={setRbacMulti}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
                 </>
               )}
 
@@ -1020,9 +1082,14 @@ export function CreateResourceForm({
                     options={names(quayConfigs.items)}
                     isRequired
                   />
-                  <FormGroup label="RBAC groups (comma-separated)" fieldId="quay-rbac">
-                    <TextArea id="quay-rbac" value={rbacMulti} onChange={(_e, v) => setRbacMulti(v)} rows={2} />
-                  </FormGroup>
+                  <RbacMultiSelect
+                    id="quay-rbac"
+                    label="RBAC groups"
+                    value={rbacMulti}
+                    onChange={setRbacMulti}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
                 </>
               )}
 
@@ -1060,9 +1127,14 @@ export function CreateResourceForm({
                   <FormGroup label="Description" fieldId="hn-desc">
                     <TextArea id="hn-desc" value={description} onChange={(_e, v) => setDescription(v)} rows={3} />
                   </FormGroup>
-                  <FormGroup label="Network viewer RBAC (comma-separated)" fieldId="hn-viewers">
-                    <TextArea id="hn-viewers" value={networkViewerRbac} onChange={(_e, v) => setNetworkViewerRbac(v)} rows={2} />
-                  </FormGroup>
+                  <RbacMultiSelect
+                    id="hn-viewers"
+                    label="Network viewer RBAC"
+                    value={networkViewerRbac}
+                    onChange={setNetworkViewerRbac}
+                    options={names(rbacs.items)}
+                    placeholder="Select Rbac CRs…"
+                  />
                 </>
               )}
 

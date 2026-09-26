@@ -79,4 +79,4 @@ Prefer documenting new day-2 flows under [`../docs/`](../docs/).
 ## Related
 
 - [docs/README.md](../docs/README.md)
-- [gitops/ZTP.md](../gitops/ZTP.md)
+- [docs/ztp.md](../docs/ztp.md)

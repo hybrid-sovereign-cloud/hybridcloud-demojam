@@ -1537,10 +1537,10 @@ stateDiagram-v2
 ### Appendix D — Related documentation
 
 - [DESIGN.md](./DESIGN.md) — EVPN networking primer and role contract  
-- [architecture/docs/technical.md)  
-- [architecture/docs/technical.md)  
-- [architecture/docs/technical.md)  
-- [architecture/docs/technical.md)  
+- [docs/architecture/technical.md)  
+- [docs/architecture/technical.md)  
+- [docs/architecture/technical.md)  
+- [docs/architecture/technical.md)  
 
 ---
 

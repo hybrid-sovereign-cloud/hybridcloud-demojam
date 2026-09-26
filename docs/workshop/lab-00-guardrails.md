@@ -10,9 +10,9 @@
 
 If this cluster is not yet GitOps-bootstrapped:
 
-1. Day-0 secrets: [architecture/docs/workshop-tutorials.md](../../architecture/docs/workshop-tutorials.md)
-2. ZTP contract: [architecture/docs/workshop-tutorials.md](../../architecture/docs/workshop-tutorials.md)
-3. Point OpenShift GitOps at repo path `gitops/` @ `main` — see [gitops/ZTP.md](../../gitops/ZTP.md)
+1. Day-0 secrets: [../architecture/workshop-tutorials.md](../../../architecture/workshop-tutorials.md)
+2. ZTP contract: [../architecture/workshop-tutorials.md](../../../architecture/workshop-tutorials.md)
+3. Point OpenShift GitOps at repo path `gitops/` @ `main` — see [docs/ztp.md](../../docs/ztp.md)
 
 ## Check you are ready for Lab 1
 

@@ -1611,8 +1611,8 @@ spec:
               properties:
                 type:
                   type: string
-                  description: "Platform type: openstack or aws"
-                  enum: [openstack, aws]
+                  description: "Platform type: openstack | aws | hosted (Hypershift HCP on CloudVirt)"
+                  enum: [openstack, aws, hosted]
                 openstack:
                   type: object
                   description: "OpenStack-specific configuration"
@@ -1673,6 +1673,21 @@ spec:
                       type: string
                       description: "AWS instance type for workers"
                       default: m5.large
+                hosted:
+                  type: object
+                  description: "Hypershift Hosted Control Plane on CloudVirt"
+                  required: [environment]
+                  properties:
+                    environment:
+                      type: string
+                      description: "CloudVirt CR name providing the virt environment"
+                    nodePoolReplicas:
+                      type: integer
+                      description: "Worker NodePool replica count"
+                      default: 2
+                    releaseImage:
+                      type: string
+                      description: "Optional OpenShift release image override"
                 toolRbac:
                   description: Controls who gets roles on the provisioned OpenShift cluster (Layer 2 RBAC)
                   type: object

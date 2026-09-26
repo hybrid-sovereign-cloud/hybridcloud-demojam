@@ -26,7 +26,7 @@ default_project_domain: "shc_domain"
 vault_init_secret_name: "vault-init-secrets"
 vault_init_secret_namespace: "central-vault"
 vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault-active.central-vault.svc:8200', true) }}"
-oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.signal9.gg' }}"
+oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.io/gauravshankar' }}"
 mce_cluster_build_chart_version: "0.2.3"
 
 eda_dashboard_host: ""

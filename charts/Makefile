@@ -1,5 +1,5 @@
 OCI_REGISTRY_HOST ?= $(OCI_HOST)
-OCI_CHART_REF    ?= oci://$(OCI_REGISTRY_HOST)/hybrid-sovereign
+OCI_CHART_REF    ?= oci://$(OCI_REGISTRY_HOST)
 
 MCE_CHART_NAME    = mce-cluster-build
 MCE_CHART_VERSION = $(shell grep '^version:' charts/$(MCE_CHART_NAME)/Chart.yaml | awk '{print $$2}')
@@ -17,7 +17,7 @@ upload-mce-chart: ## Package and push mce-cluster-build Helm chart to OCI
 	helm push /tmp/$(MCE_CHART_NAME)-$(MCE_CHART_VERSION).tgz $(OCI_CHART_REF)
 	@rm -f /tmp/$(MCE_CHART_NAME)-$(MCE_CHART_VERSION).tgz
 	@echo "── Setting chart repository visibility to public ──"
-	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/hybrid-sovereign/$(MCE_CHART_NAME)/changevisibility" \
+	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/gauravshankar/$(MCE_CHART_NAME)/changevisibility" \
 		-H "Authorization: Bearer $(OCI_REGISTRY_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"visibility":"public"}' 2>/dev/null || true
@@ -33,7 +33,7 @@ upload-ocp-base-chart: ## Package and push ocp-base Helm chart to OCI (public vi
 	helm push /tmp/$(OCP_BASE_CHART_NAME)-$(OCP_BASE_CHART_VERSION).tgz $(OCI_CHART_REF)
 	@rm -f /tmp/$(OCP_BASE_CHART_NAME)-$(OCP_BASE_CHART_VERSION).tgz
 	@echo "── Setting chart repository visibility to public ──"
-	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/hybrid-sovereign/$(OCP_BASE_CHART_NAME)/changevisibility" \
+	@curl -sS -X POST "https://$(OCI_REGISTRY_HOST)/api/v1/repository/gauravshankar/$(OCP_BASE_CHART_NAME)/changevisibility" \
 		-H "Authorization: Bearer $(OCI_REGISTRY_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"visibility":"public"}' 2>/dev/null || true

@@ -1,6 +1,6 @@
 # Hybrid Sovereign Cloud — Technical Reference
 
-Single technical reference for the **current** single-hub platform (Operators → AAP, `gitops/`). Day-2 usage: [`../../docs/README.md`](../../docs/README.md). C4: [`c4.md`](c4.md).
+Single technical reference for the **current** single-hub platform (Operators → AAP, `gitops/`). Day-2 usage: [`../../docs/README.md`](../README.md). C4: [`c4.md`](c4.md).
 
 ## Table of contents
 
@@ -1727,7 +1727,7 @@ The new image tags are reflected in `bootstrap/helm/central/values.yaml`.
 
 ### Overview
 
-Destructive “clean slate” for platform workloads on the **hub** while preserving OpenShift GitOps. Prefer `./scripts/ztp-wipe.sh` for GitOps-era labs (see [gitops/ZTP.md](../../../gitops/ZTP.md)).
+Destructive “clean slate” for platform workloads on the **hub** while preserving OpenShift GitOps. Prefer `./scripts/ztp-wipe.sh` for GitOps-era labs (see [docs/ztp.md](../../../docs/ztp.md)).
 
 ### Preserved
 
@@ -3566,7 +3566,7 @@ Allocation increments `HybridFabric.status.allocatedVniCount` and records placem
 ### References
 
 - UI / CR sketches: [DESIGN_UI.md](../../mocks/DESIGN_UI.md)
-- ZTP secret + GitOps contract: [gitops/ZTP.md](../../../gitops/ZTP.md)
+- ZTP secret + GitOps contract: [docs/ztp.md](../../../docs/ztp.md)
 - CNV baseline: [10-openshift-cnv.md](./10-openshift-cnv.md)
 
 ---

@@ -92,7 +92,7 @@
     argv:
       - "{{ helm_bin }}"
       - pull
-      - "oci://{{ oci_registry_host }}/hybrid-sovereign/sovereign-assignment"
+      - "oci://{{ oci_registry_host }}/sovereign-assignment"
       - --version
       - "{{ sovereign_assignment_chart_version }}"
       - --untar

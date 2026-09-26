@@ -3,9 +3,8 @@ name: mce-cluster-build
 description: >-
   Helm chart for provisioning OpenShift clusters via MCE/Hive ClusterDeployment.
   Supports AWS (Mint and STS/Manual modes), OpenStack, vSphere, and Agent.
-  Sovereign Cloud fork of marbindrakon/signal9-lab-gitops mce-cluster-build.
 type: application
-version: 0.2.3
+version: 0.2.4
 appVersion: "4.21"
 keywords:
   - openshift
@@ -13,8 +12,8 @@ keywords:
   - mce
   - acm
   - cluster-provisioning
+home: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
 sources:
-  - https://github.com/hybrid-sovereign-cloud/charts
-  - https://github.com/marbindrakon/signal9-lab-gitops
+  - https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
 maintainers:
   - name: hybrid-sovereign-cloud

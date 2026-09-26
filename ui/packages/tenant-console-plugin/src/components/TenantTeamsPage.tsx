@@ -33,7 +33,7 @@ const KIND_META: Partial<
 > = {
   Team: { path: 'teams', form: 'team' },
   Project: { path: 'projects', form: 'project' },
-  PlatformOpenshift: { path: 'platforms' },
+  PlatformOpenshift: { path: 'platforms', form: 'platformopenshift' },
   CloudOSO: { path: 'cloudoso', form: 'cloudoso' },
   CloudAWS: { path: 'cloudaws', form: 'cloudaws' },
   CloudVirt: { path: 'cloudvirt', form: 'cloudvirt' },
@@ -116,6 +116,8 @@ export function makeTenantKindPage(kind: HybridSovereignKind, title: string): Re
             showNamespace={false}
             linkMode="anchor"
             detailHref={(item) => `${listPath}/${encodeURIComponent(item.metadata.name)}`}
+            enableDelete
+            onDeleted={refresh}
           />
         </div>
       </PageSection>

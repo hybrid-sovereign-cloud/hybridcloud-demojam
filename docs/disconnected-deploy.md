@@ -48,6 +48,6 @@ Never claim “air-gap ready” until the items below are green.
 ## Related
 
 - `docs/lab-config.md` — topology / secrets policy
-- `architecture/docs/technical.md` — Quay mirroring patterns
-- `architecture/docs/technical.md` — Gitea image mirroring
+- `docs/architecture/technical.md` — Quay mirroring patterns
+- `docs/architecture/technical.md` — Gitea image mirroring
 - `tests/argocd-deploy/DEPLOYMENT_GATES.md` — sync gates (ignore retired event-forwarder)

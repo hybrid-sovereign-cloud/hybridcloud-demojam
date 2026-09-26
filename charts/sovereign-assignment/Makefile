@@ -1,4 +1,4 @@
-OCI_REGISTRY_HOST ?= quay.signal9.gg
+OCI_REGISTRY_HOST ?= quay.io/gauravshankar
 
 include make/upload-chart.mk
 

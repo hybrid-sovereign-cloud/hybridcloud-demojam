@@ -4,7 +4,7 @@
     ep_project: "{{ oso_spec.project | default(entity_name ~ '_' ~ cloudoso_cr_name, true) }}"
     ep_vault_path: "{{ oso_spec.vaultPath | default('') }}"
     ep_credentials_secret_name: "{{ (oso_spec.credentialsSecretRef | default({})).name | default('') }}"
-    ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('lab.signal9.gg', true), true) }}"
+    ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('', true)) }}"
     ep_project_domain: "{{ oso_spec.projectDomain | default(default_project_domain) }}"
     ep_entity_name: "{{ entity_name }}"
     ep_route53_vault_path: "{{ oso_spec.route53VaultPath | default('oso/accounts/route53-openstack') }}"
@@ -13,10 +13,10 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
-    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('lab.signal9.gg', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)) }}"
+    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)) }}"
     ep_parent_zone_id: >-
       {{ oso_spec.designateZoneId | default('')
-         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('lab.signal9.gg', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
+         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
          else '' }}
     ep_reuse_existing_project: "{{ ((oso_spec.credentialsSecretRef | default({})).name | default('') | length) > 0 }}"
 

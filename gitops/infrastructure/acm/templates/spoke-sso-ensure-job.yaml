@@ -104,11 +104,23 @@ spec:
               [[ -n "$TOK" ]] || finish "keycloak token failed; skip"
               EXIST=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso")
               CID=$(echo "$EXIST" | jq -r '.[0].id // empty')
+              # Classic IPI/UPI spokes use oauth-openshift.apps.*; Hypershift HCP uses
+              # oauth-clusters-<ns>-<name>.apps.* (e.g. oauth-clusters-hosted-2-hosted-2.apps...).
+              REDIRECTS='["https://oauth-openshift.apps.*/*","https://console-openshift-console.apps.*/*","https://oauth-clusters-*.apps.*/*","https://console-openshift-console.apps.*.apps.*/*"]'
               if [[ -z "$CID" ]]; then
                 curl -sk -X POST -H "Authorization: Bearer ${TOK}" -H "Content-Type: application/json" \
                   "${KC_ADMIN}/admin/realms/${KC_REALM}/clients" \
-                  -d '{"clientId":"openshift-spoke-sso","name":"OpenShift managed spokes SSO","protocol":"openid-connect","publicClient":false,"standardFlowEnabled":true,"redirectUris":["https://oauth-openshift.apps.*/*","https://console-openshift-console.apps.*/*"],"webOrigins":["https://*"],"attributes":{"groups.claim.enabled":"true"}}' >/dev/null
+                  -d "{\"clientId\":\"openshift-spoke-sso\",\"name\":\"OpenShift managed spokes SSO\",\"protocol\":\"openid-connect\",\"publicClient\":false,\"standardFlowEnabled\":true,\"redirectUris\":${REDIRECTS},\"webOrigins\":[\"https://*\"],\"attributes\":{\"groups.claim.enabled\":\"true\"}}" >/dev/null
                 CID=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients?clientId=openshift-spoke-sso" | jq -r '.[0].id // empty')
+              else
+                # Keep redirect URIs current for HCP (client may predate Hypershift SSO support).
+                CUR=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients/${CID}")
+                PATCHED=$(echo "$CUR" | jq --argjson r "$REDIRECTS" '
+                  .redirectUris = ((.redirectUris // []) + $r | unique) |
+                  .webOrigins = ((.webOrigins // []) + ["https://*"] | unique)
+                ')
+                curl -sk -X PUT -H "Authorization: Bearer ${TOK}" -H "Content-Type: application/json" \
+                  "${KC_ADMIN}/admin/realms/${KC_REALM}/clients/${CID}" -d "$PATCHED" >/dev/null || true
               fi
               [[ -n "$CID" ]] || finish "client id missing; skip"
               SECRET=$(curl -sk -H "Authorization: Bearer ${TOK}" "${KC_ADMIN}/admin/realms/${KC_REALM}/clients/${CID}/client-secret" | jq -r '.value // empty')

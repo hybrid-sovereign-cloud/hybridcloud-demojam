@@ -594,11 +594,11 @@ Phased delivery to limit risk:
 
 | Document | Relevance |
 |----------|-----------|
-| [architecture/docs/12-console-plugins.md](../docs/12-console-plugins.md) | Plugin deployment and nav |
-| [architecture/docs/technical.md) | Global admin scope |
-| [architecture/docs/technical.md) | Tenant admin scope |
-| [architecture/docs/concepts.md) | CR dependency graph |
-| [architecture/docs/technical.md) | Pipeline stages |
+| [docs/architecture/12-console-plugins.md](../docs/12-console-plugins.md) | Plugin deployment and nav |
+| [docs/architecture/technical.md) | Global admin scope |
+| [docs/architecture/technical.md) | Tenant admin scope |
+| [docs/architecture/concepts.md) | CR dependency graph |
+| [docs/architecture/technical.md) | Pipeline stages |
 | `user_dashboard/plugin/console-extensions.json` | Current global nav |
 | `tenancy_dashboard/plugin/console-extensions.json` | Current tenant nav |
 | `tenancy_dashboard/plugin/src/components/ResourceList.tsx` | List pattern baseline |

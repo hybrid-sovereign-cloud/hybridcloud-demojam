@@ -76,6 +76,8 @@ const AdminEntitiesPage: React.FC = () => {
           detailHref={(item) =>
             `/hybridsovereign/entities/${encodeURIComponent(item.metadata?.name ?? '')}`
           }
+          enableDelete
+          onDeleted={refresh}
         />
       </div>
     </PageSection>
@@ -159,6 +161,8 @@ export const makeKindListPage = (
             showNamespace
             linkMode="anchor"
             detailHref={detailHref}
+            enableDelete
+            onDeleted={refresh}
           />
         </div>
       </PageSection>

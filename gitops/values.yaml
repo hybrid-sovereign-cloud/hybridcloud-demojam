@@ -32,7 +32,9 @@ provision:
   # WildcardsAllowed on IngressController/default — required for Hypershift
   # KubeVirt baseDomainPassthrough guest console/apps routes
   ingress: true
-  builds: true
+  # Default OFF: Day-0 images come from quay.io/gauravshankar (no per-ZTP rebuild).
+  # Set true only for air-gap hubs that cannot pull Quay and need local BuildConfigs.
+  builds: false
   operators: true
   platformConfigs: true  # ZTP prereq — RbacConfig / AAPConfig / QuayConfig (default on)
   platformSmoke: true    # always-on ACME Entity + local CloudVirt + dummy tool CRs

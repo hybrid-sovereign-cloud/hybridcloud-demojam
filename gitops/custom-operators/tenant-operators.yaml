@@ -68,7 +68,7 @@ spec:
       serviceAccountName: hybridsovereign-rbac-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -179,7 +179,7 @@ spec:
       serviceAccountName: hybridsovereign-team-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -290,7 +290,7 @@ spec:
       serviceAccountName: hybridsovereign-project-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -401,7 +401,7 @@ spec:
       serviceAccountName: hybridsovereign-persona-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -512,7 +512,7 @@ spec:
       serviceAccountName: hybridsovereign-assignment-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -623,7 +623,7 @@ spec:
       serviceAccountName: hybridsovereign-vault-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -734,7 +734,7 @@ spec:
       serviceAccountName: hybridsovereign-vaultkv-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -848,7 +848,7 @@ spec:
       serviceAccountName: hybridsovereign-aaporg-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -963,7 +963,7 @@ spec:
       serviceAccountName: hybridsovereign-quayorg-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1074,7 +1074,7 @@ spec:
       serviceAccountName: hybridsovereign-hybridnetwork-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1185,7 +1185,7 @@ spec:
       serviceAccountName: hybridsovereign-networkplacement-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1296,7 +1296,7 @@ spec:
       serviceAccountName: hybridsovereign-cloudoso-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1407,7 +1407,7 @@ spec:
       serviceAccountName: hybridsovereign-cloudaws-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1521,7 +1521,7 @@ spec:
       serviceAccountName: hybridsovereign-cloudvirt-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES
@@ -1635,7 +1635,7 @@ spec:
       serviceAccountName: hybridsovereign-platformopenshift-operator
       containers:
         - name: operator
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:latest
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
             - name: MAX_CONCURRENT_RECONCILES

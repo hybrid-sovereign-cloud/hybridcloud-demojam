@@ -38,10 +38,8 @@ import {
   KeyIcon,
   ProcessAutomationIcon,
   SecurityIcon,
-  UserEditIcon,
   LockIcon,
   BundleIcon,
-  MigrationIcon,
 } from '@patternfly/react-icons';
 import { NavLink, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -76,28 +74,9 @@ type NavEntry =
 /** Static sidebar — all links always visible; pages fetch K8s only on navigate/refresh */
 const NAV: NavEntry[] = [
   { type: 'link', path: '/', labelKey: 'nav.overview', icon: TachometerAltIcon, end: true },
-  { type: 'sep', labelKey: 'nav.tenancy' },
+  { type: 'sep', labelKey: 'nav.team' },
   { type: 'link', path: '/teams', labelKey: 'nav.teams', icon: UsersIcon, kind: 'Team', form: 'team' },
   { type: 'link', path: '/projects', labelKey: 'nav.projects', icon: FolderOpenIcon, kind: 'Project', form: 'project' },
-  {
-    type: 'link',
-    path: '/platforms',
-    labelKey: 'nav.platformOpenshift',
-    icon: ClusterIcon,
-    kind: 'PlatformOpenshift',
-    form: 'platformopenshift',
-  },
-  { type: 'link', path: '/cloudoso', labelKey: 'nav.cloudOso', icon: LayerGroupIcon, kind: 'CloudOSO', form: 'cloudoso' },
-  { type: 'link', path: '/cloudaws', labelKey: 'nav.cloudAws', icon: AwsIcon, kind: 'CloudAWS', form: 'cloudaws' },
-  { type: 'link', path: '/cloudvirt', labelKey: 'nav.cloudVirt', icon: ServerIcon, kind: 'CloudVirt', form: 'cloudvirt' },
-  {
-    type: 'link',
-    path: '/migrations',
-    labelKey: 'nav.migrateOpenStack',
-    icon: MigrationIcon,
-    kind: 'OpenStackMigration',
-    form: 'migration',
-  },
   {
     type: 'link',
     path: '/assignments',
@@ -106,7 +85,11 @@ const NAV: NavEntry[] = [
     kind: 'Assignment',
     form: 'assignment',
   },
-  { type: 'sep', labelKey: 'nav.hybridVpc' },
+  { type: 'sep', labelKey: 'nav.iaasPlatform' },
+  { type: 'link', path: '/cloudoso', labelKey: 'nav.cloudOso', icon: LayerGroupIcon, kind: 'CloudOSO', form: 'cloudoso' },
+  { type: 'link', path: '/cloudaws', labelKey: 'nav.cloudAws', icon: AwsIcon, kind: 'CloudAWS', form: 'cloudaws' },
+  { type: 'link', path: '/cloudvirt', labelKey: 'nav.cloudVirt', icon: ServerIcon, kind: 'CloudVirt', form: 'cloudvirt' },
+  { type: 'sep', labelKey: 'nav.iaasNetworking' },
   {
     type: 'link',
     path: '/networks',
@@ -123,13 +106,22 @@ const NAV: NavEntry[] = [
     kind: 'NetworkPlacement',
     form: 'networkplacement',
   },
-  { type: 'sep', labelKey: 'nav.accessControl' },  { type: 'link', path: '/personas', labelKey: 'nav.personas', icon: UserEditIcon, kind: 'Persona', form: 'persona' },
-  { type: 'link', path: '/rbac', labelKey: 'nav.rbac', icon: LockIcon, kind: 'Rbac', form: 'rbac' },
-  { type: 'sep', labelKey: 'nav.integrations' },
+  { type: 'sep', labelKey: 'nav.appPlatform' },
+  {
+    type: 'link',
+    path: '/platforms',
+    labelKey: 'nav.platformOpenshift',
+    icon: ClusterIcon,
+    kind: 'PlatformOpenshift',
+    form: 'platformopenshift',
+  },
+  { type: 'sep', labelKey: 'nav.services' },
   { type: 'link', path: '/vaults', labelKey: 'nav.vaults', icon: SecurityIcon, kind: 'Vault', form: 'vault' },
   { type: 'link', path: '/vaultkvs', labelKey: 'nav.vaultKvs', icon: KeyIcon, kind: 'VaultKV', form: 'vaultkv' },
   { type: 'link', path: '/aaporgs', labelKey: 'nav.aapOrgs', icon: ProcessAutomationIcon, kind: 'AAPOrg', form: 'aaporg' },
   { type: 'link', path: '/quayorgs', labelKey: 'nav.quayOrgs', icon: BundleIcon, kind: 'QuayOrg', form: 'quayorg' },
+  { type: 'sep', labelKey: 'nav.accessControl' },
+  { type: 'link', path: '/rbac', labelKey: 'nav.rbac', icon: LockIcon, kind: 'Rbac', form: 'rbac' },
 ];
 
 function ThemeToggle(): React.ReactElement {

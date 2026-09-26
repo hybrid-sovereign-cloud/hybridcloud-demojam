@@ -1,4 +1,4 @@
-# Admin + tenant dashboards from local ImageStreams (built by hs-builds).
+# Admin + tenant dashboards from quay.io/gauravshankar (prebuilt; no hs-builds).
 # Auth: ose-oauth-proxy + real OAuthClient (user:full). SA-as-OAuth-client cannot
 # request user:full — see oauth-clients.yaml bootstrap Job.
 # Namespace sovereign-ui is owned by parent app-of-apps (gitops/templates/namespaces.yaml)
@@ -173,7 +173,7 @@ spec:
               cpu: 200m
               memory: 128Mi
         - name: dashboard
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-cloud-dashboard:latest
+          image: quay.io/gauravshankar/sovereign-cloud-dashboard:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -334,7 +334,7 @@ spec:
               cpu: 200m
               memory: 128Mi
         - name: dashboard
-          image: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/tenancy-dashboard:latest
+          image: quay.io/gauravshankar/tenancy-dashboard:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

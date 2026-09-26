@@ -14,7 +14,7 @@
 
 **Argo root:** Application `field-content` → `gitops/` @ `main`.
 
-**ZTP guide:** [`gitops/ZTP.md`](./ZTP.md)
+**ZTP guide:** [`docs/ztp.md`](./ZTP.md)
 
 ---
 
@@ -56,7 +56,7 @@
 | Field | Value |
 |-------|-------|
 | Change summary | Extend hs-plugin-cred-sync PostSync to seed hybridsovereign KV (openshift/aap/quay/rhbk) so wipe→rollout needs no mid-process hand-seeding |
-| Paths touched | `gitops/infrastructure/security/templates/plugin-cred-sync.yaml`, Chart 0.1.5, `gitops/ZTP.md` |
+| Paths touched | `gitops/infrastructure/security/templates/plugin-cred-sync.yaml`, Chart 0.1.5, `docs/ztp.md` |
 | Rollback | Revert chart to 0.1.4 / prior plugin-cred-sync |
 | Next action | Push; full wipe; single field-content sync; monitor-only |
 
@@ -439,7 +439,7 @@ Anti-loop fix pushed (no relaunch when job already successful). ACM still Instal
 |-------|-------|
 | Incident | Ad-hoc wipe used bare CRD plural `projects` → deleted OpenShift Projects; OAuth/:443 died |
 | Change summary | Add `scripts/ztp-wipe.sh` with FQ-only HS deletes + Project API refuse; document ZTP-004 |
-| Paths touched | `scripts/ztp-wipe.sh`, `gitops/issues.md`, `gitops/ZTP.md` |
+| Paths touched | `scripts/ztp-wipe.sh`, `gitops/issues.md`, `docs/ztp.md` |
 | Next action | Rebuild cluster; use only `./scripts/ztp-wipe.sh` for future wipes |
 | Status | halted pending new cluster |
 

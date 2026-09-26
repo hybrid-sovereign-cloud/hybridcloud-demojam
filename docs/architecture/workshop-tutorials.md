@@ -1,6 +1,6 @@
 # Hybrid Sovereign Cloud — Workshop & Tutorials
 
-Day-0 / ZTP workshop notes plus day-2 tutorials. Hands-on CR labs: [`../../docs/workshop/README.md`](../../docs/workshop/README.md). GitOps: [`../../gitops/ZTP.md`](../../gitops/ZTP.md).
+Day-0 / ZTP workshop notes plus day-2 tutorials. Hands-on CR labs: [`../../docs/workshop/README.md`](../../docs/workshop/README.md). GitOps: [`../../docs/ztp.md`](../../docs/ztp.md).
 
 ## Table of contents
 
@@ -67,7 +67,7 @@ Do **not** label these `hybridsovereign.redhat/gitops-owned=true`.
 2. `hs-security` PushSecrets copy seeds into Vault KV.
 3. Sample CRs reference `vaultPath` / Secret refs — no credentials and no cluster URLs in Git.
 
-Full contract: [gitops/ZTP.md](../../../gitops/ZTP.md).
+Full contract: [docs/ztp.md](../../../docs/ztp.md).
 
 ---
 
@@ -104,7 +104,7 @@ Default interval **3–5 minutes**. Checkpoint to `/tmp/ztp-agent-state/` before
 `PlatformOpenshift.spec.type`: `openstack` | `aws` | `hosted`.  
 Environments: `CloudOSO`, `CloudAWS`, `CloudVirt`.
 
-See [ZTP.md](../../../gitops/ZTP.md) and [issues.md](../../../gitops/issues.md).
+See [ZTP.md](../../../docs/ztp.md) and [issues.md](../../../gitops/issues.md).
 
 ---
 
@@ -760,7 +760,7 @@ Each operator has two PrometheusRule alerts:
 - `<Kind>ReconcileErrors` — fires when error rate > 0 for 5 minutes
 - `<Kind>OperatorDown` — fires when no pods are reporting metrics
 
-See [26-observability.md](../technical.md) for the full alert table.
+See [26-observability.md](technical.md) for the full alert table.
 
 ---
 

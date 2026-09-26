@@ -266,7 +266,17 @@ async function k8sFetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(`K8s API error ${response.status}: ${detail}`);
   }
-  return response.json() as Promise<T>;
+  // DELETE / some PATCHes return 200 with body, 202 Accepted, or 204 No Content.
+  if (response.status === 204 || response.status === 205) {
+    return undefined as T;
+  }
+  const text = await response.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return undefined as T;
+  }
 }
 
 function normalizeListPayload<T>(data: unknown): T[] {

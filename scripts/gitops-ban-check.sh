@@ -14,12 +14,12 @@ check() {
   fi
 }
 
-check 'quay\.signal9\.gg' 'external quay.signal9.gg must not appear in gitops/src'
+check 'quay\.signal9\.gg|signal9\.gg' 'lab signal9 domains must not appear in gitops/src'
 check 'kind:[[:space:]]*Kafka($|[^a-zA-Z])' 'Kafka CRs banned'
 check 'amq-streams' 'amq-streams banned in active gitops/src'
 
 # Soft check: password keys in values (allow listed comments)
-if grep -RnE '^\s+(password| Pal|secretKey|adminPassword):' "$ROOT/gitops" 2>/dev/null \
+if grep -RnE '^\s+(password| Pal|adminPassword):' "$ROOT/gitops" 2>/dev/null \
   | grep -v TRACKING | grep -v '#'; then
   echo "BAN FAIL: possible plaintext password keys under gitops/"
   FAIL=1

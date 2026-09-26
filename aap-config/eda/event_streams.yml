@@ -1,4 +1,0 @@
----
-# HTTP event streams retired — operators publish directly to AMQ Streams.
-# Rulebooks use ansible.eda.kafka source with sovereign-kafka-consumer-credential env injection.
-eda_event_streams: []
