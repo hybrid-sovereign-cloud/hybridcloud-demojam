@@ -3,7 +3,7 @@
   group: hybridsovereign.redhat
   kind: QuayOrg
   role: kind_reconcile
-  reconcilePeriod: 120s
+  reconcilePeriod: 1h
   snakeCaseParameters: false
   finalizer:
     name: quayorg.hybridsovereign.redhat/finalizer

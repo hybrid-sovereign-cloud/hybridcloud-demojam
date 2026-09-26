@@ -822,7 +822,6 @@ data:
       group: hybridsovereign.redhat
       kind: AAPOrg
       role: kind_reconcile
-      reconcilePeriod: 120s
       snakeCaseParameters: false
       reconcilePeriod: 1h
       finalizer:
@@ -938,7 +937,6 @@ data:
       kind: QuayOrg
       role: kind_reconcile
       # Requeue failed/stuck CRs without relying on annotate-only reconcileNow
-      reconcilePeriod: 120s
       snakeCaseParameters: false
       reconcilePeriod: 1h
       finalizer:
@@ -1501,7 +1499,6 @@ data:
       group: hybridsovereign.redhat
       kind: CloudVirt
       role: kind_reconcile
-      reconcilePeriod: 120s
       snakeCaseParameters: false
       reconcilePeriod: 1h
       finalizer:
@@ -1617,7 +1614,7 @@ data:
       kind: PlatformOpenshift
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 120s
+      reconcilePeriod: 1h
       finalizer:
         name: platformopenshift.hybridsovereign.redhat/finalizer
         role: kind_reconcile

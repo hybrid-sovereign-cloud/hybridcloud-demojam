@@ -4,7 +4,7 @@
   kind: PlatformOpenshift
   role: kind_reconcile
   snakeCaseParameters: false
-  reconcilePeriod: 120s
+  reconcilePeriod: 1h
   finalizer:
     name: platformopenshift.hybridsovereign.redhat/finalizer
     role: kind_reconcile
