@@ -4,6 +4,7 @@
   kind: HybridFabric
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: hybridfabric.hybridsovereign.redhat/finalizer
     role: kind_reconcile

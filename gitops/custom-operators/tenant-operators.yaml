@@ -39,6 +39,7 @@ data:
       kind: Rbac
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: rbac.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -150,6 +151,7 @@ data:
       kind: Team
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: team.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -261,6 +263,7 @@ data:
       kind: Project
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: project.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -372,6 +375,7 @@ data:
       kind: Persona
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: persona.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -483,6 +487,7 @@ data:
       kind: Assignment
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: assignment.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -594,6 +599,7 @@ data:
       kind: Vault
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: vault.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -705,6 +711,7 @@ data:
       kind: VaultKV
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: vaultkv.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -817,6 +824,7 @@ data:
       role: kind_reconcile
       reconcilePeriod: 120s
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: aaporg.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -932,6 +940,7 @@ data:
       # Requeue failed/stuck CRs without relying on annotate-only reconcileNow
       reconcilePeriod: 120s
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: quayorg.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1045,6 +1054,7 @@ data:
       kind: HybridNetwork
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: hybridnetwork.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1156,6 +1166,7 @@ data:
       kind: NetworkPlacement
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: networkplacement.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1267,6 +1278,7 @@ data:
       kind: CloudOSO
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: cloudoso.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1378,6 +1390,7 @@ data:
       kind: CloudAWS
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: cloudaws.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1490,6 +1503,7 @@ data:
       role: kind_reconcile
       reconcilePeriod: 120s
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: cloudvirt.hybridsovereign.redhat/finalizer
         role: kind_reconcile

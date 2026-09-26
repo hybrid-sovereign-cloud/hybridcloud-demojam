@@ -4,6 +4,7 @@
   kind: TransportLink
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: transportlink.hybridsovereign.redhat/finalizer
     role: kind_reconcile

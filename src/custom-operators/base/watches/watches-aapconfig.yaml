@@ -4,6 +4,7 @@
   kind: AAPConfig
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: aapconfig.hybridsovereign.redhat/finalizer
     role: kind_reconcile

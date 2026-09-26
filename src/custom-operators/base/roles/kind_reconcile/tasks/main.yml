@@ -73,10 +73,46 @@
     - not is_delete | bool
     - cur_observed | int == hs_generation | int
     - cur_phase in ['ready', 'provisioned']
+    - (hs_status.ready | default(false) | bool)
+    - (hs_status.status | default('') | string | lower) not in ['failed', 'error', 'degraded']
     - not (
         ((hs_live.resources | default([{}]))[0].metadata.annotations | default({}))
         .get('ansible.sdk.operatorframework.io/reconcileNow', '') | string | length > 0
       )
+
+# Periodic retry for non-ready / failed CRs (watches reconcilePeriod also requeues).
+# If lastReconciledAt is older than 1h (or missing) and not ready, force AAP path below.
+- name: Detect stale failure / pending needing hourly retry
+  ansible.builtin.set_fact:
+    hs_status_failed: >-
+      {{
+        (hs_status.status | default('') | string | lower) in ['failed', 'error', 'degraded']
+        or (hs_status.ready | default(false) | bool) == false
+        or (cur_phase | string | lower) in ['pending', 'failed', 'error']
+      }}
+    hs_last_reconciled: "{{ hs_status.lastReconciledAt | default('') | string }}"
+
+- name: Compute hours since lastReconciledAt
+  when: hs_last_reconciled | length > 0
+  ansible.builtin.set_fact:
+    hs_hours_since_reconcile: "{{ ((now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%S.%fZ')).strftime('%s') | int) / 3600 }}"
+  ignore_errors: true
+
+- name: Fallback datetime without micros
+  when: hs_last_reconciled | length > 0 and (hs_hours_since_reconcile is not defined)
+  ansible.builtin.set_fact:
+    hs_hours_since_reconcile: "{{ ((now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%SZ')).strftime('%s') | int) / 3600 }}"
+  ignore_errors: true
+
+- name: Flag hourly retry when failed/pending and stale or never reconciled
+  ansible.builtin.set_fact:
+    hs_force_hourly_retry: >-
+      {{
+        (hs_status_failed | bool) and (
+          (hs_last_reconciled | length == 0) or
+          ((hs_hours_since_reconcile | default(999) | float) >= 1.0)
+        )
+      }}
 
 - name: Clear reconcileNow annotation when present
   when: >-

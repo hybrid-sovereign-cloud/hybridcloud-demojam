@@ -4,6 +4,7 @@
   kind: Team
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: team.hybridsovereign.redhat/finalizer
     role: kind_reconcile

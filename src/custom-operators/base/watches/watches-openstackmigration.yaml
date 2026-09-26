@@ -4,6 +4,7 @@
   kind: OpenStackMigration
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: openstackmigration.hybridsovereign.redhat/finalizer
     role: kind_reconcile

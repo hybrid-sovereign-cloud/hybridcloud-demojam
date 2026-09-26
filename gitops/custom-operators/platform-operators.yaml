@@ -38,6 +38,7 @@ data:
       kind: RbacConfig
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: rbacconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -150,6 +151,7 @@ data:
       kind: AAPConfig
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: aapconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -262,6 +264,7 @@ data:
       kind: QuayConfig
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: quayconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -374,6 +377,7 @@ data:
       kind: HybridFabric
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: hybridfabric.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -486,6 +490,7 @@ data:
       kind: CloudGateway
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: cloudgateway.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -598,6 +603,7 @@ data:
       kind: TransportLink
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: transportlink.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -710,6 +716,7 @@ data:
       kind: UIHealthChecker
       role: kind_reconcile
       snakeCaseParameters: false
+      reconcilePeriod: 1h
       finalizer:
         name: uihealthchecker.hybridsovereign.redhat/finalizer
         role: kind_reconcile

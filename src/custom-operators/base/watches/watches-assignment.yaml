@@ -4,6 +4,7 @@
   kind: Assignment
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: assignment.hybridsovereign.redhat/finalizer
     role: kind_reconcile

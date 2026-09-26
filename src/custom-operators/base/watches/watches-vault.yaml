@@ -4,6 +4,7 @@
   kind: Vault
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: vault.hybridsovereign.redhat/finalizer
     role: kind_reconcile

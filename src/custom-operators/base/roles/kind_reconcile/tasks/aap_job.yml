@@ -114,6 +114,7 @@
           (not (is_delete | bool)) and (
             (job_is_failed | bool) or
             (aap_job_status == 'none') or
+            (hs_force_hourly_retry | default(false) | bool) or
             (
               job_is_running | bool and
               (job_age_seconds | int) > (job_stale_seconds | int)

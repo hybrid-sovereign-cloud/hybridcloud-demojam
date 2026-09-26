@@ -4,6 +4,7 @@
   kind: Rbac
   role: kind_reconcile
   snakeCaseParameters: false
+  reconcilePeriod: 1h
   finalizer:
     name: rbac.hybridsovereign.redhat/finalizer
     role: kind_reconcile
