@@ -53,8 +53,17 @@
           all_jobs = [job_entry]
 
           status_body = json.loads(os.environ["CR_STATUS_BODY"])
-          if "observedGeneration" in status_body:
-              status_body["observedGeneration"] = int(status_body["observedGeneration"])
+          # Ansible Jinja | int still serializes as JSON strings; coerce known int fields.
+          for _k in (
+              "observedGeneration", "vni", "domainAsn", "allocatedVniCount",
+              "availableVniCount", "allocatedClusterCidrCount", "peerCount",
+              "networkId",
+          ):
+              if _k in status_body and status_body[_k] is not None and status_body[_k] != "":
+                  try:
+                      status_body[_k] = int(status_body[_k])
+                  except (TypeError, ValueError):
+                      pass
           if "conditions" in status_body and isinstance(status_body["conditions"], list):
               for cond in status_body["conditions"]:
                   if isinstance(cond, dict) and "status" in cond and not isinstance(cond["status"], str):
