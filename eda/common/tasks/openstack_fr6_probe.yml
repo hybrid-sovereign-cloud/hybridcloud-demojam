@@ -21,27 +21,36 @@
 # Lab / Default EE often has openstacksdk but not the CLI entrypoint.
 # Best-effort install of python-openstackclient into the job venv so the
 # FR6 `--evpn-vni` help probe can run without waiting for a DE rebuild.
+# IMPORTANT: do not re-register into _fr6_cli_probe on a skipped task —
+# Ansible overwrites the register with a skipped stub (no .rc).
 - name: Best-effort install python-openstackclient when CLI missing
   ansible.builtin.pip:
     name: python-openstackclient
     state: present
   register: _fr6_pip_install
   failed_when: false
-  when: (_fr6_cli_probe.rc | default(1)) != 0
+  when: (_fr6_cli_probe.rc | default(1) | int) != 0
 
 - name: Re-probe openstack CLI after pip install
   ansible.builtin.command: openstack --version
-  register: _fr6_cli_probe
+  register: _fr6_cli_reprobe
   changed_when: false
   failed_when: false
-  when: (_fr6_cli_probe.rc | default(1)) != 0
+  when: (_fr6_cli_probe.rc | default(1) | int) != 0
+
+- name: Adopt re-probe CLI result when install path ran
+  ansible.builtin.set_fact:
+    _fr6_cli_probe: "{{ _fr6_cli_reprobe }}"
+  when:
+    - _fr6_cli_reprobe is defined
+    - not (_fr6_cli_reprobe.skipped | default(false) | bool)
 
 - name: Probe router create --evpn-vni support
   ansible.builtin.shell: openstack router create --help 2>&1 | grep -- '--evpn-vni'
   register: _fr6_flag_probe
   changed_when: false
   failed_when: false
-  when: (_fr6_cli_probe.rc | default(1)) == 0
+  when: (_fr6_cli_probe.rc | default(1) | int) == 0
 
 - name: Set FR6 EVPN probe result (CLI missing)
   ansible.builtin.set_fact:
@@ -51,7 +60,7 @@
       cannot verify RHOSO 18.0 FR6 native OVN BGP-EVPN (`--evpn-vni`).
       Install python-openstackclient in de-hybridvpc / de-cloudoso
       (or assign those EEs to fabric Job Templates).
-  when: (_fr6_cli_probe.rc | default(1)) != 0
+  when: (_fr6_cli_probe.rc | default(1) | int) != 0
 
 - name: Set FR6 EVPN probe result (flag missing)
   ansible.builtin.set_fact:
@@ -61,13 +70,13 @@
       target OpenStack does not expose RHOSO 18.0 FR6 native OVN BGP-EVPN
       (still on legacy ovn-bgp-agent or pre-FR6 Neutron).
   when:
-    - (_fr6_cli_probe.rc | default(1)) == 0
-    - (_fr6_flag_probe.rc | default(1)) != 0
+    - (_fr6_cli_probe.rc | default(1) | int) == 0
+    - (_fr6_flag_probe.rc | default(1) | int) != 0
 
 - name: Set FR6 EVPN probe result (available)
   ansible.builtin.set_fact:
     fr6_probe_available: true
     fr6_probe_message: "RHOSO FR6 native OVN BGP-EVPN verified (--evpn-vni present)."
   when:
-    - (_fr6_cli_probe.rc | default(1)) == 0
-    - (_fr6_flag_probe.rc | default(1)) == 0
+    - (_fr6_cli_probe.rc | default(1) | int) == 0
+    - (_fr6_flag_probe.rc | default(1) | int) == 0
