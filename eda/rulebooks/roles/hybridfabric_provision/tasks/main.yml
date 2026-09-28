@@ -41,14 +41,14 @@
     - name: Set VNI pool overlap failure reason before validating
       ansible.builtin.set_fact:
         hybridfabric_fail_reason: VniPoolInvalid
-      when: hf_pool_end < hf_pool_start
+      when: (hf_pool_end | int) < (hf_pool_start | int)
 
     - name: Validate vniPool.end >= vniPool.start
       ansible.builtin.fail:
         msg: >-
           HybridFabric {{ hybridfabric_cr_name }} spec.vniPool.end ({{ hf_pool_end }})
           must be >= spec.vniPool.start ({{ hf_pool_start }}).
-      when: hf_pool_end < hf_pool_start
+      when: (hf_pool_end | int) < (hf_pool_start | int)
 
     - name: List other HybridFabric CRs in the same namespace
       kubernetes.core.k8s_info:
