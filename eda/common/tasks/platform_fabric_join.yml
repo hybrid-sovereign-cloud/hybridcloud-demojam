@@ -1,0 +1,281 @@
+---
+# Shared "platform_fabric_join" role (design/fabric.md §15.3 / §15.8).
+# Runs once at the end of a successful platformopenshift-provision, and is
+# safe to re-run on every reconcile (Mode A + Mode B share this file).
+#
+# Non-negotiable: never fails cluster provisioning. Fabric absence /
+# unreadiness only ever produces Pending/Degraded/Skipped membership.
+#
+# Expected vars from the caller (platformopenshift_provision main.yml):
+#   platformopenshift_cr_name, platformopenshift_cr_namespace
+#   platformopenshift_generation, resolved_entity, platform_type
+#   services_api_host, services_bearer_token
+#   platform_spec (fresh PlatformOpenshift.spec)
+
+- name: platform_fabric_join
+  block:
+    - name: Resolve fabric join spec
+      ansible.builtin.set_fact:
+        pfj_fabric_spec: "{{ platform_spec.fabric | default({}) }}"
+        pfj_entity: "{{ resolved_entity | default('') }}"
+        pfj_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: AWS PlatformOpenshift never attaches to fabric (design §15.0)
+      when: platform_type == 'aws'
+      block:
+        - name: Patch fabricMembership Skipped for AWS
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+          vars:
+            cr_api_version: hybridsovereign.redhat/v1alpha1
+            cr_plural: platformopenshifts
+            cr_name: "{{ platformopenshift_cr_name }}"
+            cr_namespace: "{{ platformopenshift_cr_namespace }}"
+            cr_status_body:
+              fabricMembership:
+                - fabric: ""
+                  phase: Skipped
+                  evpnPrepReady: false
+                  lastJoinedAt: "{{ pfj_timestamp }}"
+                  message: "AWS PlatformOpenshift has no fabric attachment (design §15.0)."
+        - ansible.builtin.meta: end_host
+
+    - name: No-op when joinPolicy is None
+      when: (pfj_fabric_spec.joinPolicy | default('AutoWhenFabricReady')) == 'None'
+      ansible.builtin.meta: end_host
+
+    - name: List Ready HybridFabric CRs on services cluster
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        namespace: sovereign-cloud
+      register: _pfj_all_fabrics
+      failed_when: false
+
+    - name: Filter Ready fabrics visible to this Entity
+      ansible.builtin.set_fact:
+        pfj_ready_fabrics: "{{ _pfj_all_fabrics.resources | default([]) | selectattr('status.ready', 'defined') | selectattr('status.ready') | list }}"
+
+    - name: Reset entity-visible fabric name accumulator
+      ansible.builtin.set_fact:
+        pfj_visible_fabric_names: []
+
+    - name: Compute entity-visible fabric names (entityRefs, else label fallback)
+      ansible.builtin.set_fact:
+        pfj_visible_fabric_names: "{{ pfj_visible_fabric_names + [item.metadata.name] }}"
+      loop: "{{ pfj_ready_fabrics }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      when: >-
+        (pfj_entity in (item.spec.entityRefs | default([])))
+        or (
+          (item.spec.entityRefs | default([]) | length == 0)
+          and ((item.metadata.labels | default({})).get('hybridsovereign.redhat/entity', '') == pfj_entity)
+        )
+
+    - name: Apply joinPolicy selection (ExplicitOnly restricts to spec fabricRefs)
+      ansible.builtin.set_fact:
+        pfj_candidate_names: >-
+          {{
+            (pfj_visible_fabric_names | select('in', pfj_fabric_spec.fabricRefs | default([])) | list)
+            if (pfj_fabric_spec.joinPolicy | default('AutoWhenFabricReady')) == 'ExplicitOnly'
+            else pfj_visible_fabric_names
+          }}
+
+    - name: Select fabric (preferredFabricRef wins, else first candidate)
+      ansible.builtin.set_fact:
+        pfj_selected_fabric: >-
+          {{
+            pfj_fabric_spec.preferredFabricRef
+            if (pfj_fabric_spec.preferredFabricRef | default('') | length > 0
+                and pfj_fabric_spec.preferredFabricRef in pfj_candidate_names)
+            else (pfj_candidate_names | first | default('', true))
+          }}
+
+    - name: Patch fabricMembership Pending (no entity-visible Ready fabric yet)
+      when: (pfj_selected_fabric | default('') | length) == 0
+      block:
+        - ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+          vars:
+            cr_api_version: hybridsovereign.redhat/v1alpha1
+            cr_plural: platformopenshifts
+            cr_name: "{{ platformopenshift_cr_name }}"
+            cr_namespace: "{{ platformopenshift_cr_namespace }}"
+            cr_status_body:
+              fabricMembership:
+                - fabric: "{{ pfj_fabric_spec.preferredFabricRef | default((pfj_fabric_spec.fabricRefs | default([]) | first) | default('', true)) }}"
+                  phase: Pending
+                  evpnPrepReady: false
+                  lastJoinedAt: "{{ pfj_timestamp }}"
+                  message: >-
+                    Waiting for an entity-visible Ready HybridFabric (Entity={{ pfj_entity }}).
+                    Tag this Entity on a HybridFabric.spec.entityRefs (or label
+                    hybridsovereign.redhat/entity=<entity> on the fabric) to join.
+        - ansible.builtin.meta: end_host
+
+    - name: Load selected HybridFabric detail
+      ansible.builtin.set_fact:
+        pfj_fabric_cr: "{{ pfj_ready_fabrics | selectattr('metadata.name', 'equalto', pfj_selected_fabric) | list | first }}"
+
+    - name: Compute idempotent gateway/link names (design §15.10)
+      ansible.builtin.set_fact:
+        pfj_gw_name: "{{ pfj_entity }}-{{ platformopenshift_cr_name }}-gw"
+        pfj_link_name: "{{ pfj_entity }}-{{ platformopenshift_cr_name }}-link"
+        pfj_manage: "{{ (pfj_fabric_spec.manageGatewayAndLink | default(true)) | bool }}"
+        pfj_tunnel_type: >-
+          {{
+            pfj_fabric_spec.tunnelType
+            | default(pfj_fabric_cr.spec.transportDefaults.defaultTunnelType | default('none'), true)
+          }}
+        pfj_cloud_type: "{{ 'openshift' if platform_type == 'hosted' else 'openstack' }}"
+        pfj_spoke_asn: "{{ 65100 + ((platformopenshift_cr_name | length) * 7 % 900) }}"
+
+    - name: Discover existing CloudGateway (read-only when manageGatewayAndLink=false)
+      when: not pfj_manage
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudGateway
+        namespace: sovereign-cloud
+        label_selectors:
+          - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
+      register: _pfj_discovered_gw
+      failed_when: false
+
+    - name: Ensure CloudGateway (Mode A/B — manageGatewayAndLink=true)
+      when: pfj_manage
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: hybridsovereign.redhat/v1alpha1
+          kind: CloudGateway
+          metadata:
+            name: "{{ pfj_gw_name }}"
+            namespace: sovereign-cloud
+            labels:
+              hybridsovereign.redhat/entity: "{{ pfj_entity }}"
+              hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+              hybridsovereign.redhat/fabric: "{{ pfj_selected_fabric }}"
+          spec:
+            enabled: true
+            cloud: "{{ pfj_cloud_type }}"
+            domainAsn: "{{ pfj_spoke_asn }}"
+            fabricRef: "{{ pfj_selected_fabric }}"
+            transport:
+              type: "{{ pfj_tunnel_type }}"
+            openstackCloudOSORef: "{{ platform_spec.openstack.environment | default(omit) if platform_type == 'openstack' else omit }}"
+      register: _pfj_gw_apply
+
+    - name: Ensure TransportLink (Mode A/B — manageGatewayAndLink=true)
+      when: pfj_manage
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: hybridsovereign.redhat/v1alpha1
+          kind: TransportLink
+          metadata:
+            name: "{{ pfj_link_name }}"
+            namespace: sovereign-cloud
+            labels:
+              hybridsovereign.redhat/entity: "{{ pfj_entity }}"
+              hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+              hybridsovereign.redhat/fabric: "{{ pfj_selected_fabric }}"
+          spec:
+            enabled: true
+            fabricRef: "{{ pfj_selected_fabric }}"
+            cloudGatewayRef: "{{ pfj_gw_name }}"
+            tunnelType: "{{ pfj_tunnel_type }}"
+      register: _pfj_link_apply
+
+    - name: Re-read CloudGateway/TransportLink readiness (managed path)
+      when: pfj_manage
+      block:
+        - name: Read CloudGateway status
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: CloudGateway
+            name: "{{ pfj_gw_name }}"
+            namespace: sovereign-cloud
+          register: _pfj_gw_read
+          failed_when: false
+        - name: Read TransportLink status
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: TransportLink
+            name: "{{ pfj_link_name }}"
+            namespace: sovereign-cloud
+          register: _pfj_link_read
+          failed_when: false
+        - name: Set managed gateway/link readiness facts
+          ansible.builtin.set_fact:
+            pfj_gw_ready: "{{ (_pfj_gw_read.resources | default([{}]))[0].status.ready | default(false) | bool }}"
+            pfj_link_ready: "{{ (_pfj_link_read.resources | default([{}]))[0].status.ready | default(false) | bool }}"
+
+    - name: Adopt discovered gateway/link readiness (unmanaged path)
+      when: not pfj_manage
+      ansible.builtin.set_fact:
+        pfj_gw_ready: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].status.ready | default(false) | bool }}"
+        pfj_link_ready: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].status.ready | default(false) | bool }}"
+        pfj_gw_name: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].metadata.name | default(pfj_gw_name) }}"
+
+    - name: Compute join phase and evpnPrepReady
+      ansible.builtin.set_fact:
+        pfj_phase: "{{ 'Joined' if (pfj_gw_ready | default(false) and pfj_link_ready | default(false)) else 'Pending' }}"
+        pfj_evpn_prep_ready: "{{ (pfj_gw_ready | default(false) and pfj_link_ready | default(false)) | bool }}"
+
+    - name: Patch PlatformOpenshift.status.fabricMembership
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      vars:
+        cr_api_version: hybridsovereign.redhat/v1alpha1
+        cr_plural: platformopenshifts
+        cr_name: "{{ platformopenshift_cr_name }}"
+        cr_namespace: "{{ platformopenshift_cr_namespace }}"
+        cr_status_body:
+          fabricMembership:
+            - fabric: "{{ pfj_selected_fabric }}"
+              phase: "{{ pfj_phase }}"
+              cloudGatewayRef: "{{ pfj_gw_name }}"
+              transportLinkRef: "{{ pfj_link_name if pfj_manage else '' }}"
+              evpnPrepReady: "{{ pfj_evpn_prep_ready }}"
+              lastJoinedAt: "{{ pfj_timestamp }}"
+              message: >-
+                {{
+                  'Joined fabric ' ~ pfj_selected_fabric ~ ' via ' ~ pfj_gw_name
+                  if pfj_phase == 'Joined'
+                  else 'CloudGateway/TransportLink for fabric ' ~ pfj_selected_fabric ~ ' not yet Ready'
+                }}
+
+  rescue:
+    # Fabric join must never fail cluster provisioning (design §15.3).
+    - name: Patch fabricMembership Degraded on join error
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      vars:
+        cr_api_version: hybridsovereign.redhat/v1alpha1
+        cr_plural: platformopenshifts
+        cr_name: "{{ platformopenshift_cr_name }}"
+        cr_namespace: "{{ platformopenshift_cr_namespace }}"
+        cr_status_body:
+          fabricMembership:
+            - fabric: "{{ pfj_selected_fabric | default('') }}"
+              phase: Degraded
+              evpnPrepReady: false
+              lastJoinedAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+              message: "{{ ansible_failed_result.msg | default('platform_fabric_join failed') }}"
+      ignore_errors: true
+      when: services_api_host is defined and services_bearer_token is defined

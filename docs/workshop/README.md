@@ -15,6 +15,7 @@ Hands-on lab: from zero cloud registration to a usable spoke and Assignment.
 | 3 | Provision PlatformOpenshift | [lab-03](lab-03-provision-platform.md) |
 | 4 | Entity Team + Assignment cycle | [lab-04](lab-04-assignment.md) |
 | 5 | (Optional) UI path | [lab-05](lab-05-ui.md) |
+| 6 | Hybrid Fabric EVPN (Acme + Chad, UI dropdowns) | [lab-06](lab-06-hybrid-fabric.md) |
 
 ## Mental model (keep this visible)
 

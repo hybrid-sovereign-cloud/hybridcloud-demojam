@@ -1,6 +1,6 @@
 # Hybrid Sovereign Cloud — Workshop & Tutorials
 
-Day-0 / ZTP workshop notes plus day-2 tutorials. Hands-on CR labs: [`../../docs/workshop/README.md`](../../docs/workshop/README.md). GitOps: [`../../docs/ztp.md`](../../docs/ztp.md).
+Day-0 / ZTP workshop notes plus day-2 tutorials. Hands-on CR labs: [`../../docs/workshop/README.md`](../../docs/workshop/README.md) (includes [lab-06 Hybrid Fabric](../../docs/workshop/lab-06-hybrid-fabric.md)). GitOps: [`../../docs/ztp.md`](../../docs/ztp.md).
 
 ## Table of contents
 

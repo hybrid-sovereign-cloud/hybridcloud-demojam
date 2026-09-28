@@ -1,0 +1,213 @@
+# Acme + Chad Hybrid Fabric lab manifests (design/fabric.md §11).
+# Apply after CloudVirt Ready. Secrets must NOT be committed — create CloudOSO secret separately.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridFabric
+metadata:
+  name: acme-fabric
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+spec:
+  enabled: true
+  domainAsn: 65010
+  entityRefs:
+    - name: acme-corp
+  routeReflectors:
+    - name: central-rr-a
+      address: 10.255.10.1
+    - name: central-rr-b
+      address: 10.255.10.2
+  vniPool:
+    start: 51000
+    end: 51127
+  ipam:
+    clusterNetworkPool:
+      cidr: 10.128.0.0/12
+      blockPrefixLength: 14
+    serviceNetworkPool:
+      cidr: 172.30.0.0/15
+      blockPrefixLength: 16
+    machineNetworkPool:
+      cidr: 192.168.64.0/18
+      blockPrefixLength: 24
+    hybridOverlayReserved:
+      - 10.110.0.0/16
+    denyOverlappingClusterCidrs: true
+  transportDefaults:
+    mtu: 9000
+    innerMssClamp: 1360
+    defaultTunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridFabric
+metadata:
+  name: chad-fabric
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: chad
+spec:
+  enabled: true
+  domainAsn: 65020
+  entityRefs:
+    - name: chad
+  routeReflectors:
+    - name: central-rr-a
+      address: 10.255.10.1
+    - name: central-rr-b
+      address: 10.255.10.2
+  vniPool:
+    start: 52000
+    end: 52127
+  ipam:
+    clusterNetworkPool:
+      cidr: 10.144.0.0/12
+      blockPrefixLength: 14
+    serviceNetworkPool:
+      cidr: 172.32.0.0/15
+      blockPrefixLength: 16
+    machineNetworkPool:
+      cidr: 192.168.128.0/18
+      blockPrefixLength: 24
+    hybridOverlayReserved:
+      - 10.120.0.0/16
+    denyOverlappingClusterCidrs: true
+  transportDefaults:
+    mtu: 9000
+    defaultTunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Entity
+metadata:
+  name: chad
+  namespace: sovereign-cloud
+spec:
+  billingID: CHAD-2026-001
+  description: Chad tenant — dual-HCP fabric isolation showcase
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudVirt
+metadata:
+  name: local-virt
+  namespace: entity-chad
+spec:
+  baseDomain: cnv.local
+  enableVRF: false
+  storageClass: ocs-external-storagecluster-ceph-rbd
+  vaultPath: virt/accounts/local
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: acme-hcp1-gw
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/fabric: acme-fabric
+spec:
+  enabled: true
+  cloud: openshift
+  region: local-virt
+  domainAsn: 65011
+  fabricRef: acme-fabric
+  transport:
+    type: none
+  platformOpenshiftRef: hcp1
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: acme-oso1-gw
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/fabric: acme-fabric
+spec:
+  enabled: true
+  cloud: openstack
+  region: regionOne
+  domainAsn: 65012
+  fabricRef: acme-fabric
+  transport:
+    type: none
+  openstackCloudOSORef: oso1
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: chad-hcp2-gw
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: chad
+    hybridsovereign.redhat/fabric: chad-fabric
+spec:
+  enabled: true
+  cloud: openshift
+  region: local-virt
+  domainAsn: 65021
+  fabricRef: chad-fabric
+  transport:
+    type: none
+  platformOpenshiftRef: hcp2
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: chad-hcp3-gw
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/entity: chad
+    hybridsovereign.redhat/fabric: chad-fabric
+spec:
+  enabled: true
+  cloud: openshift
+  region: local-virt
+  domainAsn: 65022
+  fabricRef: chad-fabric
+  transport:
+    type: none
+  platformOpenshiftRef: hcp3
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: acme-hcp1-link
+  namespace: sovereign-cloud
+spec:
+  enabled: true
+  fabricRef: acme-fabric
+  cloudGatewayRef: acme-hcp1-gw
+  tunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: acme-oso1-link
+  namespace: sovereign-cloud
+spec:
+  enabled: true
+  fabricRef: acme-fabric
+  cloudGatewayRef: acme-oso1-gw
+  tunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: chad-hcp2-link
+  namespace: sovereign-cloud
+spec:
+  enabled: true
+  fabricRef: chad-fabric
+  cloudGatewayRef: chad-hcp2-gw
+  tunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: chad-hcp3-link
+  namespace: sovereign-cloud
+spec:
+  enabled: true
+  fabricRef: chad-fabric
+  cloudGatewayRef: chad-hcp3-gw
+  tunnelType: none

@@ -72,7 +72,7 @@ As a principal network and security engineer, treat this as a **VPN isolation pr
 |-------|------|--------|-------------|-------------|
 | **CENTRAL** | OpenShift hub (ACM, Hypershift, Sovereign operators, AAP) | platform | hub | RR + BGW + numbering + Ansible |
 | **HCP1** | `PlatformOpenshift` `type: hosted` | **acme** | `CloudVirt/local-virt` | Acme spoke (CUDN EVPN) |
-| **OSO1** | `CloudOSO` external RHOSO | **acme** | Neutron + ovn-bgp-agent | Acme spoke |
+| **OSO1** | `CloudOSO` external RHOSO **18.0 FR6+** | **acme** | Native OVN BGP-EVPN (Type-5 / OVN Gateway) | Acme spoke |
 | **HCP2** | `PlatformOpenshift` `type: hosted` | **chad** | `CloudVirt/local-virt` | Chad spoke |
 | **HCP3** | `PlatformOpenshift` `type: hosted` | **chad** | `CloudVirt/local-virt` | Chad spoke |
 
@@ -106,7 +106,7 @@ flowchart TB
   end
   subgraph acme["acme-fabric ASN 65010"]
     HCP1["HCP1 CUDN IP-VRF"]
-    OSO1["OSO1 Neutron EVPN"]
+    OSO1["OSO1 RHOSO FR6\nnative OVN EVPN Type-5"]
   end
   subgraph chad["chad-fabric ASN 65020"]
     HCP2["HCP2 CUDN"]
@@ -151,7 +151,7 @@ flowchart TB
 
 ## 5. Acme dedicated EVPN VRF (HCP1 ↔ OSO1)
 
-![Acme IP-VRF data plane — HCP1 CUDN EVPN to OSO1 Neutron via CENTRAL](images/fabric-acme-evpn-vrf.png)
+![Acme IP-VRF data plane — HCP1 CUDN EVPN to OSO1 native OVN EVPN Type-5 via CENTRAL](images/fabric-acme-evpn-vrf.png)
 
 Acme uses OpenShift **4.22 primary ClusterUserDefinedNetwork** with:
 
@@ -168,8 +168,8 @@ flowchart LR
   subgraph fabric["Acme EVPN via CENTRAL"]
     VX["VXLAN :4789\nRT 65010:51001"]
   end
-  subgraph oso["OSO1 RHOSO"]
-    NEU["Neutron + ovn-bgp-agent"]
+  subgraph oso["OSO1 RHOSO 18.0 FR6"]
+    NEU["Neutron EVPN router\n--evpn-vni + OVN Gateway"]
     VM[VMs]
   end
   W --> CUDN --> VX --> NEU --> VM
@@ -299,7 +299,7 @@ flowchart TB
 | Resolve fabric | Load `fabricRef`; fail if fabric not Ready |
 | Entity match | Gateway labels/entity must match fabric entity |
 | Branch on `spec.cloud` | `openshift` → HCP/Virt (**hosted** PlatformOpenshift on CloudVirt) landing; `openstack` → CloudOSO / PlatformOpenshift type=openstack; **`aws` — no EVPN fabric landing** (do not create fabric CloudGateway for AWS PlatformOpenshift) |
-| OSO path | Using `openstackCloudOSORef`, obtain admin/appcred from Vault; ensure BGP speaker / ovn-bgp-agent can peer hub RR |
+| OSO path | Using `openstackCloudOSORef`, obtain admin/appcred from Vault; assert RHOSO ≥ 18.0.21; enable **native OVN BGP-EVPN** (FRR + EVPN Service Plugin / OVN Gateway) — **not** deprecated `ovn-bgp-agent` |
 | OCP path | Using spoke kubeconfig: ensure FRR-k8s + VTEP prerequisites; reserve spoke ASN `domainAsn` |
 | Landing zone | Create/ensure provider resources (security groups, external nets hooks) **without** tenant VNIs yet |
 | Status | `landingZoneReady`, `gatewayAddress` (VTEP or BGP peer IP), `peerCount` |
@@ -367,14 +367,18 @@ On the **spoke HCP API** (kubeconfig from Vault), Ansible must create/update:
 
 Idempotent apply (SSA); record resource versions in placement status.
 
-#### 8.5.3 Backend: CloudOSO (`backend_openstack`)
+#### 8.5.3 Backend: CloudOSO — RHOSO 18.0 FR6 native OVN EVPN (`backend_openstack` / `backend_rhoso_ovn_evpn`)
 
 | Ansible must | Detail |
 |--------------|--------|
+| Assert FR6 EVPN | RHOSO ≥ 18.0.21; Neutron supports `router.create` with `evpn_vni`; reject labs still requiring `ovn-bgp-agent` for new placements |
 | Neutron network/subnet | Prefixes from placement |
-| ovn-bgp-agent / EVPN | Import/export **canonical RT** (rewrite strategy) |
-| BGP peer hub RR | From fabric routeReflectors |
-| Status | Neutron UUIDs, `backendApplied` |
+| EVPN router | `openstack router create --evpn-vni <HybridNetwork.status.vni>` (centralized OVN Gateway, Type-5) |
+| Advertise prefixes | `router add subnet --advertise-host` (or REST `advertise_host: true`) |
+| BGP toward hub | FRR on OVN Gateway chassis peers `HybridFabric` RRs (`l2vpn evpn`); align RT/RD to canonical RT |
+| Status | Neutron network/subnet/router UUIDs, `vni`, `backendApplied` |
+
+Full procedure: **§10.3**.
 
 #### 8.5.4 `fabric_vni` (hub side)
 
@@ -412,7 +416,7 @@ stateDiagram-v2
 | L2 CloudGateway | Landing zone, spoke ASN prep | L1 Ready |
 | L3 TransportLink | BGP neighbors ± tunnel | L2 Ready |
 | L4 HybridNetwork | VNI/RT allocation | L1 Ready |
-| L5 NetworkPlacement | CUDN/FRR/VTEP/RA or Neutron + probes | L3 Ready + L4 allocated |
+| L5 NetworkPlacement | CUDN/FRR/VTEP/RA **or** Neutron EVPN router (`--evpn-vni`) + Type-5 probes | L3 Ready + L4 allocated |
 | Teardown L5 | Withdraw site | — |
 | Teardown L4 | Free VNI | no placements |
 | Teardown L3→L1 | Reverse order | no dependents |
@@ -437,7 +441,7 @@ Playbooks live under `eda/hybridvpc/` / `eda/rulebooks/`; SCM update-on-launch f
 
 1. Complete L0 checks (underlay, MTU, Vault, CNO, backends Ready).  
 2. Create `HybridFabric/acme-fabric` and `chad-fabric` (disjoint pools). Wait Ready.  
-3. Create Acme gateways `acme-hcp1-gw`, `acme-oso1-gw` → landing Ready.  
+3. Create Acme gateways `acme-hcp1-gw`, `acme-oso1-gw` → landing Ready (OSO1: assert RHOSO **18.0.21 FR6+** native OVN BGP-EVPN, FRR `l2vpn evpn` toward hub RR).  
 4. Create Acme TransportLinks (`tunnelType: none` in lab) → tunnel Up.  
 5. Create Chad gateways/links for HCP2 and HCP3 **only**.  
 6. **Negative test:** TransportLink Chad-gw → acme-fabric must fail.  
@@ -534,9 +538,116 @@ spec:
         routeTarget: "65010:51001"
 ```
 
-### 10.3 RHOSO (OSO1)
+### 10.3 RHOSO 18.0 FR6 — native OVN BGP-EVPN (OSO1)
 
-Ansible: Neutron network/subnet `10.110.1.0/24` → ovn-bgp-agent export/import RT `65010:51001` → BGP EVPN toward CENTRAL RRs → write UUIDs on placement status.
+**Target platform:** Red Hat OpenStack Services on OpenShift **18.0.21 (Feature Release 6)** and later.  
+**Feature status:** Technology Preview — *Native BGP-EVPN for advanced multi-tenant routing* (RHOSSTRAT-583).  
+**Design choice:** Prefer **OVN-native BGP-EVPN** over the legacy / deprecated `ovn-bgp-agent` path (deprecated since RHOSO 18.0.10 FR3; do not build new Sovereign automation on it).
+
+#### 10.3.1 What FR6 native EVPN provides
+
+| Capability | FR6 native OVN BGP-EVPN | Legacy `ovn-bgp-agent` (do not use for new work) |
+|------------|-------------------------|--------------------------------------------------|
+| Control plane | BGP EVPN via **FRR**, driven by **OVN dynamic-routing** options | Python agent watches NB DB → FRR / kernel VRF |
+| Route types (TP) | **Type-5** (IP prefixes) only | Kernel/VRF exposure; Type-5 with manual gaps |
+| Routing model (TP) | **Centralized** via **OVN Gateway** chassis | Per-node VRF + VXLAN devices |
+| Tenant isolation | OVN logical isolation preserved; VNI per EVPN domain | Provider-network + VNI external_ids |
+| Future (post-FR6) | Type-2 + distributed routing planned upstream | Deprecated / removed |
+
+Native OVN installs Type-5-advertised prefixes into a Linux VRF/table; FRR advertises them as EVPN. Remote Type-5 learning is consumed via Netlink into OVN (no SB DB copy of remote EVPN state). Datapath stays in OVS/OVN (hardware-offload friendly vs pure kernel VRF hairpinning).
+
+```mermaid
+flowchart LR
+  subgraph oso["RHOSO 18.0 FR6 OSO1"]
+    VM[Tenant VM]
+    NS[Neutron net/subnet]
+    RTR["Neutron router\n--evpn-vni VNI"]
+    GW[OVN Gateway chassis]
+    FRR[FRR l2vpn evpn]
+  end
+  subgraph hub["CENTRAL hub"]
+    RR[Fabric RR ASN]
+  end
+  subgraph hcp["HCP1 OCP 4.22"]
+    CUDN["CUDN ipVRF same VNI/RT"]
+  end
+  VM --> NS --> RTR --> GW
+  GW --> FRR
+  FRR <-->|EVPN Type-5| RR
+  RR <-->|EVPN Type-5| CUDN
+```
+
+#### 10.3.2 Platform prerequisites (CloudGateway / day-0 on OSO1)
+
+Ansible `cloud_landing_zone` / `transport` for `cloud: openstack` must assert RHOSO ≥ **18.0.21** and enable native dynamic routing / EVPN (not `ovn-bgp-agent`):
+
+| Area | Requirement |
+|------|-------------|
+| Control plane | ML2/OVN; Neutron **EVPN Service Plugin** (or FR6 equivalent packaging) enabled |
+| Data plane / EDPM | FRR on gateway/network nodes; OVN **EVPN agent extension** (replaces BGP-agent EVPN expose) |
+| VTEP | Global reachable VTEP IP per EVPN chassis (`ovn-evpn-local-ip` / Open_vSwitch external_ids) |
+| BGP underlay | FRR peers toward `HybridFabric.spec.routeReflectors[]` (CENTRAL) with **address-family l2vpn evpn** activated |
+| AS / VNI | Spoke ASN from CloudGateway `domainAsn`; VNIs allocated only from fabric pool (never tenant-picked) |
+| Verify | `openstack router create --help` shows `--evpn-vni`; OVN NB supports `dynamic-routing*` options |
+
+**Explicit non-goals on OSO for FR6 TP**
+
+- Type-2 MAC/IP EVPN (L2 stretch OCP↔RHOSO) — wait for later RHOSO; Acme design stays **L3 / Type-5 / IP-VRF**.  
+- Distributed EVPN on every compute — TP is **centralized OVN Gateway** only.  
+- Reintroducing `edpm_ovn_bgp_agent_*` EVPN knobs for new CloudOSO attachments.
+
+#### 10.3.3 Placement realization (`backend_openstack` → rename conceptually `backend_rhoso_ovn_evpn`)
+
+When `NetworkPlacement` targets `CloudOSO/oso1` for HybridNetwork `acme-core` with allocated `vni=51001`, `canonicalRt=65010:51001`, prefix `10.110.1.0/24`:
+
+| Step | Ansible action |
+|------|----------------|
+| 1 | Resolve admin clouds.yaml from Vault (`CloudOSO`); assert FR6 EVPN APIs |
+| 2 | Ensure project network + subnet for placement prefixes (or adopt existing) |
+| 3 | Create (or adopt) Neutron **EVPN router**: `openstack router create --evpn-vni 51001 …` so VNI **equals** HybridNetwork status VNI |
+| 4 | Attach subnet with host-route advertisement into the EVPN: `openstack router add subnet --advertise-host <router> <subnet>` (or REST `advertise_host: true`) |
+| 5 | Confirm OVN logical router has dynamic-routing / VRF-id / VNI wiring (EVPN Service Plugin); gateway chassis scheduled |
+| 6 | Confirm FRR on gateway nodes advertises Type-5 for the prefix toward CENTRAL RRs; RT/RD strategy aligns with fabric canonical RT (`65010:51001`) — rewrite/import policy on hub if Neutron RD format differs |
+| 7 | Patch `NetworkPlacement.status` with network/subnet/router UUIDs, `vni`, `backendApplied`, `cloudGatewayRef`, `transportLinkRef` |
+| 8 | Validate: probe from HCP1 CUDN pod to RHOSO VM (and negative cross-fabric) |
+
+**CLI sketch (automation-owned; tenants never set VNI)**
+
+```bash
+# VNI MUST be HybridNetwork.status.vni from fabric IPAM / allocate role
+openstack network create acme-core-oso1
+openstack subnet create --network acme-core-oso1 --subnet-range 10.110.1.0/24 acme-core-oso1-subnet
+openstack router create --evpn-vni 51001 acme-core-evpn-rtr
+openstack router add subnet --advertise-host acme-core-evpn-rtr acme-core-oso1-subnet
+openstack router show acme-core-evpn-rtr -c evpn-vni
+```
+
+#### 10.3.4 Alignment with OpenShift CUDN (same fabric VPN)
+
+| Side | Object | VNI | RT | Prefix example |
+|------|--------|-----|----|----------------|
+| HCP1 | CUDN `evpn.ipVRF` | 51001 | `65010:51001` | 10.110.0.0/24 |
+| OSO1 | Neutron router `--evpn-vni` + advertised subnet | 51001 | import/export policy → same canonical RT | 10.110.1.0/24 |
+| CENTRAL | Fabric RR | reflects Type-5 | fabric ASN 65010 | — |
+
+Same VNI on both spokes is mandatory for one HybridNetwork VPN. Overlapping tenant CIDRs across **different** HybridNetworks remain OK (different VNIs).
+
+#### 10.3.5 TransportLink semantics for RHOSO FR6
+
+| `tunnelType` | Use |
+|--------------|-----|
+| `none` | Lab / adjacent underlay — EVPN/VXLAN only between OSO gateway VTEPs and CENTRAL / HCP VTEPs |
+| `wireguard` / `ipsec` | When OSO site is remote; underlay tunnel first, then EVPN Type-5 inside or beside per fabric defaults |
+
+CloudGateway for OSO remains the Sovereign object that owns spoke ASN, `openstackCloudOSORef`, and peer endpoints; FR6 native EVPN does **not** remove the need for HybridFabric / CloudGateway / TransportLink CRs.
+
+#### 10.3.6 Migration note (existing labs)
+
+If a lab still runs `ovn-bgp-agent` EVPN expose (FR3-era):
+
+1. Treat as **transitional only**.  
+2. New `NetworkPlacement` automation targets FR6 native `--evpn-vni` routers.  
+3. Document drain: withdraw agent-managed VRFs → recreate with EVPN routers → verify Type-5 on hub RR before deleting agent config.
 
 ### 10.4 Chad dual-HCP
 
@@ -840,26 +951,28 @@ Backend + prefixes; read-only VNI/RT card from parent network status. Disable ba
 |------|-------------|
 | CENTRAL | Hub OCP; ACM/Hypershift; Sovereign fabric operators; AAP JTs; Vault |
 | HCP | OCP **4.22+**, CNO EVPN flags, FRR-k8s |
-| RHOSO | External CloudOSO Ready; ovn-bgp-agent (or equiv.) |
+| RHOSO | External CloudOSO Ready on **18.0.21 FR6+** with **native OVN BGP-EVPN** (Type-5 / OVN Gateway); do not require `ovn-bgp-agent` for new fabric attachments |
 | CloudVirt | `local-virt` Ready for HCP hosting |
 | Underlay | Hub ↔ spoke VTEP reachability (or tunnels); MTU plan |
 | Numbering | Disjoint fabric ASN + VNI pools |
 
 ### 13.2 Success criteria
 
-- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM in `acme-core` prefixes; traceroute via EVPN VRF  
-- [ ] Chad: HCP2 ↔ HCP3 on `chad-app`  
+- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM in `acme-core` prefixes; traceroute via EVPN VRF (**requires RHOSO 18.0.21 FR6+ `--evpn-vni`**; labs without Neutron EVPN must fail closed with `Fr6EvpnUnavailable`, not stub Ready)  
+- [ ] Chad: HCP2 ↔ HCP3 on `chad-app` (primary EVPN packet proof when OSO lacks FR6)  
 - [ ] Negative: HCP2 cannot reach Acme OSO prefixes  
 - [ ] CENTRAL RR shows Type-2/Type-5 per fabric without cross-import  
-- [ ] Tenant UI has no VNI/RT editors; admin UI shows pool utilization  
+- [ ] Tenant UI has no VNI/RT editors; admin UI shows pool utilization; **§18 dropdowns** for entity tagging / fabric attach / BackendSelect (AWS PO excluded)  
 - [ ] Introducing each CR layer only succeeds when Ansible preflight for that layer passes  
+- [ ] Workshop [lab-06](../docs/workshop/lab-06-hybrid-fabric.md) exercises Acme + Chad + UI selectors  
 
 ### 13.3 Observability
 
 | Signal | Source |
 |--------|--------|
-| BGP / EVPN | FRR on nodes; `show bgp l2vpn evpn` |
+| BGP / EVPN | FRR on HCP nodes and RHOSO OVN Gateway; `show bgp l2vpn evpn` |
 | CUDN Ready | Spoke `ClusterUserDefinedNetwork` |
+| RHOSO EVPN router | `openstack router show … -c evpn-vni`; advertised subnets |
 | Sovereign Ready | CR printer columns + Network Health UI |
 | Ansible | AAP job URL on CR status |
 
@@ -875,11 +988,14 @@ Backend + prefixes; read-only VNI/RT card from parent network status. Disable ba
 - Tenants choosing VNIs  
 - Full-mesh spoke BGP  
 - Secrets or real cluster domains in Git samples  
+- RHOSO Type-2 / distributed EVPN (wait for post-FR6; Acme stays Type-5 IP-VRF)  
+- New fabric automation on deprecated `ovn-bgp-agent`  
 
 **References**
 
 - OpenShift 4.22 Advanced Networking — BGP EVPN for user-defined networks  
 - OVN-Kubernetes — MAC-VRF vs IP-VRF  
+- RHOSO **18.0.21 FR6** — Native BGP-EVPN (TP): OVN Gateway centralized Type-5; Neutron `--evpn-vni` / advertise-host; OVN dynamic-routing + FRR (`l2vpn evpn`)  
 - In-repo CRDs `gitops/custom-operators/crds/`; samples `samples/hybridvpc/`  
 - Prior UI notes `architecture/mocks/DESIGN_UI.md`  
 - Admin / entity tagging / tenant catalog: §19
@@ -895,14 +1011,14 @@ An OCP cluster represented by `PlatformOpenshift` lives in an **Entity namespace
 | `PlatformOpenshift.spec.type` | Environment backend | Fabric / EVPN / CUDN attach? | Notes |
 |-------------------------------|---------------------|------------------------------|--------|
 | `hosted` | **CloudVirt** (`spec.hosted.environment`) | **Yes** (optional) | HCP on CNV; primary fabric path for lab/prod Virt |
-| `openstack` | **CloudOSO** (`spec.openstack.environment`) | **Yes** (optional) | IPI/UPI on RHOSO; joins via OSO/OVN EVPN path with CloudOSO gateway |
+| `openstack` | **CloudOSO** (`spec.openstack.environment`) | **Yes** (optional) | IPI/UPI on RHOSO; fabric via **native OVN BGP-EVPN (18.0 FR6 Type-5)** + CloudOSO gateway |
 | `aws` | **CloudAWS** (`spec.aws.environment`) | **No** | **No fabric attachment capability.** No `spec.fabric` join, no CloudGateway/TransportLink for this cluster, no HybridNetwork placement onto this PlatformOpenshift for EVPN CUDN |
 
 **Also in scope for fabric (not PlatformOpenshift):**
 
 | Backend CR | Fabric attach? |
 |------------|----------------|
-| `CloudOSO` (external RHOSO cloud, e.g. OSO1) | **Yes** — via `CloudGateway` `openstackCloudOSORef` + TransportLink + NetworkPlacement |
+| `CloudOSO` (external RHOSO cloud, e.g. OSO1) | **Yes** — FR6 native OVN EVPN via `CloudGateway` `openstackCloudOSORef` + TransportLink + NetworkPlacement (`--evpn-vni`) |
 | `CloudVirt` (CNV environment) | **Yes** — as underlay for `type: hosted`, and as placement backend when applicable |
 | `CloudAWS` | **No** EVPN fabric path in this design (out of scope; CRD may still allow non-fabric NetworkPlacement historically — fabric UI must not offer AWS) |
 
@@ -1872,7 +1988,7 @@ Tenant does **not** pick a TransportLink name in the happy path.
 1. Create `HybridNetwork` (name + description).  
 2. Platform allocates VNI/RT from a fabric bound to that entity (`status.fabric`, `status.vni`, …).  
 3. Create `NetworkPlacement` with `backend.kind/name` + `prefixes`.  
-4. Ansible resolves: backend → CloudGateway → Ready TransportLink → realize EVPN/Neutron.
+4. Ansible resolves: backend → CloudGateway → Ready TransportLink → realize CUDN EVPN or RHOSO native OVN `--evpn-vni` Type-5.
 
 ---
 

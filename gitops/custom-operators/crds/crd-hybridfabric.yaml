@@ -149,6 +149,18 @@ spec:
                 numberingAuthority:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                entityRefs:
+                  type: array
+                  description: >-
+                    Entities tagged to consume this fabric (admin multi-select).
+                    PlatformOpenshift joined to this fabric must belong to one of these Entities.
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        description: Entity metadata.name (e.g. acme-corp, chad)
             status:
               type: object
               properties:

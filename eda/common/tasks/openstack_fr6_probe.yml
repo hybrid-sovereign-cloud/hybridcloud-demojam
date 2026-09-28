@@ -1,0 +1,53 @@
+---
+# Probe whether the execution environment can verify RHOSO 18.0 FR6 native
+# OVN BGP-EVPN support (`openstack router create --evpn-vni`), per
+# design/fabric.md §10.3.2. Fails closed: absence of the CLI or the flag
+# means EVPN cannot be verified, and callers must not mark placements Ready.
+#
+# Optional var: os_cloud_env (OS_CLOUD name) when a clouds.yaml is already
+# staged at OS_CLIENT_CONFIG_FILE — probe still works without credentials
+# since `--help` does not require auth.
+#
+# Sets facts:
+#   fr6_probe_available   (bool)
+#   fr6_probe_message     (string, human-readable reason)
+
+- name: Probe openstack CLI presence
+  ansible.builtin.command: openstack --version
+  register: _fr6_cli_probe
+  changed_when: false
+  failed_when: false
+
+- name: Probe router create --evpn-vni support
+  ansible.builtin.shell: openstack router create --help 2>&1 | grep -- '--evpn-vni'
+  register: _fr6_flag_probe
+  changed_when: false
+  failed_when: false
+  when: (_fr6_cli_probe.rc | default(1)) == 0
+
+- name: Set FR6 EVPN probe result (CLI missing)
+  ansible.builtin.set_fact:
+    fr6_probe_available: false
+    fr6_probe_message: >-
+      openstack CLI not available in this execution environment;
+      cannot verify RHOSO 18.0 FR6 native OVN BGP-EVPN (`--evpn-vni`).
+  when: (_fr6_cli_probe.rc | default(1)) != 0
+
+- name: Set FR6 EVPN probe result (flag missing)
+  ansible.builtin.set_fact:
+    fr6_probe_available: false
+    fr6_probe_message: >-
+      openstack CLI present but `router create --evpn-vni` flag not found;
+      target OpenStack does not expose RHOSO 18.0 FR6 native OVN BGP-EVPN
+      (still on legacy ovn-bgp-agent or pre-FR6 Neutron).
+  when:
+    - (_fr6_cli_probe.rc | default(1)) == 0
+    - (_fr6_flag_probe.rc | default(1)) != 0
+
+- name: Set FR6 EVPN probe result (available)
+  ansible.builtin.set_fact:
+    fr6_probe_available: true
+    fr6_probe_message: "RHOSO FR6 native OVN BGP-EVPN verified (--evpn-vni present)."
+  when:
+    - (_fr6_cli_probe.rc | default(1)) == 0
+    - (_fr6_flag_probe.rc | default(1)) == 0

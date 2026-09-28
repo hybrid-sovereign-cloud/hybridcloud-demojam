@@ -17,6 +17,15 @@ import { createDashboardResource, createNamespaceSecret, useK8sResourceList } fr
 import { HybridSovereignKind, K8sResource } from '../types';
 import { PageHeader } from './PageHeader';
 import { RbacMultiSelect } from './RbacMultiSelect';
+import { EntityMultiSelect } from './EntityMultiSelect';
+import { FabricSelect } from './FabricSelect';
+import { FabricMultiSelect } from './FabricMultiSelect';
+import { JoinPolicySelect } from './JoinPolicySelect';
+import type { JoinPolicy } from '../types';
+import { PlatformOpenshiftSelect, filterFabricCapablePlatformOpenshifts } from './PlatformOpenshiftSelect';
+import { CloudOSOSelect } from './CloudOSOSelect';
+import { CloudGatewaySelect } from './CloudGatewaySelect';
+import { BackendSelect, buildBackendOptions, type BackendSelectValue } from './BackendSelect';
 
 export type SelfServiceFormType =
   | 'team'
@@ -176,7 +185,7 @@ export function CreateResourceForm({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [networkRef, setNetworkRef] = useState('');
-  const [backendKind, setBackendKind] = useState('CloudAWS');
+  const [backendKind, setBackendKind] = useState('');
   const [backendName, setBackendName] = useState('');
   const [prefixes, setPrefixes] = useState('10.50.0.0/24');
   const [domainAsn, setDomainAsn] = useState('65000');
@@ -222,6 +231,16 @@ export function CreateResourceForm({
   const [rbacViewer, setRbacViewer] = useState<string[]>([]);
   const [networkViewerRbac, setNetworkViewerRbac] = useState<string[]>([]);
   const [personaRbacs, setPersonaRbacs] = useState<string[]>([]);
+  // HybridFabric — entity tagging (§18.3)
+  const [fabricEntityRefs, setFabricEntityRefs] = useState<string[]>([]);
+  // PlatformOpenshift — fabric attach (§18.4); hidden/ignored when platformType === 'aws'
+  const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>('AutoWhenFabricReady');
+  const [fabricRefsExplicit, setFabricRefsExplicit] = useState<string[]>([]);
+  const [preferredFabricRef, setPreferredFabricRef] = useState('');
+  const [ipamFabricRef, setIpamFabricRef] = useState('');
+  const [manageGatewayAndLink, setManageGatewayAndLink] = useState(true);
+  // CloudGateway — backend picked from PlatformOpenshiftSelect / CloudOSOSelect by cloud type (§18.5)
+  const [gatewayBackendName, setGatewayBackendName] = useState('');
 
   const type = formType;
   const title = FORM_TITLES[type] ?? 'Create Resource';
@@ -238,7 +257,7 @@ export function CreateResourceForm({
 
   const entities = useK8sResourceList<K8sResource>('Entity', {
     namespace: 'sovereign-cloud',
-    enabled: type === 'persona' && !namespace,
+    enabled: (type === 'persona' && !namespace) || type === 'hybridfabric',
   });
 
   const teams = useK8sResourceList<K8sResource>('Team', { namespace: entityNs, enabled: type === 'assignment' });
@@ -276,11 +295,22 @@ export function CreateResourceForm({
   const aapConfigs = useK8sResourceList<K8sResource>('AAPConfig', { enabled: type === 'aaporg' });
   const quayConfigs = useK8sResourceList<K8sResource>('QuayConfig', { enabled: type === 'quayorg' });
   const hybridNetworks = useK8sResourceList<K8sResource>('HybridNetwork', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
-  const cloudAwssForPlacement = useK8sResourceList<K8sResource>('CloudAWS', { namespace: entityNs, enabled: type === 'networkplacement' && backendKind === 'CloudAWS' && !!entityNs });
-  const cloudososForPlacement = useK8sResourceList<K8sResource>('CloudOSO', { namespace: entityNs, enabled: type === 'networkplacement' && backendKind === 'CloudOSO' && !!entityNs });
-  const platformsForPlacement = useK8sResourceList<K8sResource>('PlatformOpenshift', { namespace: entityNs, enabled: type === 'networkplacement' && backendKind === 'PlatformOpenshift' && !!entityNs });
-  const fabrics = useK8sResourceList<K8sResource>('HybridFabric', { namespace: 'sovereign-cloud', enabled: type === 'cloudgateway' || type === 'transportlink' });
+  // BackendSelect (§18.6) — CloudOSO / CloudVirt / PlatformOpenshift(hosted|openstack) only, never CloudAWS/AWS-PO.
+  const cloudososForPlacement = useK8sResourceList<K8sResource>('CloudOSO', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
+  const cloudvirtsForPlacement = useK8sResourceList<K8sResource>('CloudVirt', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
+  const platformsForPlacement = useK8sResourceList<K8sResource>('PlatformOpenshift', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
+  const fabrics = useK8sResourceList<K8sResource>('HybridFabric', {
+    namespace: 'sovereign-cloud',
+    enabled: type === 'cloudgateway' || type === 'transportlink' || type === 'platformopenshift',
+  });
   const gateways = useK8sResourceList<K8sResource>('CloudGateway', { namespace: 'sovereign-cloud', enabled: type === 'transportlink' });
+  // CloudGateway backend (§18.5) — cluster-wide (all entity namespaces), filtered to entities tagged on selected fabric.
+  const platformsForGateway = useK8sResourceList<K8sResource>('PlatformOpenshift', {
+    enabled: type === 'cloudgateway' && cloudProvider === 'openshift',
+  });
+  const cloudososForGateway = useK8sResourceList<K8sResource>('CloudOSO', {
+    enabled: type === 'cloudgateway' && cloudProvider === 'openstack',
+  });
 
 
   const names = (items: K8sResource[] | undefined | null) =>
@@ -291,6 +321,83 @@ export function CreateResourceForm({
 
   const firstName = (items: K8sResource[] | undefined | null): string | undefined =>
     names(items)[0]?.value;
+
+  /** Options with a Ready badge — used by EntityMultiSelect / FabricSelect / FabricMultiSelect. */
+  const namesWithReady = (items: K8sResource[] | undefined | null) =>
+    (items ?? [])
+      .filter((i): i is K8sResource => typeof i?.metadata?.name === 'string' && i.metadata.name.length > 0)
+      .map((i) => ({
+        value: i.metadata.name,
+        label: i.metadata.name,
+        ready: (i.status as { ready?: boolean } | undefined)?.ready,
+      }));
+
+  const currentEntityName = (entityNs || '').replace(/^entity-/, '');
+
+  /** Entity names tagged on a given HybridFabric (spec.entityRefs). */
+  const entityRefsOfFabric = (fabricName: string): string[] =>
+    (fabrics.items.find((f) => f.metadata.name === fabricName)?.spec as
+      | { entityRefs?: Array<{ name: string }> }
+      | undefined)?.entityRefs?.map((r) => r.name) ?? [];
+
+  /** FabricSelect / FabricMultiSelect options — disabled (greyed) when this Entity isn't tagged (§18.4). */
+  const fabricOptionsForEntity = fabrics.items.map((f) => ({
+    value: f.metadata.name,
+    label: f.metadata.name,
+    ready: (f.status as { ready?: boolean } | undefined)?.ready,
+    isDisabled: !entityRefsOfFabric(f.metadata.name).includes(currentEntityName),
+  }));
+
+  /** FabricSelect options for CloudGateway / TransportLink — Ready fabrics, no entity filter. */
+  const fabricSelectOptions = fabrics.items.length
+    ? fabrics.items.map((f) => ({
+        value: f.metadata.name,
+        label: f.metadata.name,
+        ready: (f.status as { ready?: boolean } | undefined)?.ready,
+      }))
+    : [{ value: 'lab-fabric', label: 'lab-fabric' }];
+
+  const entityNameFromNamespace = (ns: string | undefined): string => (ns ?? '').replace(/^entity-/, '');
+
+  /** PlatformOpenshiftSelect options for CloudGateway backend — hosted/openstack only, entity-tagged on selected fabric. */
+  const gatewayPlatformOptions = filterFabricCapablePlatformOpenshifts(platformsForGateway.items)
+    .filter((p) => {
+      const tagged = entityRefsOfFabric(fabricRef);
+      return !tagged.length || tagged.includes(entityNameFromNamespace(p.metadata.namespace));
+    })
+    .map((p) => ({
+      value: p.metadata.name,
+      label: `${p.metadata.name} (${p.metadata.namespace})`,
+      ready: (p.status as { ready?: boolean } | undefined)?.ready,
+    }));
+
+  /** CloudOSOSelect options for CloudGateway backend — entity-tagged on selected fabric. */
+  const gatewayCloudOsoOptions = cloudososForGateway.items
+    .filter((c) => {
+      const tagged = entityRefsOfFabric(fabricRef);
+      return !tagged.length || tagged.includes(entityNameFromNamespace(c.metadata.namespace));
+    })
+    .map((c) => ({
+      value: c.metadata.name,
+      label: `${c.metadata.name} (${c.metadata.namespace})`,
+      ready: (c.status as { ready?: boolean } | undefined)?.ready,
+    }));
+
+  /** CloudGatewaySelect options for TransportLink — gateways for the selected fabric, re-filters on change (§18.11). */
+  const gatewayOptionsForFabric = gateways.items
+    .filter((g) => !fabricRef || (g.spec as { fabricRef?: string } | undefined)?.fabricRef === fabricRef)
+    .map((g) => ({
+      value: g.metadata.name,
+      label: g.metadata.name,
+      ready: (g.status as { ready?: boolean } | undefined)?.ready,
+    }));
+
+  /** BackendSelect options for NetworkPlacement — CloudOSO, CloudVirt, PlatformOpenshift hosted/openstack Joined. */
+  const backendOptions = buildBackendOptions({
+    cloudosos: cloudososForPlacement.items,
+    cloudvirts: cloudvirtsForPlacement.items,
+    platforms: platformsForPlacement.items,
+  });
 
   useEffect(() => {
     if (type === 'persona' && !namespace && !entityName) {
@@ -432,6 +539,7 @@ export function CreateResourceForm({
               }
             : undefined;
         if (platformType === 'aws') {
+          // AWS PlatformOpenshift has no fabric attachment — omit spec.fabric / spec.networking entirely (§15.0).
           return {
             type: 'aws',
             aws: {
@@ -444,6 +552,23 @@ export function CreateResourceForm({
             ...(toolRbac ? { toolRbac } : {}),
           };
         }
+        // hosted / openstack only — JoinPolicySelect + FabricSelect/FabricMultiSelect (§18.4).
+        const fabricSpec =
+          joinPolicy === 'None'
+            ? { joinPolicy: 'None' as const, manageGatewayAndLink: false }
+            : {
+                joinPolicy,
+                ...(joinPolicy === 'ExplicitOnly' ? { fabricRefs: fabricRefsExplicit } : {}),
+                ...(preferredFabricRef ? { preferredFabricRef } : {}),
+                manageGatewayAndLink,
+              };
+        const networkingSpec =
+          joinPolicy === 'None'
+            ? undefined
+            : {
+                allocateFromFabric: true,
+                ...((ipamFabricRef || preferredFabricRef) ? { fabricRef: ipamFabricRef || preferredFabricRef } : {}),
+              };
         if (platformType === 'hosted') {
           const envName = platformEnv || cloudVirtRef;
           return {
@@ -452,6 +577,8 @@ export function CreateResourceForm({
               environment: envName,
               nodePoolReplicas: Number(nodePoolReplicas) || 2,
             },
+            fabric: fabricSpec,
+            ...(networkingSpec ? { networking: networkingSpec } : {}),
             ...(toolRbac ? { toolRbac } : {}),
           };
         }
@@ -463,6 +590,8 @@ export function CreateResourceForm({
             workerCount: Number(workerCount) || 3,
             externalNetwork,
           },
+          fabric: fabricSpec,
+          ...(networkingSpec ? { networking: networkingSpec } : {}),
           ...(toolRbac ? { toolRbac } : {}),
         };
       }
@@ -511,6 +640,7 @@ export function CreateResourceForm({
       case 'networkplacement':
         return {
           network: networkRef,
+          // BackendSelect (§18.6) — CloudOSO / CloudVirt / PlatformOpenshift hosted|openstack only.
           backend: { kind: backendKind, name: backendName },
           prefixes: prefixes.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
           state: 'present',
@@ -519,6 +649,8 @@ export function CreateResourceForm({
         return {
           enabled: true,
           domainAsn: Number(domainAsn) || 65000,
+          // EntityMultiSelect (§18.3) — tenants that may use this fabric.
+          entityRefs: fabricEntityRefs.map((n) => ({ name: n })),
           routeReflectors: [{ name: 'rr1', address: '10.0.0.1' }],
           vniPool: { start: Number(vniStart) || 50000, end: Number(vniEnd) || 50511 },
           transportDefaults: { mtu: 9000, defaultTunnelType: 'wireguard' },
@@ -530,6 +662,10 @@ export function CreateResourceForm({
           region,
           domainAsn: Number(domainAsn) || 65001,
           fabricRef,
+          // Backend picked via PlatformOpenshiftSelect (cloud=openshift) or CloudOSOSelect (cloud=openstack).
+          // AWS PlatformOpenshift can never be a fabric gateway backend (§15.0) — cloud=aws has no ref here.
+          ...(cloudProvider === 'openshift' && gatewayBackendName ? { platformOpenshiftRef: gatewayBackendName } : {}),
+          ...(cloudProvider === 'openstack' && gatewayBackendName ? { openstackCloudOSORef: gatewayBackendName } : {}),
           transport: { type: 'wireguard' },
         };
       case 'transportlink':
@@ -576,15 +712,28 @@ export function CreateResourceForm({
       return false;
     if (type === 'cloudvirt' && (!(virtVaultPath || vaultPath) || !(virtBaseDomain || baseDomain))) return false;
     if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef || cloudVirtRef)) return false;
+    if (
+      type === 'platformopenshift' &&
+      platformType !== 'aws' &&
+      joinPolicy === 'ExplicitOnly' &&
+      fabricRefsExplicit.length === 0
+    )
+      return false;
     if (type === 'persona' && (!(personaRbacs[0] || rbacRef) || !personaType)) return false;
     if (type === 'vaultkv' && !vaultRef) return false;
     if (type === 'migration' && (!vmName || !cloudosoRef)) return false;
     if ((type === 'vault' || type === 'rbac') && !rbacConfig) return false;
     if (type === 'aaporg' && !aapConfig) return false;
     if (type === 'quayorg' && !quayConfig) return false;
-    if (type === 'networkplacement' && (!networkRef || !backendName || !prefixes.trim())) return false;
-    if (type === 'hybridfabric' && !domainAsn) return false;
-    if (type === 'cloudgateway' && (!fabricRef || !region)) return false;
+    if (type === 'networkplacement' && (!networkRef || !backendKind || !backendName || !prefixes.trim())) return false;
+    if (type === 'hybridfabric' && (!domainAsn || fabricEntityRefs.length === 0)) return false;
+    if (
+      type === 'cloudgateway' &&
+      (!fabricRef ||
+        !region ||
+        ((cloudProvider === 'openshift' || cloudProvider === 'openstack') && !gatewayBackendName))
+    )
+      return false;
     if (type === 'transportlink' && (!fabricRef || !gatewayRef)) return false;
     if (type === 'uihealthchecker' && !healthUrl.startsWith('http')) return false;
     return true;
@@ -945,6 +1094,72 @@ export function CreateResourceForm({
                       <TextInput id="plat-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} />
                     </FormGroup>
                   )}
+
+                  {platformType === 'aws' ? (
+                    <Alert variant="info" isInline title="AWS PlatformOpenshift clusters do not attach to Hybrid Fabric" className="sc-mb">
+                      AWS PlatformOpenshift clusters do not attach to Hybrid Fabric / EVPN / CUDN. Use CloudOSO or
+                      CloudVirt-backed OpenShift (hosted / openstack) for fabric networking.
+                    </Alert>
+                  ) : (
+                    <>
+                      <JoinPolicySelect
+                        id="po-join-policy"
+                        value={joinPolicy}
+                        onChange={(v) => {
+                          setJoinPolicy(v);
+                          if (v === 'None') {
+                            setFabricRefsExplicit([]);
+                            setPreferredFabricRef('');
+                            setIpamFabricRef('');
+                          }
+                        }}
+                        isRequired
+                      />
+                      {joinPolicy === 'ExplicitOnly' && (
+                        <FabricMultiSelect
+                          id="po-fabric-refs"
+                          label="Fabrics"
+                          value={fabricRefsExplicit}
+                          onChange={setFabricRefsExplicit}
+                          options={fabricOptionsForEntity}
+                          isRequired
+                        />
+                      )}
+                      {joinPolicy !== 'None' && (
+                        <>
+                          <FabricSelect
+                            id="po-preferred-fabric"
+                            label="Preferred fabric"
+                            value={preferredFabricRef}
+                            onChange={setPreferredFabricRef}
+                            options={fabricOptionsForEntity}
+                            placeholder="Discover automatically"
+                          />
+                          <FabricSelect
+                            id="po-ipam-fabric"
+                            label="IPAM fabric"
+                            value={ipamFabricRef}
+                            onChange={setIpamFabricRef}
+                            options={fabricOptionsForEntity}
+                            placeholder="Same as preferred fabric"
+                          />
+                          <FormGroup label="Manage CloudGateway + TransportLink automatically" fieldId="po-manage-gw">
+                            <Switch
+                              id="po-manage-gw"
+                              isChecked={manageGatewayAndLink}
+                              onChange={(_e, checked) => setManageGatewayAndLink(checked)}
+                            />
+                          </FormGroup>
+                        </>
+                      )}
+                      {joinPolicy === 'None' && (
+                        <Alert variant="info" isInline title="Standalone install" className="sc-mb">
+                          No EVPN/CUDN until attached later via “Attach to fabric…”.
+                        </Alert>
+                      )}
+                    </>
+                  )}
+
                   <RbacMultiSelect
                     id="plat-rbac-admin"
                     label="Cluster admin RBAC"
@@ -1141,31 +1356,15 @@ export function CreateResourceForm({
               {type === 'networkplacement' && (
                 <>
                   <RefSelect id="np-network" label="Hybrid Network" value={networkRef} onChange={setNetworkRef} options={names(hybridNetworks.items)} isRequired />
-                  <RefSelect
-                    id="np-backend-kind"
-                    label="Backend kind"
-                    value={backendKind}
-                    onChange={(v) => { setBackendKind(v); setBackendName(''); }}
-                    options={[
-                      { value: 'CloudAWS', label: 'CloudAWS' },
-                      { value: 'CloudOSO', label: 'CloudOSO' },
-                      { value: 'CloudVirt', label: 'CloudVirt' },
-                      { value: 'PlatformOpenshift', label: 'PlatformOpenshift' },
-                    ]}
-                    isRequired
-                  />
-                  <RefSelect
-                    id="np-backend-name"
-                    label="Backend instance"
-                    value={backendName}
-                    onChange={setBackendName}
-                    options={names(
-                      backendKind === 'CloudOSO'
-                        ? cloudososForPlacement.items
-                        : backendKind === 'PlatformOpenshift'
-                          ? platformsForPlacement.items
-                          : cloudAwssForPlacement.items,
-                    )}
+                  <BackendSelect
+                    id="np-backend"
+                    label="Backend"
+                    value={backendName ? { kind: backendKind, name: backendName } : null}
+                    onChange={(b: BackendSelectValue) => {
+                      setBackendKind(b.kind);
+                      setBackendName(b.name);
+                    }}
+                    options={backendOptions}
                     isRequired
                   />
                   <FormGroup label="Prefixes (CIDR, comma-separated)" fieldId="np-prefixes" isRequired>
@@ -1185,6 +1384,14 @@ export function CreateResourceForm({
                   <FormGroup label="VNI pool end" fieldId="hf-vni-end">
                     <TextInput id="hf-vni-end" value={vniEnd} onChange={(_e, v) => setVniEnd(v)} />
                   </FormGroup>
+                  <EntityMultiSelect
+                    id="hf-entities"
+                    label="Entities that may use this fabric"
+                    value={fabricEntityRefs}
+                    onChange={setFabricEntityRefs}
+                    options={namesWithReady(entities.items)}
+                    isRequired
+                  />
                 </>
               )}
 
@@ -1194,7 +1401,10 @@ export function CreateResourceForm({
                     id="cg-cloud"
                     label="Cloud"
                     value={cloudProvider}
-                    onChange={setCloudProvider}
+                    onChange={(v) => {
+                      setCloudProvider(v);
+                      setGatewayBackendName('');
+                    }}
                     options={[
                       { value: 'aws', label: 'AWS' },
                       { value: 'openstack', label: 'OpenStack' },
@@ -1208,36 +1418,64 @@ export function CreateResourceForm({
                   <FormGroup label="Domain ASN" fieldId="cg-asn">
                     <TextInput id="cg-asn" value={domainAsn} onChange={(_e, v) => setDomainAsn(v)} />
                   </FormGroup>
-                  <RefSelect
+                  <FabricSelect
                     id="cg-fabric"
                     label="Fabric"
                     value={fabricRef}
-                    onChange={setFabricRef}
-                    options={
-                      names(fabrics.items).length
-                        ? names(fabrics.items)
-                        : [{ value: 'lab-fabric', label: 'lab-fabric' }]
-                    }
+                    onChange={(v) => {
+                      setFabricRef(v);
+                      setGatewayBackendName('');
+                    }}
+                    options={fabricSelectOptions}
                     isRequired
                   />
+                  {cloudProvider === 'openshift' && (
+                    <PlatformOpenshiftSelect
+                      id="cg-backend-po"
+                      value={gatewayBackendName}
+                      onChange={setGatewayBackendName}
+                      options={gatewayPlatformOptions}
+                      isRequired
+                    />
+                  )}
+                  {cloudProvider === 'openstack' && (
+                    <CloudOSOSelect
+                      id="cg-backend-oso"
+                      value={gatewayBackendName}
+                      onChange={setGatewayBackendName}
+                      options={gatewayCloudOsoOptions}
+                      isRequired
+                    />
+                  )}
+                  {cloudProvider === 'aws' && (
+                    <Alert variant="info" isInline title="AWS Cloud Gateway" className="sc-mb">
+                      AWS gateways front the CloudAWS account directly. Fabric attach to an AWS
+                      PlatformOpenshift cluster is unsupported (§15.0).
+                    </Alert>
+                  )}
                 </>
               )}
 
               {type === 'transportlink' && (
                 <>
-                  <RefSelect
+                  <FabricSelect
                     id="tl-fabric"
                     label="Fabric"
                     value={fabricRef}
-                    onChange={setFabricRef}
-                    options={
-                      names(fabrics.items).length
-                        ? names(fabrics.items)
-                        : [{ value: 'lab-fabric', label: 'lab-fabric' }]
-                    }
+                    onChange={(v) => {
+                      setFabricRef(v);
+                      setGatewayRef('');
+                    }}
+                    options={fabricSelectOptions}
                     isRequired
                   />
-                  <RefSelect id="tl-gw" label="Cloud Gateway" value={gatewayRef} onChange={setGatewayRef} options={names(gateways.items)} isRequired />
+                  <CloudGatewaySelect
+                    id="tl-gw"
+                    value={gatewayRef}
+                    onChange={setGatewayRef}
+                    options={gatewayOptionsForFabric}
+                    isRequired
+                  />
                 </>
               )}
 

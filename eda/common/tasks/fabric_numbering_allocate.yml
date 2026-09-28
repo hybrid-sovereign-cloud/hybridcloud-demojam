@@ -1,0 +1,110 @@
+---
+# Atomically allocate a VNI from a HybridFabric numbering ledger ConfigMap
+# (fabric-numbering-<fabric>), created by hybridfabric_provision.
+#
+# Required vars:
+#   fn_fabric_name       - HybridFabric metadata.name
+#   fn_fabric_namespace   - namespace of the numbering ConfigMap (sovereign-cloud)
+#   fn_alloc_key          - unique ledger key for the caller (e.g. "<ns>/<name>")
+#
+# Sets facts:
+#   fn_vni                (int) allocated / reused VNI
+#   fn_reused             (bool) true when the key already had an allocation
+#
+# Idempotent: re-running with the same fn_alloc_key returns the same VNI.
+# Uses optimistic concurrency (resourceVersion) with retry-on-409 so concurrent
+# HybridNetwork allocations against the same fabric never collide.
+
+- name: "Write fabric numbering allocate script for {{ fn_fabric_name }}"
+  ansible.builtin.copy:
+    dest: /tmp/fabric_numbering_allocate.py
+    mode: "0755"
+    content: |
+      import json, os, sys, time
+      import requests, urllib3
+      urllib3.disable_warnings()
+
+      api_host = os.environ["CR_API_HOST"].strip()
+      if api_host and not api_host.startswith(("http://", "https://")):
+          api_host = "https://" + api_host.lstrip("/")
+      token = os.environ["CR_TOKEN"]
+      ns = os.environ["CM_NAMESPACE"]
+      name = os.environ["CM_NAME"]
+      alloc_key = os.environ["ALLOC_KEY"]
+      url = f"{api_host}/api/v1/namespaces/{ns}/configmaps/{name}"
+      headers = {"Authorization": f"Bearer {token}"}
+
+      for attempt in range(10):
+          resp = requests.get(url, headers=headers, verify=False, timeout=30)
+          if resp.status_code != 200:
+              print(f"ERROR reading numbering ConfigMap {ns}/{name}: "
+                    f"{resp.status_code} {resp.text[:300]}", file=sys.stderr)
+              sys.exit(1)
+          cm = resp.json()
+          data = cm.get("data") or {}
+          allocated = json.loads(data.get("allocated", "{}") or "{}")
+
+          # Idempotent re-entry: this caller already holds a VNI.
+          if alloc_key in allocated:
+              print(json.dumps({"vni": int(allocated[alloc_key]), "reused": True}))
+              sys.exit(0)
+
+          pool_start = int(data.get("poolStart", "0"))
+          pool_end = int(data.get("poolEnd", "0"))
+          used = {int(v) for v in allocated.values()}
+          next_hint = int(data.get("nextVni", pool_start))
+          if next_hint < pool_start or next_hint > pool_end:
+              next_hint = pool_start
+
+          vni = None
+          for candidate in list(range(next_hint, pool_end + 1)) + list(range(pool_start, next_hint)):
+              if candidate not in used:
+                  vni = candidate
+                  break
+          if vni is None:
+              print(f"ERROR: VNI pool {pool_start}-{pool_end} on fabric numbering "
+                    f"{ns}/{name} is exhausted", file=sys.stderr)
+              sys.exit(2)
+
+          allocated[alloc_key] = vni
+          data["allocated"] = json.dumps(allocated, sort_keys=True)
+          data["nextVni"] = str(vni + 1 if vni + 1 <= pool_end else pool_start)
+          cm["data"] = data
+
+          put_resp = requests.put(
+              url,
+              headers={**headers, "Content-Type": "application/json"},
+              data=json.dumps(cm),
+              verify=False,
+              timeout=30,
+          )
+          if put_resp.status_code in (200, 201):
+              print(json.dumps({"vni": vni, "reused": False}))
+              sys.exit(0)
+          if put_resp.status_code == 409:
+              # Lost the optimistic-lock race; re-read and retry.
+              time.sleep(0.4 + attempt * 0.3)
+              continue
+          print(f"ERROR writing numbering ConfigMap {ns}/{name}: "
+                f"{put_resp.status_code} {put_resp.text[:300]}", file=sys.stderr)
+          sys.exit(1)
+
+      print(f"ERROR: exhausted retries on ConfigMap conflict for {ns}/{name}", file=sys.stderr)
+      sys.exit(3)
+
+- name: "Allocate VNI for {{ fn_alloc_key }} from fabric-numbering-{{ fn_fabric_name }}"
+  ansible.builtin.command: python3 /tmp/fabric_numbering_allocate.py
+  environment:
+    CR_API_HOST: "{{ services_api_host | trim }}"
+    CR_TOKEN: "{{ services_bearer_token | trim }}"
+    CM_NAMESPACE: "{{ fn_fabric_namespace }}"
+    CM_NAME: "fabric-numbering-{{ fn_fabric_name }}"
+    ALLOC_KEY: "{{ fn_alloc_key }}"
+  register: _fn_allocate_result
+  changed_when: true
+  no_log: false
+
+- name: Expose allocated VNI fact
+  ansible.builtin.set_fact:
+    fn_vni: "{{ (_fn_allocate_result.stdout | from_json).vni | int }}"
+    fn_reused: "{{ (_fn_allocate_result.stdout | from_json).reused | default(false) | bool }}"

@@ -1,4 +1,6 @@
 ---
+# HybridFabric teardown — never delete the numbering ledger while VNIs
+# remain allocated (design/fabric.md §8.1 "Teardown" row).
 - block:
     - name: Parse event payload
       ansible.builtin.set_fact:
@@ -8,9 +10,69 @@
     - name: Resolve services cluster API connection from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
 
-    - name: Stub debug teardown for HybridFabric
-      ansible.builtin.debug:
-        msg: "Stub teardown HybridFabric/{{ hybridfabric_cr_name }}"
+    - name: Read numbering ConfigMap
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: ConfigMap
+        name: "fabric-numbering-{{ hybridfabric_cr_name }}"
+        namespace: "{{ hybridfabric_cr_namespace }}"
+      register: hf_teardown_cm_lookup
+
+    - name: Compute allocated VNI count from the ledger
+      ansible.builtin.set_fact:
+        hf_teardown_allocated_map: >-
+          {{
+            (hf_teardown_cm_lookup.resources | default([{}]))[0].data.allocated | default('{}') | from_json
+            if hf_teardown_cm_lookup.resources | default([]) | length > 0
+            else {}
+          }}
+
+    - name: Set allocated count fact
+      ansible.builtin.set_fact:
+        hf_teardown_allocated_count: "{{ hf_teardown_allocated_map | length }}"
+
+    # BLOCK: refuse to delete the numbering ledger while any VNI is still
+    # allocated — the tenant HybridNetworks holding those VNIs must be
+    # released first.
+    - name: Block teardown while VNIs remain allocated
+      when: hf_teardown_allocated_count | int > 0
+      block:
+        - ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+          vars:
+            cr_api_version: hybridsovereign.redhat/v1alpha1
+            cr_plural: hybridfabrics
+            cr_name: "{{ hybridfabric_cr_name }}"
+            cr_namespace: "{{ hybridfabric_cr_namespace }}"
+            cr_status_body:
+              status: failed
+              ready: false
+              deletionComplete: false
+              message: >-
+                Blocked: fabric-numbering-{{ hybridfabric_cr_name }} still has
+                {{ hf_teardown_allocated_count }} allocated VNI(s). Release all
+                HybridNetworks on this fabric before deleting it.
+              lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+        - ansible.builtin.fail:
+            msg: >-
+              HybridFabric {{ hybridfabric_cr_name }} teardown blocked:
+              {{ hf_teardown_allocated_count }} VNI(s) still allocated in fabric-numbering-{{ hybridfabric_cr_name }}.
+
+    - name: Delete numbering ConfigMap (safe — zero VNIs allocated)
+      when:
+        - hf_teardown_allocated_count | int == 0
+        - hf_teardown_cm_lookup.resources | default([]) | length > 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        name: "fabric-numbering-{{ hybridfabric_cr_name }}"
+        namespace: "{{ hybridfabric_cr_namespace }}"
 
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -23,7 +85,7 @@
           status: ready
           ready: true
           deletionComplete: true
-          message: "Stub deleted by EDA hybridvpc"
+          message: "fabric-numbering-{{ hybridfabric_cr_name }} removed (0 VNIs allocated)."
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:
@@ -37,10 +99,11 @@
         cr_status_body:
           status: failed
           ready: false
-          message: "{{ ansible_failed_result.msg | default('EDA stub teardown failed') }}"
+          deletionComplete: false
+          message: "{{ ansible_failed_result.msg | default('EDA teardown failed') }}"
       ignore_errors: true
       when: services_api_host is defined
 
     - name: Re-raise
       ansible.builtin.fail:
-        msg: "HybridFabric teardown stub failed"
+        msg: "HybridFabric {{ hybridfabric_cr_name | default('unknown') }} teardown failed"

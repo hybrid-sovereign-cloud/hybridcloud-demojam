@@ -1,0 +1,73 @@
+# Tenant HybridNetwork + NetworkPlacement for Acme and Chad fabrics.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridNetwork
+metadata:
+  name: acme-core
+  namespace: entity-acme-corp
+spec:
+  description: Acme core VRF — HCP1 + OSO1 via EVPN IP-VRF
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: acme-core-hcp1
+  namespace: entity-acme-corp
+spec:
+  network: acme-core
+  state: present
+  backend:
+    kind: PlatformOpenshift
+    name: hcp1
+  prefixes:
+    - 10.110.0.0/24
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: acme-core-oso1
+  namespace: entity-acme-corp
+spec:
+  network: acme-core
+  state: present
+  backend:
+    kind: CloudOSO
+    name: oso1
+  prefixes:
+    - 10.110.1.0/24
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridNetwork
+metadata:
+  name: chad-app
+  namespace: entity-chad
+spec:
+  description: Chad app VRF — HCP2 ↔ HCP3
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: chad-app-hcp2
+  namespace: entity-chad
+spec:
+  network: chad-app
+  state: present
+  backend:
+    kind: PlatformOpenshift
+    name: hcp2
+  prefixes:
+    - 10.120.0.0/24
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: chad-app-hcp3
+  namespace: entity-chad
+spec:
+  network: chad-app
+  state: present
+  backend:
+    kind: PlatformOpenshift
+    name: hcp3
+  prefixes:
+    - 10.120.1.0/24

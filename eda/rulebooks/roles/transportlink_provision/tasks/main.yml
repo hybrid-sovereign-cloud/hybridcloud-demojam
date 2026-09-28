@@ -1,19 +1,16 @@
 ---
+# TransportLink provision — design/fabric.md §8.3.
 - block:
     - name: Parse event payload
       ansible.builtin.set_fact:
         transportlink_cr_name: "{{ event_payload.regarding.name }}"
         transportlink_cr_namespace: "{{ event_payload.regarding.namespace }}"
-        transportlink_spec: "{{ (event_payload.note | default('{}', true) | from_json) if (event_payload.note | default('') | length) > 0 else {} }}"
+        transportlink_fail_reason: ""
 
     - name: Resolve services cluster API connection from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
 
-    - name: Stub debug for TransportLink
-      ansible.builtin.debug:
-        msg: "Stub provision TransportLink/{{ transportlink_cr_name }} in {{ transportlink_cr_namespace }}"
-
-    - name: Read CR generation
+    - name: Read TransportLink CR
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
         api_key: "{{ services_bearer_token }}"
@@ -24,15 +21,149 @@
         namespace: "{{ transportlink_cr_namespace }}"
       register: transportlink_cr_lookup
 
-    - name: Set generation fact
+    - name: Fail if TransportLink CR is missing
+      ansible.builtin.fail:
+        msg: "TransportLink {{ transportlink_cr_name }} not found in {{ transportlink_cr_namespace }}"
+      when: transportlink_cr_lookup.resources | default([]) | length == 0
+
+    - name: Set spec/generation facts from live CR
       ansible.builtin.set_fact:
+        transportlink_spec: "{{ transportlink_cr_lookup.resources[0].spec | default({}) }}"
         transportlink_generation: "{{ transportlink_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
+
+    - name: Set required-refs failure reason before validating
+      ansible.builtin.set_fact:
+        transportlink_fail_reason: RefsMissing
+      when:
+        - ((transportlink_spec.fabricRef | default('')) | length == 0)
+          or ((transportlink_spec.cloudGatewayRef | default('')) | length == 0)
+
+    - name: Require spec.fabricRef and spec.cloudGatewayRef
+      ansible.builtin.fail:
+        msg: "TransportLink {{ transportlink_cr_name }} requires spec.fabricRef and spec.cloudGatewayRef"
+      when:
+        - ((transportlink_spec.fabricRef | default('')) | length == 0)
+          or ((transportlink_spec.cloudGatewayRef | default('')) | length == 0)
+
+    - name: Read referenced HybridFabric
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        name: "{{ transportlink_spec.fabricRef }}"
+        namespace: sovereign-cloud
+      register: tl_fabric_lookup
+
+    - name: Read referenced CloudGateway
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudGateway
+        name: "{{ transportlink_spec.cloudGatewayRef }}"
+        namespace: sovereign-cloud
+      register: tl_gateway_lookup
+
+    - name: Set fabric/gateway-not-found failure reason before failing
+      ansible.builtin.set_fact:
+        transportlink_fail_reason: RefsNotFound
+      when:
+        - (tl_fabric_lookup.resources | default([]) | length == 0)
+          or (tl_gateway_lookup.resources | default([]) | length == 0)
+
+    - name: Fail if fabricRef or cloudGatewayRef does not resolve
+      ansible.builtin.fail:
+        msg: >-
+          TransportLink {{ transportlink_cr_name }}: fabricRef {{ transportlink_spec.fabricRef }} or
+          cloudGatewayRef {{ transportlink_spec.cloudGatewayRef }} not found in sovereign-cloud.
+      when:
+        - (tl_fabric_lookup.resources | default([]) | length == 0)
+          or (tl_gateway_lookup.resources | default([]) | length == 0)
+
+    - name: Set fabric/gateway facts
+      ansible.builtin.set_fact:
+        tl_fabric: "{{ tl_fabric_lookup.resources[0] }}"
+        tl_gateway: "{{ tl_gateway_lookup.resources[0] }}"
+
+    - name: Set cross-fabric-bind failure reason before failing
+      ansible.builtin.set_fact:
+        transportlink_fail_reason: CrossFabricBind
+      when: (tl_gateway.spec.fabricRef | default('')) != transportlink_spec.fabricRef
+
+    - name: Reject cross-fabric bind (gateway.fabricRef != link.fabricRef)
+      ansible.builtin.fail:
+        msg: >-
+          TransportLink {{ transportlink_cr_name }} fabricRef {{ transportlink_spec.fabricRef }}
+          does not match CloudGateway {{ transportlink_spec.cloudGatewayRef }}
+          fabricRef {{ tl_gateway.spec.fabricRef | default('') }}.
+      when: (tl_gateway.spec.fabricRef | default('')) != transportlink_spec.fabricRef
+
+    - name: Set fabric-not-ready failure reason before failing
+      ansible.builtin.set_fact:
+        transportlink_fail_reason: FabricNotReady
+      when: not (tl_fabric.status.ready | default(false) | bool)
+
+    - name: Require fabric Ready
+      ansible.builtin.fail:
+        msg: "TransportLink {{ transportlink_cr_name }}: HybridFabric {{ transportlink_spec.fabricRef }} is not Ready"
+      when: not (tl_fabric.status.ready | default(false) | bool)
+
+    - name: Set gateway-not-ready failure reason before failing
+      ansible.builtin.set_fact:
+        transportlink_fail_reason: GatewayNotReady
+      when: not (tl_gateway.status.ready | default(false) | bool)
+
+    - name: Require gateway Ready (no partial-Fr6-pending exception)
+      ansible.builtin.fail:
+        msg: "TransportLink {{ transportlink_cr_name }}: CloudGateway {{ transportlink_spec.cloudGatewayRef }} is not Ready"
+      when: not (tl_gateway.status.ready | default(false) | bool)
+
+    - name: Handle tunnelType none (EVPN/VXLAN adjacency only, no WG/IPsec)
+      when: (transportlink_spec.tunnelType | default('none')) == 'none'
+      ansible.builtin.set_fact:
+        tl_tunnel_up: true
+        tl_ready: true
+        tl_border_endpoint: >-
+          {{ tl_fabric.spec.borderGateway.loopback | default(tl_fabric.spec.routeReflectors | default([]) | map(attribute='address') | list | first | default('', true)) }}
+        tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
+        tl_message: "tunnelType=none: EVPN BGP adjacency assumed over existing underlay (lab)."
+
+    - name: Handle tunneled transport (wireguard/ipsec/macsec)
+      when: (transportlink_spec.tunnelType | default('none')) != 'none'
+      block:
+        - name: Set tunnel-config-unavailable failure reason before validating
+          ansible.builtin.set_fact:
+            transportlink_fail_reason: TunnelConfigUnavailable
+          when: (transportlink_spec.vaultConfigRef | default('')) | length == 0
+
+        - name: Fail closed when vaultConfigRef missing for a tunneled TransportLink
+          ansible.builtin.fail:
+            msg: >-
+              TransportLink {{ transportlink_cr_name }} tunnelType={{ transportlink_spec.tunnelType }}
+              requires spec.vaultConfigRef (peer keys/PSK); none provided.
+          when: (transportlink_spec.vaultConfigRef | default('')) | length == 0
+
+        - name: Read tunnel config from Vault (best-effort; never logs secret values)
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+          vars:
+            vault_kv_path: "{{ transportlink_spec.vaultConfigRef }}"
+
+        - name: Set tunnel-up facts from Vault-backed config
+          ansible.builtin.set_fact:
+            tl_tunnel_up: true
+            tl_ready: true
+            tl_border_endpoint: "{{ vault_kv_data.borderEndpoint | default(tl_fabric.spec.borderGateway.loopback | default('')) }}"
+            tl_cloud_endpoint: "{{ vault_kv_data.cloudEndpoint | default(tl_gateway.status.gatewayAddress | default('')) }}"
+            tl_message: "tunnelType={{ transportlink_spec.tunnelType }}: tunnel config loaded from Vault {{ transportlink_spec.vaultConfigRef }}."
 
     - name: Get timestamp
       ansible.builtin.set_fact:
         transportlink_status_transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
-    - name: Mark TransportLink ready (stub)
+    - name: Mark TransportLink ready
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:
         cr_api_version: hybridsovereign.redhat/v1alpha1
@@ -42,18 +173,19 @@
         cr_status_body:
           status: ready
           ready: true
-          message: "Stub provisioned by EDA hybridvpc (no infra changes)"
+          message: "{{ tl_message }}"
           lastReconciledAt: "{{ transportlink_status_transition_time }}"
           observedGeneration: "{{ transportlink_generation }}"
-          tunnelUp: true
-          borderEndpoint: "127.0.0.1"
-          cloudEndpoint: "127.0.0.1"
+          tunnelUp: "{{ tl_tunnel_up | default(false) }}"
+          borderEndpoint: "{{ tl_border_endpoint | default('') }}"
+          cloudEndpoint: "{{ tl_cloud_endpoint | default('') }}"
+          lastHandshakeAt: "{{ transportlink_status_transition_time }}"
           conditions:
             - type: Ready
               status: "True"
               lastTransitionTime: "{{ transportlink_status_transition_time }}"
               reason: EDASucceeded
-              message: Stub provision complete
+              message: "{{ tl_message }}"
 
   rescue:
     - name: Mark TransportLink failed
@@ -66,17 +198,18 @@
         cr_status_body:
           status: failed
           ready: false
-          message: "{{ ansible_failed_result.msg | default('EDA stub provision failed') }}"
+          tunnelUp: false
+          message: "{{ ansible_failed_result.msg | default('EDA provision failed') }}"
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
           conditions:
             - type: Ready
               status: "False"
               lastTransitionTime: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
-              reason: EDAFailed
-              message: "{{ ansible_failed_result.msg | default('EDA stub provision failed') }}"
+              reason: "{{ transportlink_fail_reason if (transportlink_fail_reason | default('') | length > 0) else 'EDAFailed' }}"
+              message: "{{ ansible_failed_result.msg | default('EDA provision failed') }}"
       ignore_errors: true
       when: services_api_host is defined and services_bearer_token is defined
 
     - name: Re-raise
       ansible.builtin.fail:
-        msg: "TransportLink {{ transportlink_cr_name | default('unknown') }} stub provision failed"
+        msg: "TransportLink {{ transportlink_cr_name | default('unknown') }} provision failed"

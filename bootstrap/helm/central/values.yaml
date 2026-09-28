@@ -1830,7 +1830,7 @@ acmBasechart:
 # ─── AMQ Streams (central cluster) ───────────────────────────────────────────
 hybridsovereignPrimaryOperator:
   enabled: true
-  chartVersion: "0.1.22"
+  chartVersion: "0.1.23"
   syncWave: "38"
   destinationNamespace: sovereign-cloud
   values:

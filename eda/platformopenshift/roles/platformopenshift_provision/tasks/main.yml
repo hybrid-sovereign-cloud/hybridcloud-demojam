@@ -106,6 +106,10 @@
     - name: Create per-CR cluster viewer RBAC bindings
       ansible.builtin.include_tasks: cluster_viewer_rbac.yml
 
+    - name: Join Hybrid Fabric when spec.fabric is present (design §15.3)
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/platform_fabric_join.yml"
+      when: platform_spec.fabric is defined
+
   rescue:
     - name: Mark PlatformOpenshift as failed on services cluster
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"

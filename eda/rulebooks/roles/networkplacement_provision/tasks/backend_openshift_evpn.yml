@@ -1,0 +1,204 @@
+---
+# Backend: PlatformOpenshift / CloudVirt — CUDN EVPN on the spoke OCP API
+# (design/fabric.md §8.5.2 / §10.2). Included by networkplacement_provision
+# main.yml when spec.backend.kind is PlatformOpenshift or CloudVirt.
+#
+# Expected vars: np_spec, np_backend_name, np_vni, np_canonical_rt,
+#                np_domain_asn, networkplacement_cr_name/namespace,
+#                hn_fabric_cr (HybridFabric detail; used for RR addresses)
+#
+# Sets facts:
+#   np_backend_applied, np_backend_ready, np_backend_message
+#   np_backend_fail_reason
+
+- name: Read PlatformOpenshift backend CR (spoke identity + kubeconfig path)
+  when: np_spec.backend.kind == 'PlatformOpenshift'
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: PlatformOpenshift
+    name: "{{ np_backend_name }}"
+    namespace: "{{ networkplacement_cr_namespace }}"
+  register: np_po_lookup
+
+- name: Set spoke kubeconfig Vault path fact
+  ansible.builtin.set_fact:
+    np_spoke_kubeconfig_path: >-
+      {{
+        (np_po_lookup.resources | default([{}]))[0].status.kubeconfigVaultPath | default('')
+        if np_spec.backend.kind == 'PlatformOpenshift'
+        else ''
+      }}
+
+- name: Set backend-not-found facts when PlatformOpenshift backend missing
+  when:
+    - np_spec.backend.kind == 'PlatformOpenshift'
+    - np_po_lookup.resources | default([]) | length == 0
+  ansible.builtin.set_fact:
+    np_backend_applied: false
+    np_backend_ready: false
+    np_backend_fail_reason: BackendNotFound
+    np_backend_message: "PlatformOpenshift {{ np_backend_name }} not found in {{ networkplacement_cr_namespace }}"
+
+- name: Set EvpnPrepPending facts when spoke kubeconfig is unavailable
+  when:
+    - (np_po_lookup.resources | default([]) | length > 0) or np_spec.backend.kind == 'CloudVirt'
+    - (np_spoke_kubeconfig_path | default('')) | length == 0
+  ansible.builtin.set_fact:
+    np_backend_applied: false
+    np_backend_ready: false
+    np_backend_fail_reason: EvpnPrepPending
+    np_backend_message: >-
+      EvpnPrepPending: spoke kubeconfig unavailable for backend {{ np_backend_name }};
+      CUDN/FRR/VTEP/RA apply deferred until PlatformOpenshift.status.kubeconfigVaultPath is set.
+
+- name: Apply CUDN-shaped EVPN objects on the spoke (best-effort)
+  when: (np_spoke_kubeconfig_path | default('')) | length > 0
+  block:
+    - name: Read spoke kubeconfig from Vault
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+      vars:
+        vault_kv_path: "{{ np_spoke_kubeconfig_path }}"
+
+    - name: Set spoke-kubeconfig-unreadable facts when Vault has no kubeconfig field
+      when: (vault_kv_data.kubeconfig | default('')) | length == 0
+      ansible.builtin.set_fact:
+        np_backend_applied: false
+        np_backend_ready: false
+        np_backend_fail_reason: EvpnPrepPending
+        np_backend_message: "EvpnPrepPending: Vault {{ np_spoke_kubeconfig_path }} has no kubeconfig field yet."
+
+    - name: Realize CUDN/FRR/RA on the spoke when kubeconfig is readable
+      when: (vault_kv_data.kubeconfig | default('')) | length > 0
+      block:
+        - name: Write spoke kubeconfig for this job
+          ansible.builtin.copy:
+            content: "{{ vault_kv_data.kubeconfig }}"
+            dest: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            mode: "0600"
+          no_log: true
+
+        - name: Reset FRR neighbor accumulator
+          ansible.builtin.set_fact:
+            np_frr_neighbors: []
+
+        - name: Build FRR neighbor list from fabric route reflectors
+          ansible.builtin.set_fact:
+            np_frr_neighbors: "{{ np_frr_neighbors + [{'address': item.address, 'asn': (hn_fabric_cr.spec.domainAsn | default(0) | int)}] }}"
+          loop: "{{ hn_fabric_cr.spec.routeReflectors | default([]) }}"
+          loop_control:
+            label: "{{ item.name | default(item.address) }}"
+
+        - name: Reset CUDN subnet accumulator
+          ansible.builtin.set_fact:
+            np_cudn_subnets: []
+
+        - name: Build CUDN subnet list from placement prefixes
+          ansible.builtin.set_fact:
+            np_cudn_subnets: "{{ np_cudn_subnets + [{'cidr': item, 'hostSubnet': 24}] }}"
+          loop: "{{ np_spec.prefixes | default([]) }}"
+
+        - name: Apply FRRConfiguration on the spoke (BGP neighbors = fabric RRs)
+          kubernetes.core.k8s:
+            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: frrk8s.metallb.io/v1beta1
+              kind: FRRConfiguration
+              metadata:
+                name: "{{ np_spec.network }}-evpn"
+                namespace: openshift-frr-k8s
+                labels:
+                  evpn: "true"
+                  hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
+              spec:
+                nodeSelector: {}
+                bgp:
+                  routers:
+                    - asn: "{{ np_domain_asn | int }}"
+                      neighbors: "{{ np_frr_neighbors }}"
+          register: np_frr_apply
+          ignore_errors: true
+
+        - name: Apply ClusterUserDefinedNetwork on the spoke (transport EVPN)
+          kubernetes.core.k8s:
+            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: k8s.ovn.org/v1
+              kind: ClusterUserDefinedNetwork
+              metadata:
+                name: "{{ np_spec.network }}"
+                labels:
+                  hybridsovereign.redhat/network: "{{ np_spec.network }}"
+                  hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
+                  advertise: "true"
+              spec:
+                namespaceSelector:
+                  matchLabels:
+                    hybridsovereign.redhat/hybridnetwork: "{{ np_spec.network }}"
+                network:
+                  topology: Layer3
+                  layer3:
+                    role: Primary
+                    subnets: "{{ np_cudn_subnets }}"
+                  transport: EVPN
+                  evpn:
+                    vtep: "{{ np_spec.network }}-evpn-vtep"
+                    ipVRF:
+                      vni: "{{ np_vni | int }}"
+                      routeTarget: "{{ np_canonical_rt }}"
+          register: np_cudn_apply
+          ignore_errors: true
+
+        - name: Apply RouteAdvertisements on the spoke
+          kubernetes.core.k8s:
+            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: k8s.ovn.org/v1
+              kind: RouteAdvertisements
+              metadata:
+                name: "advertise-{{ np_spec.network }}-evpn"
+              spec:
+                advertisements: ["PodNetwork"]
+                frrConfigurationSelector:
+                  matchLabels:
+                    evpn: "true"
+                networkSelectors:
+                  - networkSelectionType: ClusterUserDefinedNetworks
+                    clusterUserDefinedNetworkSelector:
+                      networkSelector:
+                        matchLabels:
+                          hybridsovereign.redhat/network: "{{ np_spec.network }}"
+          register: np_ra_apply
+          ignore_errors: true
+
+        - name: Set backend-applied facts (CUDN/FRR/RA best-effort apply)
+          ansible.builtin.set_fact:
+            np_backend_applied: >-
+              {{
+                not (np_frr_apply is failed)
+                and not (np_cudn_apply is failed)
+                and not (np_ra_apply is failed)
+              }}
+            np_backend_ready: >-
+              {{
+                not (np_frr_apply is failed)
+                and not (np_cudn_apply is failed)
+                and not (np_ra_apply is failed)
+              }}
+            np_backend_fail_reason: >-
+              {{
+                ''
+                if (not (np_frr_apply is failed) and not (np_cudn_apply is failed) and not (np_ra_apply is failed))
+                else 'BackendApplyFailed'
+              }}
+            np_backend_message: >-
+              CUDN/FRRConfiguration/RouteAdvertisements applied (best-effort) on spoke
+              for HybridNetwork {{ np_spec.network }} (vni={{ np_vni }}, rt={{ np_canonical_rt }}).

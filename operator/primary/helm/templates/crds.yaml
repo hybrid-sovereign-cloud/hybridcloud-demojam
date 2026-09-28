@@ -3137,6 +3137,18 @@ spec:
                 numberingAuthority:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                entityRefs:
+                  type: array
+                  description: >-
+                    Entities tagged to consume this fabric (admin multi-select).
+                    PlatformOpenshift joined to this fabric must belong to one of these Entities.
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        description: Entity metadata.name (e.g. acme-corp, chad)
             status:
               type: object
               properties:
@@ -3276,6 +3288,12 @@ spec:
                   type: string
                 openstackCloudOSORef:
                   type: string
+                platformOpenshiftRef:
+                  type: string
+                  description: PlatformOpenshift name in the gateway entity namespace (hosted/openstack spokes)
+                virtCloudVirtRef:
+                  type: string
+                  description: Optional CloudVirt environment name when landing on CNV
             status:
               type: object
               properties:

@@ -1,0 +1,88 @@
+# PlatformOpenshift clusters for Hybrid Fabric lab (Acme HCP1 + Chad HCP2/HCP3 + optional OSO).
+# Requires CloudVirt/local-virt Ready and CloudOSO/oso1 for openstack track.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp1
+  namespace: entity-acme-corp
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 2
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - acme-fabric
+    preferredFabricRef: acme-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  networking:
+    allocateFromFabric: true
+    fabricRef: acme-fabric
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp2
+  namespace: entity-chad
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 2
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - chad-fabric
+    preferredFabricRef: chad-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  networking:
+    allocateFromFabric: true
+    fabricRef: chad-fabric
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp3
+  namespace: entity-chad
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 2
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - chad-fabric
+    preferredFabricRef: chad-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  networking:
+    allocateFromFabric: true
+    fabricRef: chad-fabric
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: ocp-oso1
+  namespace: entity-acme-corp
+spec:
+  type: openstack
+  openstack:
+    environment: oso1
+    controlPlaneCount: 1
+    workerCount: 1
+    externalNetwork: public
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - acme-fabric
+    preferredFabricRef: acme-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  networking:
+    allocateFromFabric: true
+    fabricRef: acme-fabric

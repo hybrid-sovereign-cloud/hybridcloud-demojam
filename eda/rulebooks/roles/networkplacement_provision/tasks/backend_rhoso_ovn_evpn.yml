@@ -1,0 +1,172 @@
+---
+# Backend: CloudOSO — RHOSO 18.0 FR6 native OVN BGP-EVPN (design/fabric.md §10.3).
+# Included by networkplacement_provision main.yml when
+# spec.backend.kind == CloudOSO.
+#
+# Expected vars: np_spec, np_backend_name, np_vni, np_canonical_rt,
+#                np_domain_asn, networkplacement_cr_name/namespace
+#
+# Sets facts:
+#   np_backend_applied, np_backend_ready, np_backend_message
+#   np_backend_fail_reason
+#   np_neutron_network_id / np_neutron_subnet_id / np_neutron_router_id
+
+- name: Read CloudOSO backend CR
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudOSO
+    name: "{{ np_backend_name }}"
+    namespace: "{{ networkplacement_cr_namespace }}"
+  register: np_cloudoso_lookup
+
+- name: Set backend-not-found facts when CloudOSO missing
+  when: np_cloudoso_lookup.resources | default([]) | length == 0
+  ansible.builtin.set_fact:
+    np_backend_applied: false
+    np_backend_ready: false
+    np_backend_fail_reason: CloudOSONotFound
+    np_backend_message: "CloudOSO {{ np_backend_name }} not found in {{ networkplacement_cr_namespace }}"
+
+- name: Continue only when CloudOSO backend was found
+  when: np_cloudoso_lookup.resources | default([]) | length > 0
+  block:
+    - name: Set CloudOSO fact
+      ansible.builtin.set_fact:
+        np_cloudoso: "{{ np_cloudoso_lookup.resources[0] }}"
+
+    - name: Probe RHOSO FR6 native OVN BGP-EVPN support
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
+
+    - name: Fail closed when FR6 EVPN cannot be verified (design §5 / §10.3.2)
+      when: not (fr6_probe_available | default(false))
+      ansible.builtin.set_fact:
+        np_backend_applied: false
+        np_backend_ready: false
+        np_backend_fail_reason: Fr6EvpnUnavailable
+        np_backend_message: >-
+          Fr6EvpnUnavailable: {{ fr6_probe_message | default('cannot verify openstack router create --evpn-vni') }}
+          — NetworkPlacement {{ networkplacement_cr_name }} not realized on CloudOSO {{ np_backend_name }}.
+
+    - name: Realize EVPN router when FR6 is verified
+      when: fr6_probe_available | default(false)
+      block:
+        - name: Attempt to load OpenStack clouds.yaml from Vault
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+          vars:
+            vault_kv_path: "{{ np_cloudoso.spec.vaultPath | default('oso/accounts/shc_admin') }}"
+          register: np_clouds_yaml_read
+          ignore_errors: true
+
+        - name: Set credentials-unavailable facts when clouds.yaml missing
+          when: (vault_kv_data['clouds.yaml'] | default('')) | length == 0
+          ansible.builtin.set_fact:
+            np_backend_applied: false
+            np_backend_ready: false
+            np_backend_fail_reason: OpenStackCredentialsUnavailable
+            np_backend_message: >-
+              OpenStack clouds.yaml unavailable at Vault path {{ np_cloudoso.spec.vaultPath | default('') }};
+              FR6 EVPN router create for {{ networkplacement_cr_name }} deferred.
+
+        - name: Create Neutron network/subnet/EVPN router when credentials are available
+          when: (vault_kv_data['clouds.yaml'] | default('')) | length > 0
+          block:
+            - name: Write clouds.yaml for this NetworkPlacement job
+              ansible.builtin.copy:
+                content: "{{ vault_kv_data['clouds.yaml'] }}"
+                dest: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+                mode: "0600"
+              no_log: true
+
+            - name: Resolve cloud name from clouds.yaml
+              ansible.builtin.set_fact:
+                np_os_cloud_name: "{{ (vault_kv_data['clouds.yaml'] | from_yaml).clouds.keys() | list | first }}"
+
+            - name: Ensure Neutron network for this HybridNetwork placement
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} network show
+                {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              register: np_network_show
+              changed_when: false
+              failed_when: false
+
+            - name: Create Neutron network when missing
+              when: (np_network_show.rc | default(1)) != 0
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} network create
+                {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              register: np_network_create
+              changed_when: true
+
+            - name: Set Neutron network id fact
+              ansible.builtin.set_fact:
+                np_neutron_network_id: >-
+                  {{
+                    ((np_network_show.stdout | default('')) | trim)
+                    | default((np_network_create.stdout | default('')) | trim, true)
+                  }}
+
+            - name: Ensure Neutron subnet(s) for placement prefixes
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} subnet create
+                --network {{ np_spec.network }}-{{ np_backend_name }}
+                --subnet-range {{ item }}
+                {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ loop.index0 }}
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              loop: "{{ np_spec.prefixes | default([]) }}"
+              register: np_subnet_create
+              changed_when: true
+              failed_when: false
+
+            - name: Ensure EVPN router (--evpn-vni MUST equal HybridNetwork.status.vni)
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} router create
+                --evpn-vni {{ np_vni }} {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              register: np_router_create
+              changed_when: true
+              failed_when: false
+
+            - name: Advertise subnet host routes into the EVPN router
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host
+                {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
+                {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ item }}
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              loop: "{{ range(0, np_spec.prefixes | default([]) | length) | list }}"
+              register: np_router_add_subnet
+              changed_when: true
+              failed_when: false
+
+            - name: Resolve EVPN router id
+              ansible.builtin.command: >-
+                openstack --os-cloud {{ np_os_cloud_name }} router show
+                {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr -f value -c id
+              environment:
+                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              register: np_router_show
+              changed_when: false
+              failed_when: false
+
+            - name: Set backend-applied facts (FR6 router created)
+              ansible.builtin.set_fact:
+                np_backend_applied: "{{ (np_router_show.rc | default(1)) == 0 }}"
+                np_backend_ready: "{{ (np_router_show.rc | default(1)) == 0 }}"
+                np_neutron_router_id: "{{ (np_router_show.stdout | default('')) | trim }}"
+                np_backend_message: >-
+                  {{
+                    'RHOSO FR6 EVPN router ' ~ (np_spec.network ~ '-' ~ np_backend_name ~ '-evpn-rtr') ~
+                    ' vni=' ~ np_vni ~ ' rt=' ~ np_canonical_rt ~ ' realized on ' ~ np_backend_name ~ '.'
+                    if (np_router_show.rc | default(1)) == 0
+                    else 'EVPN router create/show failed on CloudOSO ' ~ np_backend_name ~ '; see job log.'
+                  }}
+                np_backend_fail_reason: "{{ '' if (np_router_show.rc | default(1)) == 0 else 'BackendApplyFailed' }}"

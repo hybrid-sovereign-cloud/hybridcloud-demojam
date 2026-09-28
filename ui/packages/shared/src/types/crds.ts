@@ -106,13 +106,55 @@ export interface PlatformOpenshiftOpenstackSpec {
   externalNetwork?: string;
 }
 
+/** How this PlatformOpenshift attaches to entity-visible HybridFabric(s) — see design/fabric.md §15/§18.
+ *  Hidden / rejected entirely when `spec.type === 'aws'` — AWS has no fabric attachment (§15.0). */
+export type JoinPolicy = 'None' | 'AutoWhenFabricReady' | 'ExplicitOnly';
+
+export interface PlatformOpenshiftFabricSpec {
+  /** None = never auto-join; AutoWhenFabricReady = default; ExplicitOnly = only fabricRefs[] */
+  joinPolicy?: JoinPolicy;
+  /** Used when joinPolicy=ExplicitOnly — each must be in the Entity's HybridFabric.entityRefs */
+  fabricRefs?: string[];
+  /** Optional — which fabric to prefer when the Entity is tagged on more than one */
+  preferredFabricRef?: string;
+  /** Idempotently create/update CloudGateway + TransportLink for this cluster */
+  manageGatewayAndLink?: boolean;
+}
+
+export interface PlatformOpenshiftNetworkingSpec {
+  /** false = use platform default IPAM pools or explicit CIDRs below; true = allocate from fabric */
+  allocateFromFabric?: boolean;
+  /** Optional — IPAM fabric to allocate cluster/service CIDRs from (defaults to preferredFabricRef) */
+  fabricRef?: string;
+  clusterNetwork?: string[];
+  serviceNetwork?: string[];
+}
+
 export interface PlatformOpenshiftSpec {
   type: 'openstack' | 'aws' | 'hosted' | 'vmware';
   openstack?: PlatformOpenshiftOpenstackSpec;
   cloudRef?: string;
+  /** Fabric join policy — omitted / ignored for type=aws */
+  fabric?: PlatformOpenshiftFabricSpec;
+  /** IPAM / cluster networking — allocateFromFabric + fabricRef only meaningful for hosted/openstack */
+  networking?: PlatformOpenshiftNetworkingSpec;
 }
 
-export type PlatformOpenshift = K8sResource<PlatformOpenshiftSpec>;
+/** Per-fabric join status recorded by the fabric-join reconcile loop (design/fabric.md §15.2). */
+export interface FabricMembership {
+  fabric: string;
+  phase?: 'Pending' | 'Joined' | 'Degraded' | 'Skipped';
+  cloudGatewayRef?: string;
+  transportLinkRef?: string;
+  evpnPrepReady?: boolean;
+  message?: string;
+}
+
+export interface PlatformOpenshiftStatus extends OperatorStatus {
+  fabricMembership?: FabricMembership[];
+}
+
+export type PlatformOpenshift = K8sResource<PlatformOpenshiftSpec, PlatformOpenshiftStatus>;
 
 /** CloudOSO — OpenStack environment */
 export interface CloudOSOSpec {
@@ -264,6 +306,8 @@ export type VaultKV = K8sResource<VaultKVSpec>;
 export interface HybridFabricSpec {
   enabled?: boolean;
   domainAsn?: number;
+  /** Entities that may attach to / use this fabric — tagged via EntityMultiSelect (§18.3). */
+  entityRefs?: Array<{ name: string }>;
   routeReflectors?: Array<{ name: string; address: string }>;
   vniPool?: { start: number; end: number };
   borderGateway?: { name?: string; loopback?: string; vaultCredentialRef?: string };
@@ -286,6 +330,8 @@ export interface CloudGatewaySpec {
   transport?: { type?: string; vaultPeerConfigRef?: string };
   awsAccountId?: string;
   openstackCloudOSORef?: string;
+  /** hosted/openstack PlatformOpenshift backend for cloud=openshift — never an AWS PlatformOpenshift (§15.0) */
+  platformOpenshiftRef?: string;
 }
 export type CloudGateway = K8sResource<CloudGatewaySpec>;
 
@@ -309,7 +355,7 @@ export type HybridNetwork = K8sResource<HybridNetworkSpec>;
 /** NetworkPlacement — backend attachment */
 export interface NetworkPlacementSpec {
   network: string;
-  backend: { kind: 'CloudAWS' | 'CloudOSO' | 'PlatformOpenshift'; name: string };
+  backend: { kind: 'CloudAWS' | 'CloudOSO' | 'CloudVirt' | 'PlatformOpenshift'; name: string };
   prefixes?: string[];
   state?: 'present' | 'absent';
 }
