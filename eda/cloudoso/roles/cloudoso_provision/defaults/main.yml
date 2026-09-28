@@ -6,9 +6,10 @@ central_sa_secret_namespace: sovereign-cloud
 eda_central_work_namespace: sovereign-cloud-jobs
 
 clouds_yaml_path: "/tmp/eda-cloudoso-clouds.yaml"
-clouds_yaml_cloud: "openstack"
+# Overridden after clouds.yaml is written (auto-detect first cloud key).
+clouds_yaml_cloud: "default"
 
-default_external_network: "internet"
+default_external_network: "public"
 default_project_domain: "shc_domain"
 default_region_name: "ATUIN"
 openstack_admin_user: "shc_admin"

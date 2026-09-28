@@ -69,7 +69,7 @@
       loop_control:
         label: "{{ item.metadata.name }}"
       when: >-
-        (pfj_entity in (item.spec.entityRefs | default([])))
+        (pfj_entity in (item.spec.entityRefs | default([]) | map(attribute='name') | list))
         or (
           (item.spec.entityRefs | default([]) | length == 0)
           and ((item.metadata.labels | default({})).get('hybridsovereign.redhat/entity', '') == pfj_entity)

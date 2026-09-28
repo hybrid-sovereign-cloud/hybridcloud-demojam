@@ -42,44 +42,99 @@
     np_backend_fail_reason: BackendNotFound
     np_backend_message: "PlatformOpenshift {{ np_backend_name }} not found in {{ networkplacement_cr_namespace }}"
 
+- name: Try HostedCluster admin-kubeconfig Secret when Vault path missing (hosted)
+  when:
+    - np_spec.backend.kind == 'PlatformOpenshift'
+    - (np_spoke_kubeconfig_path | default('')) | length == 0
+    - (np_po_lookup.resources | default([]) | length > 0)
+    - (np_po_lookup.resources[0].spec.type | default('')) == 'hosted'
+  block:
+    - name: Read HostedCluster admin-kubeconfig from hub
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ np_backend_name }}-admin-kubeconfig"
+        namespace: "clusters-{{ np_backend_name }}"
+      register: np_hc_kube_secret
+      failed_when: false
+
+    - name: Materialize spoke kubeconfig from HostedCluster Secret
+      when:
+        - np_hc_kube_secret.resources | default([]) | length > 0
+        - (np_hc_kube_secret.resources[0].data.kubeconfig | default('')) | length > 0
+      block:
+        - name: Write spoke kubeconfig from HostedCluster Secret
+          ansible.builtin.copy:
+            content: "{{ np_hc_kube_secret.resources[0].data.kubeconfig | b64decode }}"
+            dest: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            mode: "0600"
+          no_log: true
+
+        - name: Mark HostedCluster kubeconfig available for CUDN apply
+          ansible.builtin.set_fact:
+            np_spoke_kubeconfig_file: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            np_spoke_kubeconfig_path: "hostedcluster://clusters-{{ np_backend_name }}/{{ np_backend_name }}-admin-kubeconfig"
+
 - name: Set EvpnPrepPending facts when spoke kubeconfig is unavailable
   when:
     - (np_po_lookup.resources | default([]) | length > 0) or np_spec.backend.kind == 'CloudVirt'
     - (np_spoke_kubeconfig_path | default('')) | length == 0
+    - (np_spoke_kubeconfig_file | default('')) | length == 0
   ansible.builtin.set_fact:
     np_backend_applied: false
     np_backend_ready: false
     np_backend_fail_reason: EvpnPrepPending
     np_backend_message: >-
       EvpnPrepPending: spoke kubeconfig unavailable for backend {{ np_backend_name }};
-      CUDN/FRR/VTEP/RA apply deferred until PlatformOpenshift.status.kubeconfigVaultPath is set.
+      CUDN/FRR/VTEP/RA apply deferred until PlatformOpenshift.status.kubeconfigVaultPath
+      is set or HostedCluster admin-kubeconfig Secret exists.
 
 - name: Apply CUDN-shaped EVPN objects on the spoke (best-effort)
-  when: (np_spoke_kubeconfig_path | default('')) | length > 0
+  when: >-
+    (np_spoke_kubeconfig_path | default('')) | length > 0
+    or (np_spoke_kubeconfig_file | default('')) | length > 0
   block:
     - name: Read spoke kubeconfig from Vault
+      when:
+        - (np_spoke_kubeconfig_file | default('')) | length == 0
+        - not (np_spoke_kubeconfig_path | default('') | regex_search('^hostedcluster://'))
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
       vars:
         vault_kv_path: "{{ np_spoke_kubeconfig_path }}"
 
-    - name: Set spoke-kubeconfig-unreadable facts when Vault has no kubeconfig field
-      when: (vault_kv_data.kubeconfig | default('')) | length == 0
+    - name: Write spoke kubeconfig from Vault when needed
+      when:
+        - (np_spoke_kubeconfig_file | default('')) | length == 0
+        - (vault_kv_data.kubeconfig | default('')) | length > 0
+      ansible.builtin.copy:
+        content: "{{ vault_kv_data.kubeconfig }}"
+        dest: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+        mode: "0600"
+      no_log: true
+
+    - name: Set spoke kubeconfig file path fact
+      ansible.builtin.set_fact:
+        np_spoke_kubeconfig_file: "{{ np_spoke_kubeconfig_file | default('/tmp/np-' ~ networkplacement_cr_name ~ '-spoke-kubeconfig') }}"
+
+    - name: Stat spoke kubeconfig file
+      ansible.builtin.stat:
+        path: "{{ np_spoke_kubeconfig_file }}"
+      register: np_spoke_kube_stat
+
+    - name: Set spoke-kubeconfig-unreadable facts when no kubeconfig file
+      when: not (np_spoke_kube_stat.stat.exists | default(false))
       ansible.builtin.set_fact:
         np_backend_applied: false
         np_backend_ready: false
         np_backend_fail_reason: EvpnPrepPending
-        np_backend_message: "EvpnPrepPending: Vault {{ np_spoke_kubeconfig_path }} has no kubeconfig field yet."
+        np_backend_message: "EvpnPrepPending: no readable spoke kubeconfig for {{ np_backend_name }}."
 
-    - name: Realize CUDN/FRR/RA on the spoke when kubeconfig is readable
-      when: (vault_kv_data.kubeconfig | default('')) | length > 0
+    - name: Realize CUDN/FRR/RA on the spoke when kubeconfig file exists
+      when: np_spoke_kube_stat.stat.exists | default(false)
       block:
-        - name: Write spoke kubeconfig for this job
-          ansible.builtin.copy:
-            content: "{{ vault_kv_data.kubeconfig }}"
-            dest: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
-            mode: "0600"
-          no_log: true
-
         - name: Reset FRR neighbor accumulator
           ansible.builtin.set_fact:
             np_frr_neighbors: []

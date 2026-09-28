@@ -114,6 +114,23 @@
   ansible.builtin.set_fact:
     clouds_yaml_path: "/tmp/eda-cloudoso-{{ cloudoso_cr_name }}-clouds.yaml"
 
+- name: Auto-detect OS_CLOUD name from clouds.yaml (prefer default, else first key)
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import yaml
+        c = yaml.safe_load(open("{{ clouds_yaml_path }}"))
+        ks = list((c.get("clouds") or {}).keys())
+        print("default" if "default" in ks else (ks[0] if ks else "openstack"))
+  register: _clouds_cloud_detect
+  changed_when: false
+
+- name: Set clouds_yaml_cloud from detection
+  ansible.builtin.set_fact:
+    clouds_yaml_cloud: "{{ _clouds_cloud_detect.stdout | trim }}"
+
 - name: Generate deterministic slug from CR name
   ansible.builtin.set_fact:
     ep_slug: "{{ (cloudoso_cr_name | hash('sha256'))[:5] }}"
