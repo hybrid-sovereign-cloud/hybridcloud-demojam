@@ -53,12 +53,55 @@
     - name: Realize EVPN router when FR6 is verified
       when: fr6_probe_available | default(false)
       block:
-        - name: Attempt to load OpenStack clouds.yaml from Vault
+        # Prefer the CloudOSO-provisioned per-project clouds.yaml written to
+        # Vault at oso/projects/<name>/clouds-config (app-cred scoped). Fall
+        # back to credentialsSecretRef in the entity namespace, then optional
+        # spec.vaultPath. Never default to oso/accounts/shc_admin (404).
+        - name: Reset clouds.yaml accumulator
+          ansible.builtin.set_fact:
+            vault_kv_data: {}
+            np_clouds_yaml_source: ""
+
+        - name: Attempt to load per-project clouds.yaml from Vault
           ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
           vars:
-            vault_kv_path: "{{ np_cloudoso.spec.vaultPath | default('oso/accounts/shc_admin') }}"
-          register: np_clouds_yaml_read
+            vault_kv_path: >-
+              {{
+                np_cloudoso.spec.vaultPath
+                | default('oso/projects/' ~ np_backend_name ~ '/clouds-config', true)
+              }}
           ignore_errors: true
+
+        - name: Record Vault clouds.yaml when present
+          when: (vault_kv_data['clouds.yaml'] | default('')) | length > 0
+          ansible.builtin.set_fact:
+            np_clouds_yaml_source: vault
+
+        - name: Fall back to credentialsSecretRef in entity namespace
+          when: (vault_kv_data['clouds.yaml'] | default('')) | length == 0
+          block:
+            - name: Read CloudOSO credentials Secret
+              kubernetes.core.k8s_info:
+                host: "{{ services_api_host }}"
+                api_key: "{{ services_bearer_token }}"
+                validate_certs: false
+                kind: Secret
+                name: "{{ np_cloudoso.spec.credentialsSecretRef.name | default('') }}"
+                namespace: "{{ networkplacement_cr_namespace }}"
+              register: np_clouds_secret
+              failed_when: false
+              when: (np_cloudoso.spec.credentialsSecretRef.name | default('')) | length > 0
+
+            - name: Decode clouds.yaml from Secret
+              when: (np_clouds_secret.resources | default([])) | length > 0
+              ansible.builtin.set_fact:
+                vault_kv_data:
+                  clouds.yaml: >-
+                    {{
+                      (np_clouds_secret.resources[0].data['clouds.yaml'] | default(''))
+                      | b64decode
+                    }}
+                np_clouds_yaml_source: secret
 
         - name: Set credentials-unavailable facts when clouds.yaml missing
           when: (vault_kv_data['clouds.yaml'] | default('')) | length == 0
@@ -67,8 +110,10 @@
             np_backend_ready: false
             np_backend_fail_reason: OpenStackCredentialsUnavailable
             np_backend_message: >-
-              OpenStack clouds.yaml unavailable at Vault path {{ np_cloudoso.spec.vaultPath | default('') }};
-              FR6 EVPN router create for {{ networkplacement_cr_name }} deferred.
+              OpenStack clouds.yaml unavailable for CloudOSO {{ np_backend_name }}
+              (tried Vault oso/projects/{{ np_backend_name }}/clouds-config and
+              credentialsSecretRef); FR6 EVPN router create for
+              {{ networkplacement_cr_name }} deferred.
 
         - name: Create Neutron network/subnet/EVPN router when credentials are available
           when: (vault_kv_data['clouds.yaml'] | default('')) | length > 0
