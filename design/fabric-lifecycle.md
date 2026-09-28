@@ -1,7 +1,7 @@
 # Hybrid Fabric — Creation, Entity Tagging & Tenant Visibility
 
 **Audience:** Platform admins, tenant network admins, UI / RBAC implementers  
-**Companion (topology, Ansible L0–L5, CUDN):** [`../design/fabric.md`](../design/fabric.md)  
+**Companion (topology, Ansible L0–L5, CUDN):** [`fabric.md`](./fabric.md)  
 **Images:** [`images/`](./images/)
 
 This document answers three operational questions:
@@ -10,7 +10,7 @@ This document answers three operational questions:
 2. **How** does an admin **tag a Hybrid Fabric to one or more Entities**?  
 3. **How** does a tenant **see** what is available so they can create a `HybridNetwork` / `NetworkPlacement` that lands on the **correct** Transport Link — without managing fabric CRs themselves?
 
-**Fabric attach backends:** CloudOSO + CloudVirt (and PlatformOpenshift `hosted` / `openstack` only). **`PlatformOpenshift` type `aws` has no fabric / EVPN / CUDN attachment** — see [`../design/fabric.md` §15.0](../design/fabric.md#150-fabric-attachment-scope-by-platformopenshift-type-locked).
+**Fabric attach backends:** CloudOSO + CloudVirt (and PlatformOpenshift `hosted` / `openstack` only). **`PlatformOpenshift` type `aws` has no fabric / EVPN / CUDN attachment** — see [`./fabric.md` §15.0](./fabric.md#150-fabric-attachment-scope-by-platformopenshift-type-locked).
 
 ---
 
@@ -389,4 +389,4 @@ Both tenants see the **same** fabric’s attachment points that map to backends 
 | How is a fabric tagged to entities? | **`spec.entityRefs[]`** (design) — one or many Entity names; admin multi-select; labels optional. |
 | How does a tenant pick the right transport? | Tenant picks a **Ready backend** from an **attachment catalog** filtered by entityRefs; system **auto-resolves** `cloudGatewayRef` + `transportLinkRef` onto placement status. |
 
-For EVPN/CUDN realization and Ansible task tables per layer, see [`../design/fabric.md`](../design/fabric.md).
+For EVPN/CUDN realization and Ansible task tables per layer, see [`fabric.md`](./fabric.md).

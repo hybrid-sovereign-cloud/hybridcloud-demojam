@@ -1,3 +1,5 @@
 # Typo redirect
 
-Canonical doc: [`fabric.md`](./fabric.md) (section 15 — PlatformOpenshift fabric awareness).
+Canonical: [`fabric.md`](./fabric.md).
+
+Lifecycle (entity tagging / tenant catalog): [`fabric-lifecycle.md`](./fabric-lifecycle.md).

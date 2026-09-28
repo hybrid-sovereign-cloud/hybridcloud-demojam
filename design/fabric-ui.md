@@ -1,3 +1,3 @@
 # Moved
 
-Content consolidated into **[fabric.md](./fabric.md)** (section 12 — UI create forms and dashboard mocks).
+Content lives in **[fabric.md](./fabric.md)** (sections 12 and 18). Single design source: `design/`.

@@ -4,7 +4,7 @@
 **Audience:** Principal network engineers, principal security engineers, platform architects  
 **Scope:** Entity-isolated EVPN fabrics; central hub; HCP + RHOSO spokes; OpenShift 4.22 `ClusterUserDefinedNetwork`  
 **Topology / Ansible / CUDN:** this file. Images: `design/images/`.  
-**Admin create flow, entity tagging, tenant attachment catalog:** [`../designs/fabric.md`](../designs/fabric.md).
+**Admin create flow, entity tagging, tenant attachment catalog:** [`fabric-lifecycle.md`](./fabric-lifecycle.md).
 
 ---
 
@@ -29,7 +29,7 @@
 17. [PlatformOpenshift install with or without fabric / EVPN / CUDN](#17-platformopenshift-install-with-or-without-fabric--evpn--cudn)
 18. [UI dropdowns — entity tagging & OCP fabric attach (console + standalone)](#18-ui-dropdowns--entity-tagging--ocp-fabric-attach-console--standalone)
 
-**Also read:** [designs/fabric.md](../designs/fabric.md) — how admins create fabric/gateway/link, tag fabrics to one or more Entities (`entityRefs`), and how tenants view an attachment catalog so placements auto-resolve the correct TransportLink.
+**Also read:** [fabric-lifecycle.md](./fabric-lifecycle.md) — how admins create fabric/gateway/link, tag fabrics to one or more Entities (`entityRefs`), and how tenants view an attachment catalog so placements auto-resolve the correct TransportLink.
 
 ---
 
@@ -232,7 +232,7 @@ Shipped CRDs: `gitops/custom-operators/crds/crd-{hybridfabric,cloudgateway,trans
 | Delta | Why |
 |-------|-----|
 | `CloudGateway.spec.virtCloudVirtRef` / `platformOpenshiftRef` | Mirror `openstackCloudOSORef` for HCP/Virt |
-| `HybridFabric.spec.entityRefs[]` (1..N Entities) | Tag fabric to consumers; see [designs/fabric.md](../designs/fabric.md) |
+| `HybridFabric.spec.entityRefs[]` (1..N Entities) | Tag fabric to consumers; see [fabric-lifecycle.md](./fabric-lifecycle.md) |
 | `HybridNetwork.spec.fabricRef` when entity has multiple fabrics | Disambiguate numbering pool |
 | Tenant attachment catalog (projection) | Tenants select backend; system resolves TransportLink |
 | Placement admission | Backend entity ∈ entityRefs + Ready TransportLink |
@@ -883,7 +883,7 @@ Backend + prefixes; read-only VNI/RT card from parent network status. Disable ba
 - OVN-Kubernetes — MAC-VRF vs IP-VRF  
 - In-repo CRDs `gitops/custom-operators/crds/`; samples `samples/hybridvpc/`  
 - Prior UI notes `architecture/mocks/DESIGN_UI.md`  
-- Admin / entity tagging / tenant catalog: [designs/fabric.md](../designs/fabric.md)
+- Admin / entity tagging / tenant catalog: [fabric-lifecycle.md](./fabric-lifecycle.md)
 
 ---
 
