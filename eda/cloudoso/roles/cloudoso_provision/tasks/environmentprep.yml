@@ -536,13 +536,20 @@
     vault_root_token: "{{ vault_root_token_ep }}"
   no_log: true
 
-- name: Detect verify flag from source clouds.yaml (lab RHOSO often uses verify:false)
+- name: Detect verify + region from source clouds.yaml
   ansible.builtin.set_fact:
     project_clouds_verify: >-
       {{
         (
           (lookup('file', clouds_yaml_path) | from_yaml).clouds[clouds_yaml_cloud].verify
           | default(true)
+        )
+      }}
+    project_clouds_region: >-
+      {{
+        (
+          (lookup('file', clouds_yaml_path) | from_yaml).clouds[clouds_yaml_cloud].region_name
+          | default(ep_region_name | default('regionOne'), true)
         )
       }}
   no_log: true
@@ -557,7 +564,7 @@
             auth_url: "{{ app_cred_data.auth_url | default('https://identity.atuin.' ~ (lookup('env', 'BASE_DOMAIN') | default('', true))) }}"
             application_credential_id: "{{ app_cred_data.id }}"
             application_credential_secret: "{{ app_cred_data.secret }}"
-          region_name: "{{ ep_region_name }}"
+          region_name: "{{ project_clouds_region | default('regionOne') }}"
           interface: "public"
           identity_api_version: 3
           auth_type: "v3applicationcredential"
