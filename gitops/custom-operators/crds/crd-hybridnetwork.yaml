@@ -41,6 +41,13 @@ spec:
                 description:
                   type: string
                   maxLength: 512
+                # Required when the Entity is tagged on more than one Ready HybridFabric
+                # (design/fabric.md §19.6) — disambiguates VNI allocation.
+                fabricRef:
+                  type: string
+                  description: >-
+                    Optional HybridFabric name in sovereign-cloud. When set, VNI/RT
+                    allocation uses this fabric; must be entity-visible and Ready.
                 networkViewerRbac:
                   type: array
                   items:

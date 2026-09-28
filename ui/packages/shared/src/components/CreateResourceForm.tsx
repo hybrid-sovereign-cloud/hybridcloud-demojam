@@ -192,6 +192,8 @@ export function CreateResourceForm({
   const [vniStart, setVniStart] = useState('50000');
   const [vniEnd, setVniEnd] = useState('50511');
   const [fabricRef, setFabricRef] = useState('lab-fabric');
+  /** Optional HybridNetwork.spec.fabricRef when Entity has multiple fabrics (§19.6) */
+  const [networkFabricRef, setNetworkFabricRef] = useState('');
   const [cloudProvider, setCloudProvider] = useState('aws');
   const [region, setRegion] = useState('us-east-1');
   const [gatewayRef, setGatewayRef] = useState('');
@@ -301,7 +303,11 @@ export function CreateResourceForm({
   const platformsForPlacement = useK8sResourceList<K8sResource>('PlatformOpenshift', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
   const fabrics = useK8sResourceList<K8sResource>('HybridFabric', {
     namespace: 'sovereign-cloud',
-    enabled: type === 'cloudgateway' || type === 'transportlink' || type === 'platformopenshift',
+    enabled:
+      type === 'cloudgateway' ||
+      type === 'transportlink' ||
+      type === 'platformopenshift' ||
+      type === 'hybridnetwork',
   });
   const gateways = useK8sResourceList<K8sResource>('CloudGateway', { namespace: 'sovereign-cloud', enabled: type === 'transportlink' });
   // CloudGateway backend (§18.5) — cluster-wide (all entity namespaces), filtered to entities tagged on selected fabric.
@@ -635,6 +641,7 @@ export function CreateResourceForm({
       case 'hybridnetwork':
         return {
           description,
+          ...(networkFabricRef ? { fabricRef: networkFabricRef } : {}),
           networkViewerRbac,
         };
       case 'networkplacement':
@@ -726,6 +733,13 @@ export function CreateResourceForm({
     if (type === 'aaporg' && !aapConfig) return false;
     if (type === 'quayorg' && !quayConfig) return false;
     if (type === 'networkplacement' && (!networkRef || !backendKind || !backendName || !prefixes.trim())) return false;
+    if (
+      type === 'hybridnetwork' &&
+      fabricOptionsForEntity.filter((o) => !o.isDisabled).length > 1 &&
+      !networkFabricRef
+    ) {
+      return false;
+    }
     if (type === 'hybridfabric' && (!domainAsn || fabricEntityRefs.length === 0)) return false;
     if (
       type === 'cloudgateway' &&
@@ -1357,6 +1371,19 @@ export function CreateResourceForm({
                   <FormGroup label="Description" fieldId="hn-desc">
                     <TextArea id="hn-desc" value={description} onChange={(_e, v) => setDescription(v)} rows={3} />
                   </FormGroup>
+                  <FabricSelect
+                    id="hn-fabric"
+                    label="Fabric"
+                    value={networkFabricRef}
+                    onChange={setNetworkFabricRef}
+                    options={fabricOptionsForEntity}
+                    placeholder={
+                      fabricOptionsForEntity.filter((o) => !o.isDisabled).length > 1
+                        ? 'Required — multiple fabrics tag this entity'
+                        : 'Auto (single fabric) or pick explicitly'
+                    }
+                    isRequired={fabricOptionsForEntity.filter((o) => !o.isDisabled).length > 1}
+                  />
                   <RbacMultiSelect
                     id="hn-viewers"
                     label="Network viewer RBAC"

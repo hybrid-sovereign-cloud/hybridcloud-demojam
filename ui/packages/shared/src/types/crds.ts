@@ -360,6 +360,8 @@ export type TransportLink = K8sResource<TransportLinkSpec>;
 /** HybridNetwork — tenant network identity */
 export interface HybridNetworkSpec {
   description?: string;
+  /** Disambiguates fabric when Entity is tagged on >1 Ready HybridFabric (design §19.6) */
+  fabricRef?: string;
   networkViewerRbac?: string[];
 }
 export type HybridNetwork = K8sResource<HybridNetworkSpec>;

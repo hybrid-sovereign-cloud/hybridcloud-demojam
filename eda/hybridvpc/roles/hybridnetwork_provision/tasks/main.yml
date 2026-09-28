@@ -82,6 +82,29 @@
             and ((item.metadata.labels | default({})).get('hybridsovereign.redhat/entity', '') == hn_entity)
           )
 
+    - name: Fail when spec.fabricRef is set but not entity-visible (design §19.6)
+      when:
+        - hn_selected_fabric_name is not defined
+        - (hybridnetwork_spec.fabricRef | default('')) | length > 0
+        - hybridnetwork_spec.fabricRef not in (hn_visible_fabric_names | default([]))
+      block:
+        - name: Set fabricRef failure reason
+          ansible.builtin.set_fact:
+            hybridnetwork_fail_reason: FabricRefNotVisible
+        - name: Fail on invalid fabricRef
+          ansible.builtin.fail:
+            msg: >-
+              HybridNetwork.spec.fabricRef='{{ hybridnetwork_spec.fabricRef }}' is not a Ready
+              HybridFabric visible to Entity '{{ hn_entity }}' (entityRefs / label mismatch).
+
+    - name: Honor HybridNetwork.spec.fabricRef when entity-visible (design §19.6)
+      when:
+        - hn_selected_fabric_name is not defined
+        - (hybridnetwork_spec.fabricRef | default('')) | length > 0
+        - hybridnetwork_spec.fabricRef in (hn_visible_fabric_names | default([]))
+      ansible.builtin.set_fact:
+        hn_selected_fabric_name: "{{ hybridnetwork_spec.fabricRef }}"
+
     - name: Set entity-visibility failure reason before failing
       ansible.builtin.set_fact:
         hybridnetwork_fail_reason: NoVisibleFabric
@@ -94,9 +117,25 @@
         msg: >-
           No Ready HybridFabric tagged for Entity '{{ hn_entity }}' — set
           HybridFabric.spec.entityRefs or label hybridsovereign.redhat/entity={{ hn_entity }}.
+          When more than one fabric is visible, set HybridNetwork.spec.fabricRef.
       when:
         - hn_selected_fabric_name is not defined
         - hn_visible_fabric_names | default([]) | length == 0
+
+    - name: Require fabricRef when Entity has more than one visible fabric
+      when:
+        - hn_selected_fabric_name is not defined
+        - (hn_visible_fabric_names | default([]) | length) > 1
+        - (hybridnetwork_spec.fabricRef | default('')) | length == 0
+      block:
+        - name: Set ambiguous-fabric failure reason
+          ansible.builtin.set_fact:
+            hybridnetwork_fail_reason: FabricRefRequired
+        - name: Fail when fabricRef omitted with multiple fabrics
+          ansible.builtin.fail:
+            msg: >-
+              Entity '{{ hn_entity }}' is tagged on multiple Ready HybridFabrics
+              ({{ hn_visible_fabric_names | join(', ') }}); set HybridNetwork.spec.fabricRef.
 
     - name: Select first entity-visible fabric
       when: hn_selected_fabric_name is not defined
