@@ -192,7 +192,7 @@
     - name: Set numbering counts
       ansible.builtin.set_fact:
         hf_allocated_count: "{{ hf_allocated_map | length }}"
-        hf_pool_size: "{{ hf_pool_end - hf_pool_start + 1 }}"
+        hf_pool_size: "{{ (hf_pool_end | int) - (hf_pool_start | int) + 1 }}"
 
     - name: Best-effort route reflector reachability check (never blocks Ready)
       ansible.builtin.command: "ping -c1 -W1 {{ item.address }}"
