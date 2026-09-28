@@ -151,8 +151,18 @@
             np_cudn_subnets: []
 
         - name: Build CUDN subnet list from placement prefixes
+          # hostSubnet must be MORE specific than cidr (OCP CUDN validation).
+          # For a /24 placement prefix use /26 node slices; never equal masks.
           ansible.builtin.set_fact:
-            np_cudn_subnets: "{{ np_cudn_subnets + [{'cidr': item, 'hostSubnet': 24}] }}"
+            np_cudn_subnets: >-
+              {{
+                np_cudn_subnets + [{
+                  'cidr': item,
+                  'hostSubnet': (
+                    [28, (item.split('/')[1] | int) + 2] | min
+                  )
+                }]
+              }}
           loop: "{{ np_spec.prefixes | default([]) }}"
 
         - name: Apply FRRConfiguration on the spoke (BGP neighbors = fabric RRs)

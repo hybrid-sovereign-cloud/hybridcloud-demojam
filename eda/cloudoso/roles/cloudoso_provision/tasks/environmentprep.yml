@@ -268,6 +268,12 @@
     ep_api_fip_id: "{{ (fip_result_raw.stdout | from_json).api.id }}"
     ep_ingress_fip_id: "{{ (fip_result_raw.stdout | from_json).ingress.id }}"
 
+- name: Force Designate DNS when CloudOSO.spec.designateZoneId is set
+  when: (oso_spec.designateZoneId | default('', true) | string | length) > 0
+  ansible.builtin.set_fact:
+    use_designate_dns: true
+    ep_parent_zone_id: "{{ oso_spec.designateZoneId }}"
+
 - name: Create temporary ExternalSecret for Route53 credentials
   when: not (use_designate_dns | default(false) | bool)
   kubernetes.core.k8s:
