@@ -13,7 +13,14 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
-    use_designate_dns: "{{ (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)) }}"
+    use_designate_dns: >-
+      {{
+        ((oso_spec.designateZoneId | default('')) | length > 0)
+        or (
+          (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true))
+          == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true))
+        )
+      }}
     ep_parent_zone_id: >-
       {{ oso_spec.designateZoneId | default('')
          if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
@@ -422,7 +429,10 @@
     auth = dict(cloud_cfg['auth'])
     auth['project_name'] = '{{ ep_project }}'
     auth['project_domain_name'] = '{{ ep_project_domain }}'
-    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3')
+    verify = cloud_cfg.get('verify', True)
+    if isinstance(verify, str):
+        verify = verify.lower() not in ('0', 'false', 'no')
+    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=cloud_cfg.get('cacert', verify))
     cred_name = 'sovereign-{{ ep_project }}'
     existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
     if existing:
@@ -452,7 +462,10 @@
     auth = dict(cloud_cfg['auth'])
     auth['project_name'] = '{{ ep_project }}'
     auth['project_domain_name'] = '{{ ep_project_domain }}'
-    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3')
+    verify = cloud_cfg.get('verify', True)
+    if isinstance(verify, str):
+        verify = verify.lower() not in ('0', 'false', 'no')
+    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=cloud_cfg.get('cacert', verify))
     cred_name = 'sovereign-{{ ep_project }}'
     existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
     for old in existing:

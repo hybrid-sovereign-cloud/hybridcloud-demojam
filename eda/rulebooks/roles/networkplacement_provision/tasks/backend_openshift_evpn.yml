@@ -179,34 +179,49 @@
           ignore_errors: true
 
         - name: Apply ClusterUserDefinedNetwork on the spoke (transport EVPN)
+          # Jinja templates stringify ints unless the whole definition is parsed
+          # from JSON with a bare numeric VNI (CUDN OpenAPI requires integer).
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
             validate_certs: false
             state: present
-            definition:
-              apiVersion: k8s.ovn.org/v1
-              kind: ClusterUserDefinedNetwork
-              metadata:
-                name: "{{ np_spec.network }}"
-                labels:
-                  hybridsovereign.redhat/network: "{{ np_spec.network }}"
-                  hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
-                  advertise: "true"
-              spec:
-                namespaceSelector:
-                  matchLabels:
-                    hybridsovereign.redhat/hybridnetwork: "{{ np_spec.network }}"
-                network:
-                  topology: Layer3
-                  layer3:
-                    role: Primary
-                    subnets: "{{ np_cudn_subnets }}"
-                  transport: EVPN
-                  evpn:
-                    vtep: "{{ np_spec.network }}-evpn-vtep"
-                    ipVRF:
-                      vni: "{{ np_vni | int }}"
-                      routeTarget: "{{ np_canonical_rt }}"
+            definition: "{{ np_cudn_definition | from_json }}"
+          vars:
+            np_cudn_definition: >-
+              {
+                "apiVersion": "k8s.ovn.org/v1",
+                "kind": "ClusterUserDefinedNetwork",
+                "metadata": {
+                  "name": {{ np_spec.network | to_json }},
+                  "labels": {
+                    "hybridsovereign.redhat/network": {{ np_spec.network | to_json }},
+                    "hybridsovereign.redhat/fabric": {{ (hn_selected_fabric_name | default('')) | to_json }},
+                    "advertise": "true"
+                  }
+                },
+                "spec": {
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "hybridsovereign.redhat/hybridnetwork": {{ np_spec.network | to_json }}
+                    }
+                  },
+                  "network": {
+                    "topology": "Layer3",
+                    "layer3": {
+                      "role": "Primary",
+                      "subnets": {{ np_cudn_subnets | to_json }}
+                    },
+                    "transport": "EVPN",
+                    "evpn": {
+                      "vtep": {{ (np_spec.network ~ '-evpn-vtep') | to_json }},
+                      "ipVRF": {
+                        "vni": {{ np_vni | int }},
+                        "routeTarget": {{ np_canonical_rt | to_json }}
+                      }
+                    }
+                  }
+                }
+              }
           register: np_cudn_apply
           ignore_errors: true
 
@@ -234,26 +249,36 @@
           register: np_ra_apply
           ignore_errors: true
 
-        - name: Set backend-applied facts (CUDN/FRR/RA best-effort apply)
+        - name: Set backend-applied facts (CUDN required; FRR/RA optional when CRDs absent)
           ansible.builtin.set_fact:
-            np_backend_applied: >-
-              {{
-                not (np_frr_apply is failed)
-                and not (np_cudn_apply is failed)
-                and not (np_ra_apply is failed)
-              }}
-            np_backend_ready: >-
-              {{
-                not (np_frr_apply is failed)
-                and not (np_cudn_apply is failed)
-                and not (np_ra_apply is failed)
-              }}
+            np_backend_applied: "{{ not (np_cudn_apply is failed) }}"
+            np_backend_ready: "{{ not (np_cudn_apply is failed) }}"
             np_backend_fail_reason: >-
               {{
                 ''
-                if (not (np_frr_apply is failed) and not (np_cudn_apply is failed) and not (np_ra_apply is failed))
+                if not (np_cudn_apply is failed)
                 else 'BackendApplyFailed'
               }}
             np_backend_message: >-
-              CUDN/FRRConfiguration/RouteAdvertisements applied (best-effort) on spoke
-              for HybridNetwork {{ np_spec.network }} (vni={{ np_vni }}, rt={{ np_canonical_rt }}).
+              {{
+                (
+                  'CUDN applied on spoke for HybridNetwork '
+                  ~ np_spec.network
+                  ~ ' (vni=' ~ (np_vni | string) ~ ', rt=' ~ np_canonical_rt ~ ').'
+                  ~ (
+                    ' FRRConfiguration skipped/unavailable: '
+                    ~ (np_frr_apply.msg | default('ok'))
+                    if (np_frr_apply is failed) else ' FRRConfiguration applied.'
+                  )
+                  ~ (
+                    ' RouteAdvertisements skipped/unavailable: '
+                    ~ (np_ra_apply.msg | default('ok'))
+                    if (np_ra_apply is failed) else ' RouteAdvertisements applied.'
+                  )
+                )
+                if not (np_cudn_apply is failed)
+                else (
+                  'CUDN apply failed on spoke: '
+                  ~ (np_cudn_apply.msg | default('unknown error'))
+                )
+              }}
