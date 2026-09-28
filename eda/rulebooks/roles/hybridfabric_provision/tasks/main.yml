@@ -72,29 +72,33 @@
             | list
           }}
 
-    - name: Compute VNI pool overlap conflicts with other Ready fabrics
+    - name: Compute VNI pool and ASN conflicts with other Ready fabrics
       ansible.builtin.set_fact:
-        hf_pool_conflicts: >-
-          {{
-            hf_other_ready_fabrics
-            | selectattr('spec.vniPool.start', 'defined')
-            | selectattr('spec.vniPool.end', 'defined')
-            | selectattr('spec.vniPool.start', 'le', hf_pool_end)
-            | selectattr('spec.vniPool.end', 'ge', hf_pool_start)
-            | map(attribute='metadata.name')
-            | list
-          }}
+        hf_pool_conflicts: "{{ hf_pool_conflicts | default([]) + [item.metadata.name] }}"
+      when:
+        - item.spec.vniPool is defined
+        - item.spec.vniPool.start is defined
+        - item.spec.vniPool.end is defined
+        - (item.spec.vniPool.start | int) <= (hf_pool_end | int)
+        - (item.spec.vniPool.end | int) >= (hf_pool_start | int)
+      loop: "{{ hf_other_ready_fabrics }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
 
     - name: Compute domainAsn conflicts with other Ready fabrics
       ansible.builtin.set_fact:
-        hf_asn_conflicts: >-
-          {{
-            hf_other_ready_fabrics
-            | selectattr('spec.domainAsn', 'defined')
-            | selectattr('spec.domainAsn', 'equalto', hf_domain_asn)
-            | map(attribute='metadata.name')
-            | list
-          }}
+        hf_asn_conflicts: "{{ hf_asn_conflicts | default([]) + [item.metadata.name] }}"
+      when:
+        - item.spec.domainAsn is defined
+        - (item.spec.domainAsn | int) == (hf_domain_asn | int)
+      loop: "{{ hf_other_ready_fabrics }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Default empty conflict lists
+      ansible.builtin.set_fact:
+        hf_pool_conflicts: "{{ hf_pool_conflicts | default([]) }}"
+        hf_asn_conflicts: "{{ hf_asn_conflicts | default([]) }}"
 
     - name: Set overlap failure reason before failing
       ansible.builtin.set_fact:
