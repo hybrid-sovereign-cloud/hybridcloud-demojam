@@ -76,7 +76,7 @@
       when:
         - hn_selected_fabric_name is not defined
         - >-
-          (hn_entity in (item.spec.entityRefs | default([])))
+          (hn_entity in (item.spec.entityRefs | default([]) | map(attribute='name') | list))
           or (
             (item.spec.entityRefs | default([]) | length == 0)
             and ((item.metadata.labels | default({})).get('hybridsovereign.redhat/entity', '') == hn_entity)
