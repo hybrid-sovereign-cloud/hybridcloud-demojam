@@ -194,10 +194,29 @@
                 --evpn-vni {{ np_vni }} {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
               environment: "{{ np_os_env }}"
               register: np_router_create
-              changed_when: true
+              changed_when: (np_router_create.rc | default(1) | int) == 0
               failed_when: false
 
+            # CLI --help can advertise --evpn-vni even when Neutron API lacks FR6.
+            # Treat Unrecognized attribute(s) 'evpn_vni' as Fr6EvpnUnavailable (design §10.3.2).
+            - name: Detect server-side FR6 EVPN API unavailable
+              when:
+                - (np_router_create.rc | default(1) | int) != 0
+                - >-
+                  ('evpn_vni' in (np_router_create.stderr | default('')))
+                  or ('Unrecognized attribute' in (np_router_create.stderr | default('')))
+              ansible.builtin.set_fact:
+                np_backend_applied: false
+                np_backend_ready: false
+                np_backend_fail_reason: Fr6EvpnUnavailable
+                np_backend_message: >-
+                  Fr6EvpnUnavailable: Neutron rejected router create --evpn-vni
+                  ({{ np_router_create.stderr | default('unrecognized attribute') | trim }}).
+                  CLI help is not proof of RHOSO 18.0.21 FR6 server support — fail closed
+                  per design/fabric.md §10.3.2.
+
             - name: Advertise subnet host routes into the EVPN router
+              when: (np_router_create.rc | default(1) | int) == 0
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
@@ -209,6 +228,7 @@
               failed_when: false
 
             - name: Resolve EVPN router id
+              when: (np_router_create.rc | default(1) | int) == 0
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr -f value -c id
@@ -218,15 +238,19 @@
               failed_when: false
 
             - name: Set backend-applied facts (FR6 router created)
+              when: np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
               ansible.builtin.set_fact:
-                np_backend_applied: "{{ (np_router_show.rc | default(1)) == 0 }}"
-                np_backend_ready: "{{ (np_router_show.rc | default(1)) == 0 }}"
+                np_backend_applied: "{{ (np_router_show.rc | default(1) | int) == 0 }}"
+                np_backend_ready: "{{ (np_router_show.rc | default(1) | int) == 0 }}"
                 np_neutron_router_id: "{{ (np_router_show.stdout | default('')) | trim }}"
                 np_backend_message: >-
                   {{
                     'RHOSO FR6 EVPN router ' ~ (np_spec.network ~ '-' ~ np_backend_name ~ '-evpn-rtr') ~
                     ' vni=' ~ np_vni ~ ' rt=' ~ np_canonical_rt ~ ' realized on ' ~ np_backend_name ~ '.'
-                    if (np_router_show.rc | default(1)) == 0
-                    else 'EVPN router create/show failed on CloudOSO ' ~ np_backend_name ~ '; see job log.'
+                    if (np_router_show.rc | default(1) | int) == 0
+                    else (
+                      'EVPN router create/show failed on CloudOSO ' ~ np_backend_name ~ ': '
+                      ~ (np_router_create.stderr | default(np_router_show.stderr | default('see job log')) | trim)
+                    )
                   }}
-                np_backend_fail_reason: "{{ '' if (np_router_show.rc | default(1)) == 0 else 'BackendApplyFailed' }}"
+                np_backend_fail_reason: "{{ '' if (np_router_show.rc | default(1) | int) == 0 else 'BackendApplyFailed' }}"
