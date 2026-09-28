@@ -11,7 +11,7 @@ clouds_yaml_cloud: "default"
 
 default_external_network: "public"
 default_project_domain: "shc_domain"
-default_region_name: "ATUIN"
+default_region_name: "regionOne"
 openstack_admin_user: "shc_admin"
 
 vault_init_secret_name: "vault-init"

@@ -179,9 +179,11 @@
                 openstack --os-cloud {{ np_os_cloud_name }} subnet create
                 --network {{ np_spec.network }}-{{ np_backend_name }}
                 --subnet-range {{ item }}
-                {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ loop.index0 }}
+                {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ np_subnet_idx }}
               environment: "{{ np_os_env }}"
               loop: "{{ np_spec.prefixes | default([]) }}"
+              loop_control:
+                index_var: np_subnet_idx
               register: np_subnet_create
               changed_when: true
               failed_when: false
