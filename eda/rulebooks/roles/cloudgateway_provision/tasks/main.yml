@@ -89,16 +89,7 @@
 
     - name: Normalize fabric entityRefs to name list
       ansible.builtin.set_fact:
-        cgw_fabric_entity_names: >-
-          {{
-            cgw_fabric.spec.entityRefs
-            | default([])
-            | map(attribute='name')
-            | list
-            if (cgw_fabric.spec.entityRefs | default([]) | length > 0)
-               and (cgw_fabric.spec.entityRefs[0] is mapping)
-            else (cgw_fabric.spec.entityRefs | default([]))
-          }}
+        cgw_fabric_entity_names: "{{ cgw_fabric.spec.entityRefs | default([]) | map(attribute='name') | list }}"
 
     - name: Set entity-mismatch failure reason before failing
       ansible.builtin.set_fact:
@@ -161,8 +152,25 @@
           register: cgw_cloudoso_local
           failed_when: false
 
+        - name: Read referenced CloudOSO in entity namespace
+          when:
+            - cgw_cloudoso_local.resources | default([]) | length == 0
+            - (cgw_entity | length) > 0
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: CloudOSO
+            name: "{{ cloudgateway_spec.openstackCloudOSORef }}"
+            namespace: "entity-{{ cgw_entity }}"
+          register: cgw_cloudoso_entity
+          failed_when: false
+
         - name: Read referenced CloudOSO (cluster-wide fallback)
-          when: cgw_cloudoso_local.resources | default([]) | length == 0
+          when:
+            - cgw_cloudoso_local.resources | default([]) | length == 0
+            - cgw_cloudoso_entity.resources | default([]) | length == 0
           kubernetes.core.k8s_info:
             host: "{{ services_api_host }}"
             api_key: "{{ services_bearer_token }}"
@@ -179,7 +187,11 @@
               {{
                 (cgw_cloudoso_local.resources | default([]) | first)
                 if (cgw_cloudoso_local.resources | default([]) | length > 0)
-                else (cgw_cloudoso_wide.resources | default([]) | first | default({}, true))
+                else (
+                  ((cgw_cloudoso_entity | default({})).get('resources', []) | first)
+                  if ((cgw_cloudoso_entity | default({})).get('resources', []) | length > 0)
+                  else (((cgw_cloudoso_wide | default({})).get('resources', []) | first) | default({}, true))
+                )
               }}
 
         - name: Set CloudOSO-not-found failure reason before failing
@@ -195,15 +207,17 @@
         - name: Set CloudOSO-not-ready failure reason before failing
           ansible.builtin.set_fact:
             cloudgateway_fail_reason: CloudOSONotReady
-          when: not (cgw_cloudoso.status.ready | default(false) | bool)
+          when:
+            - (cgw_cloudoso | default({})) | length > 0
+            - not (cgw_cloudoso.status.ready | default(false) | bool)
 
-        - name: Require CloudOSO Ready
-          ansible.builtin.fail:
-            msg: "CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }} is not ready yet"
-          when: not (cgw_cloudoso.status.ready | default(false) | bool)
-
-        - name: Probe RHOSO FR6 native OVN BGP-EVPN support
-          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
+        # CloudOSO may still be provisioning (missing openstack.cloud EE); continue to FR6
+        # probe when the CR exists so we can fail closed with Fr6EvpnUnavailable.
+        - name: Probe RHOSO FR6 even when CloudOSO not Ready yet
+          when: (cgw_cloudoso | default({})) | length > 0
+          block:
+            - name: Probe RHOSO FR6 native OVN BGP-EVPN support
+              ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
 
         - name: Set Fr6EvpnUnavailable failure reason before failing closed
           ansible.builtin.set_fact:
