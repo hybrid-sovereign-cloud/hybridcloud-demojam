@@ -13,18 +13,8 @@
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
     ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
-    use_designate_dns: >-
-      {{
-        ((oso_spec.designateZoneId | default('')) | length > 0)
-        or (
-          (oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true))
-          == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true))
-        )
-      }}
-    ep_parent_zone_id: >-
-      {{ oso_spec.designateZoneId | default('')
-         if ((oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default(LAB_DOMAIN | default('', true), true), true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true)))
-         else '' }}
+    use_designate_dns: "{{ ((oso_spec.designateZoneId | default('', true)) | length > 0) or ((oso_spec.baseDomain | default('', true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true))) }}"
+    ep_parent_zone_id: "{{ oso_spec.designateZoneId | default('', true) }}"
     ep_reuse_existing_project: "{{ ((oso_spec.credentialsSecretRef | default({})).name | default('') | length) > 0 }}"
 
 - name: Load OpenStack clouds.yaml from entity-namespace Secret

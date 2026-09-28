@@ -178,16 +178,11 @@
           register: np_frr_apply
           ignore_errors: true
 
-        - name: Apply ClusterUserDefinedNetwork on the spoke (transport EVPN)
-          # Jinja templates stringify ints unless the whole definition is parsed
-          # from JSON with a bare numeric VNI (CUDN OpenAPI requires integer).
-          kubernetes.core.k8s:
-            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
-            validate_certs: false
-            state: present
-            definition: "{{ np_cudn_definition | from_json }}"
-          vars:
-            np_cudn_definition: >-
+        - name: Write CUDN manifest JSON (integer VNI — avoid Jinja stringification)
+          ansible.builtin.copy:
+            dest: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+            mode: "0600"
+            content: |
               {
                 "apiVersion": "k8s.ovn.org/v1",
                 "kind": "ClusterUserDefinedNetwork",
@@ -222,6 +217,13 @@
                   }
                 }
               }
+
+        - name: Apply ClusterUserDefinedNetwork on the spoke (transport EVPN)
+          kubernetes.core.k8s:
+            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            validate_certs: false
+            state: present
+            src: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
           register: np_cudn_apply
           ignore_errors: true
 
