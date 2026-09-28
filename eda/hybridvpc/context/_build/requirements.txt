@@ -2,5 +2,4 @@ kubernetes>=28.1.0
 requests>=2.31.0
 openstacksdk>=2.0.0
 python-openstackclient>=6.0.0
-boto3>=1.34.0
 PyYAML>=6.0.0

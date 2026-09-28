@@ -279,6 +279,63 @@
         msg: "NetworkPlacement {{ networkplacement_cr_name }} has invalid CIDR(s) in spec.prefixes: {{ np_prefix_check.stderr | default('') }}"
       when: (np_prefix_check.rc | default(1)) != 0
 
+    # design/fabric.md §16.5 — reject placement prefixes overlapping cluster networking
+    - name: Overlap-check placement prefixes vs PlatformOpenshift.status.networking
+      when:
+        - np_spec.backend.kind == 'PlatformOpenshift'
+        - np_backend_po_lookup is defined
+        - (np_backend_po_lookup.resources | default([])) | length > 0
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 <<'PY'
+        import ipaddress, json, os, sys
+
+        def overlaps(a, b):
+            return ipaddress.ip_network(a, strict=False).overlaps(ipaddress.ip_network(b, strict=False))
+
+        prefixes = json.loads(os.environ["PREFIXES"])
+        net = json.loads(os.environ["NET_STATUS"])
+        cluster_cidrs = []
+        for key in ("clusterNetwork", "serviceNetwork", "machineNetwork", "hybridOverlayReserved"):
+            val = net.get(key) or []
+            if isinstance(val, str):
+                cluster_cidrs.append(val)
+            elif isinstance(val, list):
+                cluster_cidrs.extend([v for v in val if v])
+        hits = []
+        for p in prefixes:
+            for c in cluster_cidrs:
+                if overlaps(p, c):
+                    hits.append(f"{p} overlaps {c}")
+        if hits:
+            print("; ".join(hits), file=sys.stderr)
+            sys.exit(1)
+        print("ok")
+        PY
+      environment:
+        PREFIXES: "{{ np_spec.prefixes | default([]) | to_json }}"
+        NET_STATUS: "{{ (np_backend_po_lookup.resources | default([{}]))[0].status.networking | default({}) | to_json }}"
+      register: np_net_overlap_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set overlap failure reason before failing
+      ansible.builtin.set_fact:
+        networkplacement_fail_reason: PrefixClusterOverlap
+      when:
+        - np_net_overlap_check is defined
+        - (np_net_overlap_check.rc | default(0)) != 0
+
+    - name: Fail when placement prefixes overlap PlatformOpenshift cluster networking
+      ansible.builtin.fail:
+        msg: >-
+          NetworkPlacement {{ networkplacement_cr_name }} prefixes overlap
+          PlatformOpenshift/{{ np_backend_name }} status.networking:
+          {{ np_net_overlap_check.stderr | default('overlap detected') }}
+      when:
+        - np_net_overlap_check is defined
+        - (np_net_overlap_check.rc | default(0)) != 0
+
     # ---------------------------------------------------------------
     # §8.5.2 / §8.5.3 backend dispatch
     # ---------------------------------------------------------------

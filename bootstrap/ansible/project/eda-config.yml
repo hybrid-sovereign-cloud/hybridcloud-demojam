@@ -16,7 +16,7 @@
       assignment: "0.1.5"
       project: "0.1.0"
       platformopenshift: "0.1.7"
-      cloudoso: "0.1.6"
+      cloudoso: "0.1.9"
       openstack-migration: "0.1.0"
       cloudaws: "0.1.5"
       persona: "0.1.2"
@@ -24,6 +24,7 @@
       plugin-vault: "0.1.2"
       plugin-aap: "0.1.3"
       plugin-quay: "0.1.2"
+      hybridvpc: "0.1.1"
 
   pre_tasks:
     - name: Validate required variables

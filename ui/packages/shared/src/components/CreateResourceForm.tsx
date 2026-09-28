@@ -1143,6 +1143,21 @@ export function CreateResourceForm({
                             options={fabricOptionsForEntity}
                             placeholder="Same as preferred fabric"
                           />
+                          {(() => {
+                            const ref = ipamFabricRef || preferredFabricRef;
+                            const fab = fabrics.items.find((f) => f.metadata.name === ref);
+                            const avail = (fab?.status as { availableVniCount?: number } | undefined)
+                              ?.availableVniCount;
+                            if (ref && typeof avail === 'number' && avail <= 0) {
+                              return (
+                                <Alert variant="warning" isInline title="Fabric IPAM exhausted">
+                                  HybridFabric <strong>{ref}</strong> reports availableVniCount=0.
+                                  Cluster CIDR / VNI allocation from this fabric will fail until VNIs are released.
+                                </Alert>
+                              );
+                            }
+                            return null;
+                          })()}
                           <FormGroup label="Manage CloudGateway + TransportLink automatically" fieldId="po-manage-gw">
                             <Switch
                               id="po-manage-gw"

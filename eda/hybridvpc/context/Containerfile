@@ -52,7 +52,9 @@ RUN $PYCMD -m pip install --no-cache-dir bindep pyyaml packaging
 
 COPY --from=galaxy /usr/share/ansible /usr/share/ansible
 
-RUN $PYCMD /output/scripts/introspect.py introspect --write-bindep=/tmp/src/bindep.txt --write-pip=/tmp/src/requirements.txt
+COPY _build/requirements.txt requirements.txt
+COPY _build/bindep.txt bindep.txt
+RUN $PYCMD /output/scripts/introspect.py introspect --user-pip=requirements.txt --user-bindep=bindep.txt --write-bindep=/tmp/src/bindep.txt --write-pip=/tmp/src/requirements.txt
 RUN sed -i '/openshift-clients/d' /tmp/src/bindep.txt
 RUN sed -i '/^systemd-python/d' /tmp/src/requirements.txt
 RUN /output/scripts/assemble

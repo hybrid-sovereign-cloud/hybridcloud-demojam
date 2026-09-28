@@ -1,0 +1,2 @@
+pkg-config
+systemd-devel [compile platform:rpm]

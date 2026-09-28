@@ -428,23 +428,42 @@
     verify = cloud_cfg.get('verify', True)
     if isinstance(verify, str):
         verify = verify.lower() not in ('0', 'false', 'no')
-    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=cloud_cfg.get('cacert', verify))
-    cred_name = 'sovereign-{{ ep_project }}'
-    existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
-    if existing:
-        print(json.dumps({'exists': True, 'id': existing[0].id}))
-    else:
-        print(json.dumps({'exists': False}))
+    cacert = cloud_cfg.get('cacert') or None
+    # Prefer cacert only when verify is enabled and a path is set; otherwise honor verify=false.
+    verify_arg = cacert if (verify and cacert) else verify
+    try:
+        conn = openstack.connect(
+            auth=auth,
+            region_name=cloud_cfg.get('region_name', 'regionOne'),
+            identity_api_version='3',
+            verify=verify_arg,
+        )
+        cred_name = 'sovereign-{{ ep_project }}'
+        existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
+        if existing:
+            print(json.dumps({'exists': True, 'id': existing[0].id}))
+        else:
+            print(json.dumps({'exists': False}))
+    except Exception as e:
+        # Treat auth/TLS failures as missing so the create path can recreate.
+        print(json.dumps({'exists': False, 'error': str(e)}))
+        sys.exit(0)
     "
   environment:
     OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
   register: cred_check_raw
   changed_when: false
+  failed_when: false
   no_log: true
 
 - name: Parse credential check
   ansible.builtin.set_fact:
-    cred_check: "{{ cred_check_raw.stdout | from_json }}"
+    cred_check: >-
+      {{
+        (cred_check_raw.stdout | default('') | from_json)
+        if ((cred_check_raw.stdout | default('')) | length > 0)
+        else {'exists': false, 'error': 'credential validate produced no output'}
+      }}
   no_log: true
 
 - name: Create application credential via openstacksdk (only if not exists)
@@ -461,7 +480,9 @@
     verify = cloud_cfg.get('verify', True)
     if isinstance(verify, str):
         verify = verify.lower() not in ('0', 'false', 'no')
-    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=cloud_cfg.get('cacert', verify))
+    cacert = cloud_cfg.get('cacert') or None
+    verify_arg = cacert if (verify and cacert) else verify
+    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=verify_arg)
     cred_name = 'sovereign-{{ ep_project }}'
     existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
     for old in existing:

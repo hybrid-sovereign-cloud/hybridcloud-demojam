@@ -18,6 +18,24 @@
   changed_when: false
   failed_when: false
 
+# Lab / Default EE often has openstacksdk but not the CLI entrypoint.
+# Best-effort install of python-openstackclient into the job venv so the
+# FR6 `--evpn-vni` help probe can run without waiting for a DE rebuild.
+- name: Best-effort install python-openstackclient when CLI missing
+  ansible.builtin.pip:
+    name: python-openstackclient
+    state: present
+  register: _fr6_pip_install
+  failed_when: false
+  when: (_fr6_cli_probe.rc | default(1)) != 0
+
+- name: Re-probe openstack CLI after pip install
+  ansible.builtin.command: openstack --version
+  register: _fr6_cli_probe
+  changed_when: false
+  failed_when: false
+  when: (_fr6_cli_probe.rc | default(1)) != 0
+
 - name: Probe router create --evpn-vni support
   ansible.builtin.shell: openstack router create --help 2>&1 | grep -- '--evpn-vni'
   register: _fr6_flag_probe
@@ -31,6 +49,8 @@
     fr6_probe_message: >-
       openstack CLI not available in this execution environment;
       cannot verify RHOSO 18.0 FR6 native OVN BGP-EVPN (`--evpn-vni`).
+      Install python-openstackclient in de-hybridvpc / de-cloudoso
+      (or assign those EEs to fabric Job Templates).
   when: (_fr6_cli_probe.rc | default(1)) != 0
 
 - name: Set FR6 EVPN probe result (flag missing)

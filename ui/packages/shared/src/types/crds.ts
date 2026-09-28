@@ -150,8 +150,20 @@ export interface FabricMembership {
   message?: string;
 }
 
+/** Observed cluster CIDR plan (design/fabric.md §16) */
+export interface PlatformOpenshiftNetworkingStatus {
+  clusterNetwork?: string[];
+  serviceNetwork?: string[];
+  machineNetwork?: string[];
+  hybridOverlayReserved?: string[];
+  conflictCheck?: 'passed' | 'failed' | string;
+  conflictMessage?: string;
+  fabricRef?: string;
+}
+
 export interface PlatformOpenshiftStatus extends OperatorStatus {
   fabricMembership?: FabricMembership[];
+  networking?: PlatformOpenshiftNetworkingStatus;
 }
 
 export type PlatformOpenshift = K8sResource<PlatformOpenshiftSpec, PlatformOpenshiftStatus>;

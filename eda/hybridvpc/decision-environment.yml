@@ -10,7 +10,18 @@ dependencies:
         version: ">=3.0.0"
       - name: community.general
         version: ">=8.0.0"
-  python: []
-  system: []
+      - name: openstack.cloud
+        version: ">=2.5.0"
+  python:
+    - kubernetes>=28.1.0
+    - requests>=2.31.0
+    - openstacksdk>=2.0.0
+    # Provides the `openstack` CLI used by openstack_fr6_probe.yml and
+    # backend_rhoso_ovn_evpn.yml (`router create --evpn-vni`).
+    - python-openstackclient>=6.0.0
+    - PyYAML>=6.0.0
+  system:
+    - pkg-config
+    - systemd-devel [compile platform:rpm]
 options:
   package_manager_path: /usr/bin/microdnf

@@ -3,10 +3,10 @@
 SHELL := /bin/bash
 NPM := npm
 REGISTRY ?= $(or $(OCI_HOST),quay.io/gauravshankar)
-ADMIN_DASH_TAG ?= 2.0.24
-TENANT_DASH_TAG ?= 5.0.25
-ADMIN_PLUGIN_TAG ?= 1.2.34
-TENANT_PLUGIN_TAG ?= 1.3.28
+ADMIN_DASH_TAG ?= 2.0.25
+TENANT_DASH_TAG ?= 5.0.26
+ADMIN_PLUGIN_TAG ?= 1.2.35
+TENANT_PLUGIN_TAG ?= 1.3.29
 
 .PHONY: help install build build-shared build-admin build-tenant \
         build-admin-plugin build-tenant-plugin typecheck dev-admin dev-tenant clean \

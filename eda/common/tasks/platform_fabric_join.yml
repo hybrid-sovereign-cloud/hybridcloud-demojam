@@ -119,6 +119,50 @@
       ansible.builtin.set_fact:
         pfj_fabric_cr: "{{ pfj_ready_fabrics | selectattr('metadata.name', 'equalto', pfj_selected_fabric) | list | first }}"
 
+    # design/fabric.md §16.6 — refuse Joined when fabric IPAM conflictCheck != passed
+    - name: Read PlatformOpenshift networking status for conflictCheck gate
+      ansible.builtin.set_fact:
+        pfj_net_status: >-
+          {{
+            (platformopenshift_cr.resources | default([{}]))[0].status.networking
+            | default({})
+            if (platformopenshift_cr is defined)
+            else {}
+          }}
+        pfj_conflict_check: >-
+          {{
+            (
+              (platformopenshift_cr.resources | default([{}]))[0].status.networking
+              | default({})
+            ).get('conflictCheck', '')
+            if (platformopenshift_cr is defined)
+            else ''
+          }}
+
+    - name: Patch fabricMembership Pending when networking conflictCheck not passed
+      when:
+        - platform_type in ['hosted', 'openstack']
+        - (pfj_conflict_check | default('')) != 'passed'
+        - (pfj_conflict_check | default('')) | length > 0 or ((platform_spec.networking | default({})).allocateFromFabric | default(false) | bool)
+      block:
+        - name: Patch Pending — IPAM conflictCheck gate
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+          vars:
+            cr_api_version: hybridsovereign.redhat/v1alpha1
+            cr_plural: platformopenshifts
+            cr_name: "{{ platformopenshift_cr_name }}"
+            cr_namespace: "{{ platformopenshift_cr_namespace }}"
+            cr_status_body:
+              fabricMembership:
+                - fabric: "{{ pfj_selected_fabric }}"
+                  phase: Pending
+                  evpnPrepReady: false
+                  lastJoinedAt: "{{ pfj_timestamp }}"
+                  message: >-
+                    Refusing Joined until PlatformOpenshift.status.networking.conflictCheck=passed
+                    (current={{ pfj_conflict_check | default('unset') }}; design §16.6).
+        - ansible.builtin.meta: end_host
+
     - name: Compute idempotent gateway/link names (design §15.10)
       ansible.builtin.set_fact:
         pfj_gw_name: "{{ pfj_entity }}-{{ platformopenshift_cr_name }}-gw"

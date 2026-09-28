@@ -278,6 +278,35 @@ export function ResourceDetail({
         </Alert>
       )}
 
+      {kind === 'PlatformOpenshift' &&
+        (() => {
+          const net = (resource.status as { networking?: Record<string, unknown> } | undefined)?.networking;
+          if (!net || typeof net !== 'object') return null;
+          const conflict = String(net.conflictCheck ?? '');
+          const conflictMsg = String(net.conflictMessage ?? '');
+          const cidrs = [
+            ...(Array.isArray(net.clusterNetwork) ? net.clusterNetwork : []),
+            ...(Array.isArray(net.serviceNetwork) ? net.serviceNetwork : []),
+            ...(Array.isArray(net.machineNetwork) ? net.machineNetwork : []),
+          ].map(String);
+          return (
+            <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.5rem' }}>
+              {conflict === 'failed' || conflictMsg ? (
+                <Alert variant="danger" title="Fabric IPAM conflict" isInline>
+                  {conflictMsg || `conflictCheck=${conflict}`}
+                </Alert>
+              ) : null}
+              {cidrs.length > 0 ? (
+                <Alert variant="info" title="Allocated cluster CIDRs (status.networking)" isInline>
+                  {cidrs.join(' · ')}
+                  {net.fabricRef ? ` · fabricRef=${String(net.fabricRef)}` : ''}
+                  {conflict ? ` · conflictCheck=${conflict}` : ''}
+                </Alert>
+              ) : null}
+            </div>
+          );
+        })()}
+
       <Tabs
         activeKey={activeTab}
         onSelect={(_e, k) => setActiveTab(k)}
