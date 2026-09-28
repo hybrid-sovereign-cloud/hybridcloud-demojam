@@ -104,6 +104,7 @@ metadata:
   labels:
     hybridsovereign.redhat/entity: acme-corp
     hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/platformopenshift: hcp1
 spec:
   enabled: true
   cloud: openshift
@@ -140,6 +141,7 @@ metadata:
   labels:
     hybridsovereign.redhat/entity: chad
     hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/platformopenshift: hcp2
 spec:
   enabled: true
   cloud: openshift
@@ -158,6 +160,7 @@ metadata:
   labels:
     hybridsovereign.redhat/entity: chad
     hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/platformopenshift: hcp3
 spec:
   enabled: true
   cloud: openshift
@@ -173,6 +176,8 @@ kind: TransportLink
 metadata:
   name: acme-hcp1-link
   namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/platformopenshift: hcp1
 spec:
   enabled: true
   fabricRef: acme-fabric
@@ -195,6 +200,8 @@ kind: TransportLink
 metadata:
   name: chad-hcp2-link
   namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/platformopenshift: hcp2
 spec:
   enabled: true
   fabricRef: chad-fabric
@@ -206,6 +213,8 @@ kind: TransportLink
 metadata:
   name: chad-hcp3-link
   namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/platformopenshift: hcp3
 spec:
   enabled: true
   fabricRef: chad-fabric

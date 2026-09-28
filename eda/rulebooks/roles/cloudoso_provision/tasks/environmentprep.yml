@@ -193,40 +193,71 @@
 - name: Find or create floating IPs (idempotent via description tags)
   ansible.builtin.shell: |
     python3 -c "
-    import openstack, json, sys, yaml, os
-    cfg_path = os.environ.get('OS_CLIENT_CONFIG_FILE', '/etc/openstack/clouds.yaml')
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
-    cloud_cfg = cfg['clouds']['{{ clouds_yaml_cloud }}']
-    auth = dict(cloud_cfg['auth'])
-    auth['project_name'] = '{{ ep_project }}'
-    auth['project_domain_name'] = '{{ ep_project_domain }}'
-    conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3')
-    net = conn.network.find_network('{{ ep_external_network }}')
-    if net is None:
-        print('Network {{ ep_external_network }} not found', file=sys.stderr)
+    import json, sys, yaml, os
+    try:
+        import openstack
+    except ImportError as e:
+        print(json.dumps({'error': 'openstacksdk not installed in EE: %s' % e}))
+        sys.exit(2)
+    try:
+        cfg_path = os.environ.get('OS_CLIENT_CONFIG_FILE', '/etc/openstack/clouds.yaml')
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        cloud_name = '{{ clouds_yaml_cloud }}'
+        if cloud_name not in cfg.get('clouds', {}):
+            cloud_name = next(iter(cfg.get('clouds', {})), None)
+        if not cloud_name:
+            print(json.dumps({'error': 'no clouds in clouds.yaml'}))
+            sys.exit(1)
+        cloud_cfg = cfg['clouds'][cloud_name]
+        auth = dict(cloud_cfg['auth'])
+        # When reusing admin credentials, keep the project from clouds.yaml
+        # (overriding to a non-existent project yields empty/non-JSON SDK failures).
+        reuse = '{{ ep_reuse_existing_project | default(false) | bool }}'.lower() in ('1', 'true', 'yes')
+        if not reuse:
+            auth['project_name'] = '{{ ep_project }}'
+            auth['project_domain_name'] = '{{ ep_project_domain }}'
+        conn = openstack.connect(
+            auth=auth,
+            region_name=cloud_cfg.get('region_name', 'regionOne'),
+            identity_api_version='3',
+            interface=cloud_cfg.get('interface', 'public'),
+        )
+        net = conn.network.find_network('{{ ep_external_network }}')
+        if net is None:
+            print(json.dumps({'error': 'Network {{ ep_external_network }} not found'}))
+            sys.exit(1)
+
+        cr_name = '{{ cloudoso_cr_name }}'
+        api_tag = f'sovereign-{cr_name}-api'
+        ingress_tag = f'sovereign-{cr_name}-ingress'
+
+        def find_or_create_fip(conn, net_id, description):
+            existing = [i for i in conn.network.ips() if getattr(i, 'description', None) == description]
+            if existing:
+                return {'id': existing[0].id, 'ip': existing[0].floating_ip_address, 'created': False}
+            fip = conn.network.create_ip(floating_network_id=net_id, description=description)
+            return {'id': fip.id, 'ip': fip.floating_ip_address, 'created': True}
+
+        api_result = find_or_create_fip(conn, net.id, api_tag)
+        ingress_result = find_or_create_fip(conn, net.id, ingress_tag)
+        print(json.dumps({'api': api_result, 'ingress': ingress_result}))
+    except Exception as e:
+        print(json.dumps({'error': '%s: %s' % (type(e).__name__, e)}))
         sys.exit(1)
-
-    cr_name = '{{ cloudoso_cr_name }}'
-    api_tag = f'sovereign-{cr_name}-api'
-    ingress_tag = f'sovereign-{cr_name}-ingress'
-
-    def find_or_create_fip(conn, net_id, description):
-        existing = list(conn.network.ips(description=description))
-        if existing:
-            return {'id': existing[0].id, 'ip': existing[0].floating_ip_address, 'created': False}
-        fip = conn.network.create_ip(floating_network_id=net_id, description=description)
-        return {'id': fip.id, 'ip': fip.floating_ip_address, 'created': True}
-
-    api_result = find_or_create_fip(conn, net.id, api_tag)
-    ingress_result = find_or_create_fip(conn, net.id, ingress_tag)
-    print(json.dumps({'api': api_result, 'ingress': ingress_result}))
     "
   environment:
     OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
   register: fip_result_raw
-  changed_when: (fip_result_raw.stdout | from_json).api.created or (fip_result_raw.stdout | from_json).ingress.created
-
+  failed_when: >-
+    (fip_result_raw.rc | default(1)) != 0
+    or ('error' in ((fip_result_raw.stdout | default('{}', true)) | from_json))
+  changed_when: >-
+    (fip_result_raw.rc | default(1)) == 0
+    and (
+      (((fip_result_raw.stdout | default('{}', true)) | from_json).api.created | default(false))
+      or (((fip_result_raw.stdout | default('{}', true)) | from_json).ingress.created | default(false))
+    )
 - name: Set VIP facts
   ansible.builtin.set_fact:
     ep_api_vip: "{{ (fip_result_raw.stdout | from_json).api.ip }}"

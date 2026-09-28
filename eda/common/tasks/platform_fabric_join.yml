@@ -132,7 +132,10 @@
         pfj_cloud_type: "{{ 'openshift' if platform_type == 'hosted' else 'openstack' }}"
         pfj_spoke_asn: "{{ 65100 + ((platformopenshift_cr_name | length) * 7 % 900) }}"
 
-    - name: Discover existing CloudGateway (read-only when manageGatewayAndLink=false)
+    # Mode B (manageGatewayAndLink=false): admin-created CloudGateway/TransportLink.
+    # Discover by (1) label hybridsovereign.redhat/platformopenshift, else
+    # (2) spec.platformOpenshiftRef + fabricRef (samples/acme-chad-fabric.yaml).
+    - name: List CloudGateways for Mode B discovery
       when: not pfj_manage
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
@@ -141,11 +144,78 @@
         api_version: hybridsovereign.redhat/v1alpha1
         kind: CloudGateway
         namespace: sovereign-cloud
-        label_selectors:
-          - "hybridsovereign.redhat/platformopenshift={{ platformopenshift_cr_name }}"
-      register: _pfj_discovered_gw
+      register: _pfj_all_gws
       failed_when: false
 
+    - name: Discover CloudGateway by platformOpenshiftRef + fabricRef (Mode B)
+      when: not pfj_manage
+      ansible.builtin.set_fact:
+        _pfj_discovered_gw: >-
+          {{
+            _pfj_all_gws.resources | default([])
+            | selectattr('spec.platformOpenshiftRef', 'defined')
+            | selectattr('spec.platformOpenshiftRef', 'equalto', platformopenshift_cr_name)
+            | selectattr('spec.fabricRef', 'defined')
+            | selectattr('spec.fabricRef', 'equalto', pfj_selected_fabric)
+            | list
+            | first
+            | default({}, true)
+          }}
+
+    # Fallback: label hybridsovereign.redhat/platformopenshift (slash key → json_query)
+    - name: Fallback CloudGateway discovery by platformopenshift label
+      when:
+        - not pfj_manage
+        - (_pfj_discovered_gw.metadata.name | default('')) | length == 0
+      ansible.builtin.set_fact:
+        _pfj_discovered_gw: >-
+          {{
+            _pfj_all_gws.resources | default([])
+            | json_query(
+                "[?metadata.labels.\"hybridsovereign.redhat/platformopenshift\"=='"
+                + platformopenshift_cr_name
+                + "' && spec.fabricRef=='"
+                + pfj_selected_fabric
+                + "'] | [0]"
+              )
+            | default({}, true)
+          }}
+
+    - name: Default empty discovered link before TransportLink lookup
+      when: not pfj_manage
+      ansible.builtin.set_fact:
+        _pfj_discovered_link: {}
+
+    - name: List TransportLinks for Mode B discovery
+      when:
+        - not pfj_manage
+        - (_pfj_discovered_gw.metadata.name | default('')) | length > 0
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: TransportLink
+        namespace: sovereign-cloud
+      register: _pfj_all_links
+      failed_when: false
+
+    - name: Discover TransportLink for adopted CloudGateway
+      when:
+        - not pfj_manage
+        - (_pfj_discovered_gw.metadata.name | default('')) | length > 0
+      ansible.builtin.set_fact:
+        _pfj_discovered_link: >-
+          {{
+            _pfj_all_links.resources | default([])
+            | selectattr('spec.cloudGatewayRef', 'defined')
+            | selectattr('spec.cloudGatewayRef', 'equalto', _pfj_discovered_gw.metadata.name)
+            | selectattr('spec.fabricRef', 'defined')
+            | selectattr('spec.fabricRef', 'equalto', pfj_selected_fabric)
+            | list
+            | first
+            | default({}, true)
+          }}
     - name: Ensure CloudGateway (Mode A/B — manageGatewayAndLink=true)
       when: pfj_manage
       kubernetes.core.k8s:
@@ -230,9 +300,10 @@
     - name: Adopt discovered gateway/link readiness (unmanaged path)
       when: not pfj_manage
       ansible.builtin.set_fact:
-        pfj_gw_ready: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].status.ready | default(false) | bool }}"
-        pfj_link_ready: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].status.ready | default(false) | bool }}"
-        pfj_gw_name: "{{ (_pfj_discovered_gw.resources | default([{}]))[0].metadata.name | default(pfj_gw_name) }}"
+        pfj_gw_name: "{{ _pfj_discovered_gw.metadata.name | default(pfj_gw_name) }}"
+        pfj_link_name: "{{ _pfj_discovered_link.metadata.name | default('') }}"
+        pfj_gw_ready: "{{ (_pfj_discovered_gw.status.ready | default(false)) | bool }}"
+        pfj_link_ready: "{{ (_pfj_discovered_link.status.ready | default(false)) | bool }}"
 
     - name: Compute join phase and evpnPrepReady
       ansible.builtin.set_fact:
@@ -251,7 +322,7 @@
             - fabric: "{{ pfj_selected_fabric }}"
               phase: "{{ pfj_phase }}"
               cloudGatewayRef: "{{ pfj_gw_name }}"
-              transportLinkRef: "{{ pfj_link_name if pfj_manage else '' }}"
+              transportLinkRef: "{{ pfj_link_name }}"
               evpnPrepReady: "{{ pfj_evpn_prep_ready }}"
               lastJoinedAt: "{{ pfj_timestamp }}"
               message: >-
@@ -260,7 +331,6 @@
                   if pfj_phase == 'Joined'
                   else 'CloudGateway/TransportLink for fabric ' ~ pfj_selected_fabric ~ ' not yet Ready'
                 }}
-
   rescue:
     # Fabric join must never fail cluster provisioning (design §15.3).
     - name: Patch fabricMembership Degraded on join error
