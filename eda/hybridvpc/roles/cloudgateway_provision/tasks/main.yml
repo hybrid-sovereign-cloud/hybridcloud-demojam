@@ -87,23 +87,36 @@
             else (cloudgateway_cr_namespace | regex_replace('^entity-', '') if (cloudgateway_cr_namespace | regex_search('^entity-')) else '')
           }}
 
+    - name: Normalize fabric entityRefs to name list
+      ansible.builtin.set_fact:
+        cgw_fabric_entity_names: >-
+          {{
+            cgw_fabric.spec.entityRefs
+            | default([])
+            | map(attribute='name')
+            | list
+            if (cgw_fabric.spec.entityRefs | default([]) | length > 0)
+               and (cgw_fabric.spec.entityRefs[0] is mapping)
+            else (cgw_fabric.spec.entityRefs | default([]))
+          }}
+
     - name: Set entity-mismatch failure reason before failing
       ansible.builtin.set_fact:
         cloudgateway_fail_reason: EntityMismatch
       when:
-        - (cgw_fabric.spec.entityRefs | default([])) | length > 0
+        - (cgw_fabric_entity_names | length) > 0
         - (cgw_entity | length) > 0
-        - cgw_entity not in (cgw_fabric.spec.entityRefs | default([]))
+        - cgw_entity not in cgw_fabric_entity_names
 
     - name: Reject gateway/fabric entity mismatch (design §8.2)
       ansible.builtin.fail:
         msg: >-
           CloudGateway {{ cloudgateway_cr_name }} entity '{{ cgw_entity }}' is not in
-          HybridFabric {{ cloudgateway_spec.fabricRef }} entityRefs {{ cgw_fabric.spec.entityRefs | default([]) }}.
+          HybridFabric {{ cloudgateway_spec.fabricRef }} entityRefs {{ cgw_fabric_entity_names }}.
       when:
-        - (cgw_fabric.spec.entityRefs | default([])) | length > 0
+        - (cgw_fabric_entity_names | length) > 0
         - (cgw_entity | length) > 0
-        - cgw_entity not in (cgw_fabric.spec.entityRefs | default([]))
+        - cgw_entity not in cgw_fabric_entity_names
 
     - name: Set route reflector peer count fact
       ansible.builtin.set_fact:
