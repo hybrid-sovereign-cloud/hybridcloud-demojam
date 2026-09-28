@@ -422,9 +422,10 @@
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
     cloud_cfg = cfg['clouds']['{{ clouds_yaml_cloud }}']
+    # Authenticate with the admin project from clouds.yaml — NOT ep_project.
+    # Forcing project_name=oso1 causes HTTP 401 when the admin user is not yet
+    # a member of the tenant project; app-creds are user-scoped anyway.
     auth = dict(cloud_cfg['auth'])
-    auth['project_name'] = '{{ ep_project }}'
-    auth['project_domain_name'] = '{{ ep_project_domain }}'
     verify = cloud_cfg.get('verify', True)
     if isinstance(verify, str):
         verify = verify.lower() not in ('0', 'false', 'no')
@@ -474,9 +475,8 @@
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
     cloud_cfg = cfg['clouds']['{{ clouds_yaml_cloud }}']
+    # Keep admin project from clouds.yaml (do not switch to ep_project).
     auth = dict(cloud_cfg['auth'])
-    auth['project_name'] = '{{ ep_project }}'
-    auth['project_domain_name'] = '{{ ep_project_domain }}'
     verify = cloud_cfg.get('verify', True)
     if isinstance(verify, str):
         verify = verify.lower() not in ('0', 'false', 'no')
