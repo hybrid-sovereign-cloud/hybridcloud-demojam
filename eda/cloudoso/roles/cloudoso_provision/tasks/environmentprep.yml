@@ -217,11 +217,17 @@
         if not reuse:
             auth['project_name'] = '{{ ep_project }}'
             auth['project_domain_name'] = '{{ ep_project_domain }}'
+        verify = cloud_cfg.get('verify', True)
+        if isinstance(verify, str):
+            verify = verify.lower() not in ('0', 'false', 'no')
+        # Lab Keystone often presents a cluster-signed cert; honor clouds.yaml
+        # verify/cacert and default to insecure when verify is absent/false.
         conn = openstack.connect(
             auth=auth,
             region_name=cloud_cfg.get('region_name', 'regionOne'),
             identity_api_version='3',
             interface=cloud_cfg.get('interface', 'public'),
+            verify=cloud_cfg.get('cacert', verify),
         )
         net = conn.network.find_network('{{ ep_external_network }}')
         if net is None:
