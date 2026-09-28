@@ -198,6 +198,28 @@
       data:
         clientSecret: "{{ hc_sso_client_secret_b64 }}"
 
+- name: Build HostedCluster networking from fabric IPAM facts
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import json, os
+    clusters = json.loads(os.environ.get("CLUSTERS", "[]")) or ["10.132.0.0/14"]
+    services = json.loads(os.environ.get("SERVICES", "[]")) or ["172.31.0.0/16"]
+    print(json.dumps({
+      "clusterNetwork": [{"cidr": c} for c in clusters],
+      "serviceNetwork": [{"cidr": s} for s in services],
+    }))
+    PY
+  environment:
+    CLUSTERS: "{{ po_cluster_networks | default(['10.132.0.0/14']) | to_json }}"
+    SERVICES: "{{ po_service_networks | default(['172.31.0.0/16']) | to_json }}"
+  register: _hc_net_json
+  changed_when: false
+
+- name: Set HostedCluster networking facts
+  ansible.builtin.set_fact:
+    hc_cluster_network: "{{ (_hc_net_json.stdout | from_json).clusterNetwork }}"
+    hc_service_network: "{{ (_hc_net_json.stdout | from_json).serviceNetwork }}"
+
 - name: Build HostedCluster definition
   ansible.builtin.set_fact:
     hc_definition:
@@ -214,10 +236,8 @@
         release:
           image: "{{ hc_release_image }}"
         networking:
-          clusterNetwork:
-            - cidr: 10.132.0.0/14
-          serviceNetwork:
-            - cidr: 172.31.0.0/16
+          clusterNetwork: "{{ hc_cluster_network }}"
+          serviceNetwork: "{{ hc_service_network }}"
           networkType: OVNKubernetes
         platform:
           type: KubeVirt

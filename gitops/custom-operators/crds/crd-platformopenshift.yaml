@@ -150,6 +150,63 @@ spec:
                   type: array
                   items:
                     type: string
+                # Cluster underlay / pod / service CIDRs — unique per cluster on a fabric.
+                networking:
+                  type: object
+                  description: >-
+                    OpenShift cluster address plan. When allocateFromFabric is true (default),
+                    Ansible carves unique CIDRs from HybridFabric.spec.ipam so multiple
+                    PlatformOpenshift CRs on the same fabric never reuse the Hypershift
+                    defaults (10.132.0.0/14 + 172.31.0.0/16). Explicit CIDRs are validated
+                    for conflicts against other fabric members and reserved hybrid overlays.
+                  properties:
+                    allocateFromFabric:
+                      type: boolean
+                      default: true
+                    fabricRef:
+                      type: string
+                      description: >-
+                        Fabric whose ipam pools to use. If empty, discovered from Entity
+                        visibility (HybridFabric.entityRefs / preferred fabric).
+                    clusterNetwork:
+                      type: array
+                      items:
+                        type: string
+                      description: Explicit pod CIDR(s); omit to allocate
+                    serviceNetwork:
+                      type: array
+                      items:
+                        type: string
+                      description: Explicit service CIDR(s); omit to allocate
+                    machineNetwork:
+                      type: array
+                      items:
+                        type: string
+                      description: Explicit machine/node CIDR(s); omit to allocate when pool exists
+                    allowConflict:
+                      type: boolean
+                      default: false
+                      description: Escape hatch — must stay false for fabric-attached clusters
+                fabric:
+                  type: object
+                  description: Fabric join policy (see design/fabric.md §15)
+                  properties:
+                    joinPolicy:
+                      type: string
+                      enum: [None, AutoWhenFabricReady, ExplicitOnly]
+                      default: AutoWhenFabricReady
+                    fabricRefs:
+                      type: array
+                      items:
+                        type: string
+                    preferredFabricRef:
+                      type: string
+                    manageGatewayAndLink:
+                      type: boolean
+                      default: true
+                    tunnelType:
+                      type: string
+                      enum: [wireguard, ipsec, macsec, none]
             status:
               description: Observed state
               type: object
@@ -213,6 +270,55 @@ spec:
                 oidcClientId:
                   type: string
                   description: "Keycloak OIDC client ID for this cluster"
+                networking:
+                  type: object
+                  description: Allocated or validated address plan used for install / fabric join
+                  properties:
+                    clusterNetwork:
+                      type: array
+                      items:
+                        type: string
+                    serviceNetwork:
+                      type: array
+                      items:
+                        type: string
+                    machineNetwork:
+                      type: array
+                      items:
+                        type: string
+                    fabricRef:
+                      type: string
+                    allocationSource:
+                      type: string
+                      enum: [fabric-ipam, explicit, legacy-default]
+                    conflictCheck:
+                      type: string
+                      enum: [passed, failed, skipped]
+                    conflictMessage:
+                      type: string
+                fabricMembership:
+                  type: array
+                  description: Fabrics this cluster has joined (design §15)
+                  items:
+                    type: object
+                    properties:
+                      fabric:
+                        type: string
+                      phase:
+                        type: string
+                        enum: [Pending, Joined, Degraded, Skipped]
+                      cloudGatewayRef:
+                        type: string
+                      transportLinkRef:
+                        type: string
+                      evpnPrepReady:
+                        type: boolean
+                      lastJoinedAt:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
                 awsHelperName:
                   type: string
                 awsRegion:

@@ -1,0 +1,306 @@
+---
+# Allocate / validate PlatformOpenshift cluster CIDRs against fabric IPAM.
+# Prevents every HostedCluster from defaulting to the same 10.132.0.0/14 +
+# 172.31.0.0/16, which breaks EVPN/underlay uniqueness when multiple OCPs
+# join the same HybridFabric.
+#
+# Sets facts:
+#   po_cluster_networks  (list of CIDR strings)
+#   po_service_networks
+#   po_machine_networks
+#   po_networking_fabric_ref
+#   po_networking_allocation_source  (fabric-ipam|explicit|legacy-default)
+#   po_networking_conflict_check    (passed|failed|skipped)
+#
+# Patches PlatformOpenshift.status.networking on success.
+# Fails the play when conflicts are detected (unless allowConflict: true).
+
+- name: Read PlatformOpenshift networking + fabric intent
+  ansible.builtin.set_fact:
+    _po_net: "{{ platformopenshift_cr.resources[0].spec.networking | default({}) }}"
+    _po_fabric: "{{ platformopenshift_cr.resources[0].spec.fabric | default({}) }}"
+    _po_existing_net_status: "{{ platformopenshift_cr.resources[0].status.networking | default({}) }}"
+    _po_allocate: "{{ (platformopenshift_cr.resources[0].spec.networking.allocateFromFabric | default(true)) | bool }}"
+    _po_allow_conflict: "{{ (platformopenshift_cr.resources[0].spec.networking.allowConflict | default(false)) | bool }}"
+
+- name: Prefer already-allocated status CIDRs (idempotent re-entry)
+  when:
+    - (_po_existing_net_status.clusterNetwork | default([]) | length) > 0
+    - (_po_existing_net_status.serviceNetwork | default([]) | length) > 0
+    - (_po_existing_net_status.conflictCheck | default('')) == 'passed'
+  ansible.builtin.set_fact:
+    po_cluster_networks: "{{ _po_existing_net_status.clusterNetwork }}"
+    po_service_networks: "{{ _po_existing_net_status.serviceNetwork }}"
+    po_machine_networks: "{{ _po_existing_net_status.machineNetwork | default([]) }}"
+    po_networking_fabric_ref: "{{ _po_existing_net_status.fabricRef | default('') }}"
+    po_networking_allocation_source: "{{ _po_existing_net_status.allocationSource | default('fabric-ipam') }}"
+    po_networking_conflict_check: passed
+    _po_ipam_done: true
+
+- name: Discover HybridFabrics visible to this Entity
+  when: not (_po_ipam_done | default(false) | bool)
+  block:
+    - name: List HybridFabric CRs on services cluster
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        namespace: sovereign-cloud
+      register: _all_fabrics
+      failed_when: false
+
+    - name: Select fabric for IPAM
+      ansible.builtin.set_fact:
+        po_networking_fabric_ref: >-
+          {{
+            _po_net.fabricRef
+            | default(_po_fabric.preferredFabricRef | default('', true), true)
+            | default(
+                (
+                  (_all_fabrics.resources | default([]))
+                  | selectattr('status.ready', 'defined')
+                  | selectattr('status.ready')
+                  | map(attribute='metadata.name')
+                  | list
+                  | first
+                ) if (_all_fabrics.resources | default([]) | length) > 0 else '',
+                true
+              )
+          }}
+
+    - name: Load selected HybridFabric
+      when: (po_networking_fabric_ref | default('') | length) > 0
+      ansible.builtin.set_fact:
+        _po_fabric_cr: >-
+          {{
+            (_all_fabrics.resources | default([]))
+            | selectattr('metadata.name', 'equalto', po_networking_fabric_ref)
+            | list
+            | first
+            | default({}, true)
+          }}
+
+- name: Collect existing CIDR claims from all PlatformOpenshift CRs (conflict domain)
+  when: not (_po_ipam_done | default(false) | bool)
+  block:
+    - name: List PlatformOpenshift across cluster
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: PlatformOpenshift
+      register: _all_po
+      failed_when: false
+
+    - name: Build reserved CIDR list from peer status + hybridOverlayReserved
+      ansible.builtin.set_fact:
+        _po_reserved_cidrs: >-
+          {{
+            (
+              (_all_po.resources | default([]))
+              | rejectattr('metadata.name', 'equalto', platformopenshift_cr_name)
+              | map(attribute='status.networking')
+              | select('defined')
+              | list
+              | map(attribute='clusterNetwork')
+              | select('defined')
+              | list
+              | flatten
+            )
+            + (
+              (_all_po.resources | default([]))
+              | rejectattr('metadata.name', 'equalto', platformopenshift_cr_name)
+              | map(attribute='status.networking')
+              | select('defined')
+              | list
+              | map(attribute='serviceNetwork')
+              | select('defined')
+              | list
+              | flatten
+            )
+            + (
+              (_all_po.resources | default([]))
+              | rejectattr('metadata.name', 'equalto', platformopenshift_cr_name)
+              | map(attribute='status.networking')
+              | select('defined')
+              | list
+              | map(attribute='machineNetwork')
+              | select('defined')
+              | list
+              | flatten
+            )
+            + (_po_fabric_cr.spec.ipam.hybridOverlayReserved | default([]) if _po_fabric_cr is defined else [])
+          }}
+
+- name: Use explicit networking CIDRs from spec when provided
+  when:
+    - not (_po_ipam_done | default(false) | bool)
+    - (_po_net.clusterNetwork | default([]) | length) > 0
+    - (_po_net.serviceNetwork | default([]) | length) > 0
+  ansible.builtin.set_fact:
+    po_cluster_networks: "{{ _po_net.clusterNetwork }}"
+    po_service_networks: "{{ _po_net.serviceNetwork }}"
+    po_machine_networks: "{{ _po_net.machineNetwork | default([]) }}"
+    po_networking_allocation_source: explicit
+    _po_need_alloc: false
+
+- name: Mark allocation needed when explicit CIDRs absent
+  when:
+    - not (_po_ipam_done | default(false) | bool)
+    - _po_need_alloc is not defined
+  ansible.builtin.set_fact:
+    _po_need_alloc: true
+
+- name: Allocate unique CIDRs from HybridFabric.spec.ipam (or built-in fabric defaults)
+  when:
+    - not (_po_ipam_done | default(false) | bool)
+    - _po_need_alloc | default(true) | bool
+    - _po_allocate | bool
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os, sys
+
+    reserved = [c for c in json.loads(os.environ.get("RESERVED", "[]")) if c]
+    # Defaults align with multi-HCP fabric labs when HybridFabric.ipam omitted
+    cluster_pool = os.environ.get("CLUSTER_POOL", "10.128.0.0/12")
+    cluster_plen = int(os.environ.get("CLUSTER_PLEN", "14"))
+    service_pool = os.environ.get("SERVICE_POOL", "172.30.0.0/15")
+    service_plen = int(os.environ.get("SERVICE_PLEN", "16"))
+    machine_pool = os.environ.get("MACHINE_POOL", "")
+    machine_plen = int(os.environ.get("MACHINE_PLEN", "24") or "24")
+
+    def overlaps(a, b):
+        return ipaddress.ip_network(a, strict=False).overlaps(ipaddress.ip_network(b, strict=False))
+
+    def next_block(pool_cidr, prefix_len, reserved):
+        pool = ipaddress.ip_network(pool_cidr, strict=False)
+        if prefix_len < pool.prefixlen:
+            raise SystemExit(f"blockPrefixLength {prefix_len} shorter than pool {pool_cidr}")
+        for net in pool.subnets(new_prefix=prefix_len):
+            cidr = str(net)
+            if any(overlaps(cidr, r) for r in reserved):
+                continue
+            return cidr
+        raise SystemExit(f"IPAM exhausted in {pool_cidr} for /{prefix_len}; reserved={reserved}")
+
+    cluster = next_block(cluster_pool, cluster_plen, reserved)
+    reserved2 = reserved + [cluster]
+    service = next_block(service_pool, service_plen, reserved2)
+    reserved3 = reserved2 + [service]
+    machine = ""
+    if machine_pool:
+        machine = next_block(machine_pool, machine_plen, reserved3)
+
+    # Intra-cluster sanity
+    for a, b in ((cluster, service), (cluster, machine), (service, machine)):
+        if a and b and overlaps(a, b):
+            raise SystemExit(f"allocated CIDRs overlap: {a} vs {b}")
+
+    out = {"clusterNetwork": [cluster], "serviceNetwork": [service], "machineNetwork": [machine] if machine else []}
+    print(json.dumps(out))
+    PY
+  environment:
+    RESERVED: "{{ _po_reserved_cidrs | default([]) | to_json }}"
+    CLUSTER_POOL: "{{ _po_fabric_cr.spec.ipam.clusterNetworkPool.cidr | default('10.128.0.0/12') if _po_fabric_cr is defined else '10.128.0.0/12' }}"
+    CLUSTER_PLEN: "{{ _po_fabric_cr.spec.ipam.clusterNetworkPool.blockPrefixLength | default(14) if _po_fabric_cr is defined else 14 }}"
+    SERVICE_POOL: "{{ _po_fabric_cr.spec.ipam.serviceNetworkPool.cidr | default('172.30.0.0/15') if _po_fabric_cr is defined else '172.30.0.0/15' }}"
+    SERVICE_PLEN: "{{ _po_fabric_cr.spec.ipam.serviceNetworkPool.blockPrefixLength | default(16) if _po_fabric_cr is defined else 16 }}"
+    MACHINE_POOL: "{{ _po_fabric_cr.spec.ipam.machineNetworkPool.cidr | default('') if _po_fabric_cr is defined else '' }}"
+    MACHINE_PLEN: "{{ _po_fabric_cr.spec.ipam.machineNetworkPool.blockPrefixLength | default(24) if _po_fabric_cr is defined else 24 }}"
+  register: _po_ipam_alloc
+  changed_when: false
+
+- name: Apply allocated CIDRs
+  when:
+    - not (_po_ipam_done | default(false) | bool)
+    - _po_ipam_alloc is defined
+    - (_po_ipam_alloc.rc | default(1) | int) == 0
+  ansible.builtin.set_fact:
+    po_cluster_networks: "{{ (_po_ipam_alloc.stdout | from_json).clusterNetwork }}"
+    po_service_networks: "{{ (_po_ipam_alloc.stdout | from_json).serviceNetwork }}"
+    po_machine_networks: "{{ (_po_ipam_alloc.stdout | from_json).machineNetwork | default([]) }}"
+    po_networking_allocation_source: "{{ 'fabric-ipam' if (po_networking_fabric_ref | default('') | length) > 0 else 'legacy-default' }}"
+
+- name: Fall back to legacy Hypershift defaults only when allocateFromFabric is false
+  when:
+    - not (_po_ipam_done | default(false) | bool)
+    - not (_po_allocate | bool)
+    - (po_cluster_networks is not defined) or (po_cluster_networks | length == 0)
+  ansible.builtin.set_fact:
+    po_cluster_networks: "{{ _po_net.clusterNetwork | default(['10.132.0.0/14']) }}"
+    po_service_networks: "{{ _po_net.serviceNetwork | default(['172.31.0.0/16']) }}"
+    po_machine_networks: "{{ _po_net.machineNetwork | default([]) }}"
+    po_networking_allocation_source: legacy-default
+
+- name: Conflict-check proposed CIDRs against reserved set
+  when: not (_po_ipam_done | default(false) | bool)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os, sys
+
+    proposed = json.loads(os.environ["PROPOSED"])
+    reserved = [c for c in json.loads(os.environ.get("RESERVED", "[]")) if c]
+    allow = os.environ.get("ALLOW_CONFLICT", "false").lower() == "true"
+
+    def nets(lst):
+        return [ipaddress.ip_network(c, strict=False) for c in lst if c]
+
+    props = nets(proposed)
+    # Self-overlap
+    for i, a in enumerate(props):
+        for b in props[i + 1 :]:
+            if a.overlaps(b):
+                msg = f"self-overlap {a} vs {b}"
+                if allow:
+                    print(msg)
+                    sys.exit(0)
+                print(msg, file=sys.stderr)
+                sys.exit(2)
+    for a in props:
+        for r in reserved:
+            b = ipaddress.ip_network(r, strict=False)
+            if a.overlaps(b):
+                msg = f"conflicts with reserved {r}: {a}"
+                if allow:
+                    print(msg)
+                    sys.exit(0)
+                print(msg, file=sys.stderr)
+                sys.exit(3)
+    print("ok")
+    PY
+  environment:
+    PROPOSED: "{{ (po_cluster_networks + po_service_networks + po_machine_networks) | to_json }}"
+    RESERVED: "{{ _po_reserved_cidrs | default([]) | to_json }}"
+    ALLOW_CONFLICT: "{{ _po_allow_conflict | string }}"
+  register: _po_conflict
+  changed_when: false
+  failed_when:
+    - (_po_conflict.rc | default(1) | int) != 0
+    - not (_po_allow_conflict | bool)
+
+- name: Set conflict check result
+  when: not (_po_ipam_done | default(false) | bool)
+  ansible.builtin.set_fact:
+    po_networking_conflict_check: "{{ 'passed' if (_po_conflict.rc | default(1) | int) == 0 else 'failed' }}"
+
+- name: Persist networking allocation on PlatformOpenshift status
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: platformopenshifts
+    cr_name: "{{ platformopenshift_cr_name }}"
+    cr_namespace: "{{ platformopenshift_cr_namespace }}"
+    cr_status_body:
+      networking:
+        clusterNetwork: "{{ po_cluster_networks }}"
+        serviceNetwork: "{{ po_service_networks }}"
+        machineNetwork: "{{ po_machine_networks | default([]) }}"
+        fabricRef: "{{ po_networking_fabric_ref | default('') }}"
+        allocationSource: "{{ po_networking_allocation_source }}"
+        conflictCheck: "{{ po_networking_conflict_check }}"
+        conflictMessage: "{{ _po_conflict.stderr | default('') | trim }}"

@@ -63,6 +63,67 @@ spec:
                       type: integer
                     end:
                       type: integer
+                # Platform-owned CIDR pools so each PlatformOpenshift (and VTEP underlay)
+                # on this fabric gets non-overlapping address space.
+                ipam:
+                  type: object
+                  description: >-
+                    Address pools for clusters joining this fabric. Allocations are
+                    recorded on PlatformOpenshift.status.networking and in a ledger
+                    ConfigMap. Prevents duplicate HostedCluster defaults (e.g. every
+                    HCP using 10.132.0.0/14) from colliding on the EVPN fabric.
+                  properties:
+                    clusterNetworkPool:
+                      type: object
+                      description: Pod/cluster CIDR superspace carved per OpenShift cluster
+                      required: [cidr, blockPrefixLength]
+                      properties:
+                        cidr:
+                          type: string
+                          description: "e.g. 10.128.0.0/12"
+                        blockPrefixLength:
+                          type: integer
+                          minimum: 8
+                          maximum: 28
+                          description: "Prefix length allocated per cluster (e.g. 14 → /14 blocks)"
+                          default: 14
+                    serviceNetworkPool:
+                      type: object
+                      description: Service CIDR superspace carved per OpenShift cluster
+                      required: [cidr, blockPrefixLength]
+                      properties:
+                        cidr:
+                          type: string
+                          description: "e.g. 172.30.0.0/15"
+                        blockPrefixLength:
+                          type: integer
+                          minimum: 12
+                          maximum: 28
+                          default: 16
+                    machineNetworkPool:
+                      type: object
+                      description: Node/machine underlay CIDR superspace (VTEP-adjacent)
+                      required: [cidr, blockPrefixLength]
+                      properties:
+                        cidr:
+                          type: string
+                          description: "e.g. 192.168.64.0/18"
+                        blockPrefixLength:
+                          type: integer
+                          minimum: 16
+                          maximum: 28
+                          default: 24
+                    hybridOverlayReserved:
+                      type: array
+                      description: >-
+                        CIDRs reserved for HybridNetwork / NetworkPlacement prefixes
+                        on this fabric; must not be allocated as cluster/service/machine.
+                      items:
+                        type: string
+                    denyOverlappingClusterCidrs:
+                      type: boolean
+                      default: true
+                      description: Reject PlatformOpenshift join when proposed CIDRs overlap any member
                 borderGateway:
                   type: object
                   properties:
@@ -98,6 +159,11 @@ spec:
                 allocatedVniCount:
                   type: integer
                 availableVniCount:
+                  type: integer
+                ipamReady:
+                  type: boolean
+                  description: True when ipam pools are valid and ledger ConfigMap exists
+                allocatedClusterCidrCount:
                   type: integer
                 status:
                   type: string

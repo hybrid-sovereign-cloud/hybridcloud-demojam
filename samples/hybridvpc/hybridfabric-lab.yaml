@@ -12,6 +12,20 @@ spec:
   vniPool:
     start: 50000
     end: 50511
+  ipam:
+    clusterNetworkPool:
+      cidr: 10.128.0.0/12
+      blockPrefixLength: 14
+    serviceNetworkPool:
+      cidr: 172.30.0.0/15
+      blockPrefixLength: 16
+    machineNetworkPool:
+      cidr: 192.168.64.0/18
+      blockPrefixLength: 24
+    hybridOverlayReserved:
+      - 10.110.0.0/16
+      - 10.120.0.0/16
+    denyOverlappingClusterCidrs: true
   transportDefaults:
     mtu: 9000
     defaultTunnelType: wireguard
