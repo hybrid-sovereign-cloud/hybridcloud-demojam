@@ -118,23 +118,36 @@
         - name: Create Neutron network/subnet/EVPN router when credentials are available
           when: (vault_kv_data['clouds.yaml'] | default('')) | length > 0
           block:
-            - name: Write clouds.yaml for this NetworkPlacement job
-              ansible.builtin.copy:
-                content: "{{ vault_kv_data['clouds.yaml'] }}"
-                dest: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
-                mode: "0600"
+            - name: Write clouds.yaml for this NetworkPlacement job (force verify:false for lab TLS)
+              ansible.builtin.shell: |
+                python3 - <<'PY'
+                import yaml, pathlib, os
+                src = os.environ["CLOUDS_YAML"]
+                cfg = yaml.safe_load(src)
+                for _name, cloud in (cfg.get("clouds") or {}).items():
+                    if isinstance(cloud, dict):
+                        cloud["verify"] = False
+                dest = pathlib.Path(os.environ["DEST"])
+                dest.write_text(yaml.safe_dump(cfg, default_flow_style=False))
+                dest.chmod(0o600)
+                PY
+              environment:
+                CLOUDS_YAML: "{{ vault_kv_data['clouds.yaml'] }}"
+                DEST: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
               no_log: true
 
             - name: Resolve cloud name from clouds.yaml
               ansible.builtin.set_fact:
                 np_os_cloud_name: "{{ (vault_kv_data['clouds.yaml'] | from_yaml).clouds.keys() | list | first }}"
+                np_os_env:
+                  OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+                  PYTHONWARNINGS: ignore:Unverified HTTPS request
 
             - name: Ensure Neutron network for this HybridNetwork placement
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} network show
                 {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               register: np_network_show
               changed_when: false
               failed_when: false
@@ -144,8 +157,7 @@
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} network create
                 {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               register: np_network_create
               changed_when: true
 
@@ -163,8 +175,7 @@
                 --network {{ np_spec.network }}-{{ np_backend_name }}
                 --subnet-range {{ item }}
                 {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ loop.index0 }}
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               loop: "{{ np_spec.prefixes | default([]) }}"
               register: np_subnet_create
               changed_when: true
@@ -174,8 +185,7 @@
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router create
                 --evpn-vni {{ np_vni }} {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               register: np_router_create
               changed_when: true
               failed_when: false
@@ -185,8 +195,7 @@
                 openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
                 {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ item }}
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               loop: "{{ range(0, np_spec.prefixes | default([]) | length) | list }}"
               register: np_router_add_subnet
               changed_when: true
@@ -196,8 +205,7 @@
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr -f value -c id
-              environment:
-                OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
+              environment: "{{ np_os_env }}"
               register: np_router_show
               changed_when: false
               failed_when: false
