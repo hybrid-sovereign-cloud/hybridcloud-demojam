@@ -210,11 +210,14 @@
                     ) | default('', true)
                   }}
 
+            # Look up by name only (existence). Do NOT use `-c id -c evpn_vni`
+            # with `-f value` — multi-column value output order is ambiguous and
+            # previously caused np_neutron_router_id to be set to the VNI.
             - name: Look up existing EVPN router
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
-                -f value -c id -c evpn_vni
+                -f value -c id
               environment: "{{ np_os_env }}"
               register: np_router_existing
               changed_when: false
@@ -250,22 +253,8 @@
                   CLI help is not proof of RHOSO 18.0.21 FR6 server support — fail closed
                   per design/fabric.md §10.3.2.
 
-            - name: Resolve EVPN router id (adopt or create)
+            - name: Show EVPN router JSON (canonical id + VNI)
               when: np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
-              ansible.builtin.set_fact:
-                np_neutron_router_id: >-
-                  {{
-                    (
-                      (np_router_existing.stdout_lines | default([]) | first | default(''))
-                      if (np_router_existing.rc | default(1) | int) == 0
-                      else (np_router_create.stdout | default(''))
-                    ) | trim
-                  }}
-
-            - name: Show EVPN router (verify VNI + id)
-              when:
-                - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
-                - (np_neutron_router_id | default('')) | length > 0
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
@@ -275,12 +264,27 @@
               changed_when: false
               failed_when: false
 
-            - name: Parse router show JSON
+            - name: Parse router show JSON and set router id
               when:
                 - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
                 - (np_router_show_json.rc | default(1) | int) == 0
               ansible.builtin.set_fact:
                 np_router_obj: "{{ np_router_show_json.stdout | from_json }}"
+                np_neutron_router_id: "{{ (np_router_show_json.stdout | from_json).id | default('') | trim }}"
+
+            - name: Fall back to create/show value id when JSON show failed
+              when:
+                - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
+                - (np_neutron_router_id | default('')) | length == 0
+              ansible.builtin.set_fact:
+                np_neutron_router_id: >-
+                  {{
+                    (
+                      (np_router_existing.stdout | default(''))
+                      if (np_router_existing.rc | default(1) | int) == 0
+                      else (np_router_create.stdout | default(''))
+                    ) | trim
+                  }}
 
             - name: Fail closed when adopted router VNI mismatches HybridNetwork VNI
               when:
