@@ -35,6 +35,27 @@ function textToList(val: string): string[] {
     .filter(Boolean);
 }
 
+function namedRefsToText(val: unknown): string {
+  if (Array.isArray(val)) {
+    return val
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'name' in item) {
+          return String((item as { name?: string }).name ?? '');
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+  if (val == null) return '';
+  return String(val);
+}
+
+function textToNamedRefs(val: string): Array<{ name: string }> {
+  return textToList(val).map((name) => ({ name }));
+}
+
 export function GenericSpecEditor({
   kind,
   namespace,
@@ -195,6 +216,23 @@ export function GenericSpecEditor({
                 value={listToText(raw)}
                 isDisabled={field.immutable}
                 onChange={(_e, v) => setField(field, textToList(v))}
+                rows={2}
+              />
+              <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                {help || t('form.commaSeparated')}
+              </p>
+            </FormGroup>
+          );
+        }
+
+        if (field.widget === 'namedRefList') {
+          return (
+            <FormGroup key={field.path} label={label} fieldId={id}>
+              <TextArea
+                id={id}
+                value={namedRefsToText(raw)}
+                isDisabled={field.immutable}
+                onChange={(_e, v) => setField(field, textToNamedRefs(v))}
                 rows={2}
               />
               <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>

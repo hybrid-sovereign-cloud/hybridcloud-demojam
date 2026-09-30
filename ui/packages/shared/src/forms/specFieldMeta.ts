@@ -7,6 +7,7 @@ export type SpecFieldWidget =
   | 'boolean'
   | 'stringList'
   | 'cidrList'
+  | 'namedRefList'
   | 'select'
   | 'json';
 
@@ -214,7 +215,18 @@ export const KIND_SPEC_META: Partial<Record<HybridSovereignKind, KindSpecMeta>> 
   HybridFabric: {
     fields: [
       { path: 'enabled', labelKey: 'fields.enabled', widget: 'boolean' },
-      { path: 'domainAsn', labelKey: 'fields.domainAsn', widget: 'number' },
+      {
+        path: 'domainAsn',
+        labelKey: 'fields.domainAsn',
+        widget: 'number',
+        helpKey: 'fields.domainAsnHelp',
+      },
+      {
+        path: 'entityRefs',
+        labelKey: 'fields.entityRefs',
+        widget: 'namedRefList',
+        helpKey: 'fields.entityRefsHelp',
+      },
       { path: 'vniPool.start', labelKey: 'fields.vniStart', widget: 'number' },
       { path: 'vniPool.end', labelKey: 'fields.vniEnd', widget: 'number' },
       {
@@ -222,11 +234,77 @@ export const KIND_SPEC_META: Partial<Record<HybridSovereignKind, KindSpecMeta>> 
         labelKey: 'fields.defaultTunnelType',
         widget: 'select',
         options: tunnelOptions,
+        helpKey: 'fields.defaultTunnelTypeHelp',
       },
       { path: 'transportDefaults.mtu', labelKey: 'fields.mtu', widget: 'number' },
-      { path: 'transportDefaults.innerMssClamp', labelKey: 'fields.innerMssClamp', widget: 'number' },
-      { path: 'routeReflectors', labelKey: 'fields.routeReflectors', widget: 'json' },
-      { path: 'borderGateway', labelKey: 'fields.borderGateway', widget: 'json' },
+      {
+        path: 'transportDefaults.innerMssClamp',
+        labelKey: 'fields.innerMssClamp',
+        widget: 'number',
+      },
+      {
+        path: 'routeReflectors',
+        labelKey: 'fields.routeReflectors',
+        widget: 'json',
+        helpKey: 'fields.routeReflectorsHelp',
+      },
+      {
+        path: 'ipam.clusterNetworkPool.cidr',
+        labelKey: 'fields.clusterNetworkCidr',
+        widget: 'text',
+        helpKey: 'fields.ipamHelp',
+      },
+      {
+        path: 'ipam.clusterNetworkPool.blockPrefixLength',
+        labelKey: 'fields.clusterNetworkBlockPrefix',
+        widget: 'number',
+      },
+      {
+        path: 'ipam.serviceNetworkPool.cidr',
+        labelKey: 'fields.serviceNetworkCidr',
+        widget: 'text',
+      },
+      {
+        path: 'ipam.serviceNetworkPool.blockPrefixLength',
+        labelKey: 'fields.serviceNetworkBlockPrefix',
+        widget: 'number',
+      },
+      {
+        path: 'ipam.machineNetworkPool.cidr',
+        labelKey: 'fields.machineNetworkCidr',
+        widget: 'text',
+      },
+      {
+        path: 'ipam.machineNetworkPool.blockPrefixLength',
+        labelKey: 'fields.machineNetworkBlockPrefix',
+        widget: 'number',
+      },
+      {
+        path: 'ipam.hybridOverlayReserved',
+        labelKey: 'fields.hybridOverlayReserved',
+        widget: 'cidrList',
+      },
+      {
+        path: 'ipam.denyOverlappingClusterCidrs',
+        labelKey: 'fields.denyOverlappingClusterCidrs',
+        widget: 'boolean',
+      },
+      {
+        path: 'borderGateway.name',
+        labelKey: 'fields.borderGatewayName',
+        widget: 'text',
+        helpKey: 'fields.borderGatewayHelp',
+      },
+      {
+        path: 'borderGateway.loopback',
+        labelKey: 'fields.borderGatewayLoopback',
+        widget: 'text',
+      },
+      {
+        path: 'borderGateway.vaultCredentialRef',
+        labelKey: 'fields.borderGatewayVaultRef',
+        widget: 'text',
+      },
     ],
   },
   CloudGateway: {

@@ -12,6 +12,7 @@ import {
   CardBody,
   FormSelect,
   FormSelectOption,
+  ExpandableSection,
 } from '@patternfly/react-core';
 import { createDashboardResource, createNamespaceSecret, useK8sResourceList } from '../hooks/k8s';
 import { HybridSovereignKind, K8sResource } from '../types';
@@ -26,6 +27,17 @@ import { PlatformOpenshiftSelect, filterFabricCapablePlatformOpenshifts } from '
 import { CloudOSOSelect } from './CloudOSOSelect';
 import { CloudGatewaySelect } from './CloudGatewaySelect';
 import { BackendSelect, buildBackendOptions, type BackendSelectValue } from './BackendSelect';
+import {
+  DEFAULT_FABRIC_DOMAIN_ASN,
+  DEFAULT_FABRIC_IPAM,
+  DEFAULT_FABRIC_ROUTE_REFLECTORS,
+  DEFAULT_FABRIC_TRANSPORT,
+  DEFAULT_FABRIC_VNI,
+  formatRouteReflectors,
+  parseCidrList,
+  parseRouteReflectors,
+  type FabricTunnelType,
+} from '../forms/hybridFabricDefaults';
 
 export type SelfServiceFormType =
   | 'team'
@@ -188,9 +200,9 @@ export function CreateResourceForm({
   const [backendKind, setBackendKind] = useState('');
   const [backendName, setBackendName] = useState('');
   const [prefixes, setPrefixes] = useState('10.50.0.0/24');
-  const [domainAsn, setDomainAsn] = useState('65000');
-  const [vniStart, setVniStart] = useState('50000');
-  const [vniEnd, setVniEnd] = useState('50511');
+  const [domainAsn, setDomainAsn] = useState(String(DEFAULT_FABRIC_DOMAIN_ASN));
+  const [vniStart, setVniStart] = useState(String(DEFAULT_FABRIC_VNI.start));
+  const [vniEnd, setVniEnd] = useState(String(DEFAULT_FABRIC_VNI.end));
   const [fabricRef, setFabricRef] = useState('lab-fabric');
   /** Optional HybridNetwork.spec.fabricRef when Entity has multiple fabrics (§19.6) */
   const [networkFabricRef, setNetworkFabricRef] = useState('');
@@ -233,8 +245,37 @@ export function CreateResourceForm({
   const [rbacViewer, setRbacViewer] = useState<string[]>([]);
   const [networkViewerRbac, setNetworkViewerRbac] = useState<string[]>([]);
   const [personaRbacs, setPersonaRbacs] = useState<string[]>([]);
-  // HybridFabric — entity tagging (§18.3)
+  // HybridFabric — entity tagging (§18.3) + full fabric options with lab defaults
   const [fabricEntityRefs, setFabricEntityRefs] = useState<string[]>([]);
+  const [fabricEnabled, setFabricEnabled] = useState(true);
+  const [fabricAdvancedOpen, setFabricAdvancedOpen] = useState(false);
+  const [fabricTunnelType, setFabricTunnelType] = useState<FabricTunnelType>(
+    DEFAULT_FABRIC_TRANSPORT.defaultTunnelType,
+  );
+  const [fabricMtu, setFabricMtu] = useState(String(DEFAULT_FABRIC_TRANSPORT.mtu));
+  const [fabricMssClamp, setFabricMssClamp] = useState(String(DEFAULT_FABRIC_TRANSPORT.innerMssClamp));
+  const [fabricRrText, setFabricRrText] = useState(formatRouteReflectors(DEFAULT_FABRIC_ROUTE_REFLECTORS));
+  const [fabricClusterCidr, setFabricClusterCidr] = useState(DEFAULT_FABRIC_IPAM.clusterNetworkPool.cidr);
+  const [fabricClusterBlock, setFabricClusterBlock] = useState(
+    String(DEFAULT_FABRIC_IPAM.clusterNetworkPool.blockPrefixLength),
+  );
+  const [fabricServiceCidr, setFabricServiceCidr] = useState(DEFAULT_FABRIC_IPAM.serviceNetworkPool.cidr);
+  const [fabricServiceBlock, setFabricServiceBlock] = useState(
+    String(DEFAULT_FABRIC_IPAM.serviceNetworkPool.blockPrefixLength),
+  );
+  const [fabricMachineCidr, setFabricMachineCidr] = useState(DEFAULT_FABRIC_IPAM.machineNetworkPool.cidr);
+  const [fabricMachineBlock, setFabricMachineBlock] = useState(
+    String(DEFAULT_FABRIC_IPAM.machineNetworkPool.blockPrefixLength),
+  );
+  const [fabricOverlayReserved, setFabricOverlayReserved] = useState(
+    DEFAULT_FABRIC_IPAM.hybridOverlayReserved.join(', '),
+  );
+  const [fabricDenyOverlap, setFabricDenyOverlap] = useState(
+    DEFAULT_FABRIC_IPAM.denyOverlappingClusterCidrs,
+  );
+  const [fabricBgwName, setFabricBgwName] = useState('');
+  const [fabricBgwLoopback, setFabricBgwLoopback] = useState('');
+  const [fabricBgwVaultRef, setFabricBgwVaultRef] = useState('');
   // PlatformOpenshift — fabric attach (§18.4); hidden/ignored when platformType === 'aws'
   const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>('AutoWhenFabricReady');
   const [fabricRefsExplicit, setFabricRefsExplicit] = useState<string[]>([]);
@@ -652,16 +693,54 @@ export function CreateResourceForm({
           prefixes: prefixes.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
           state: 'present',
         };
-      case 'hybridfabric':
+      case 'hybridfabric': {
+        const rrs = parseRouteReflectors(fabricRrText);
+        const overlay = parseCidrList(fabricOverlayReserved);
         return {
-          enabled: true,
-          domainAsn: Number(domainAsn) || 65000,
-          // EntityMultiSelect (§18.3) — tenants that may use this fabric.
+          enabled: fabricEnabled,
+          domainAsn: Number(domainAsn) || DEFAULT_FABRIC_DOMAIN_ASN,
           entityRefs: fabricEntityRefs.map((n) => ({ name: n })),
-          routeReflectors: [{ name: 'rr1', address: '10.0.0.1' }],
-          vniPool: { start: Number(vniStart) || 50000, end: Number(vniEnd) || 50511 },
-          transportDefaults: { mtu: 9000, defaultTunnelType: 'wireguard' },
+          routeReflectors: rrs.length > 0 ? rrs : DEFAULT_FABRIC_ROUTE_REFLECTORS,
+          vniPool: {
+            start: Number(vniStart) || DEFAULT_FABRIC_VNI.start,
+            end: Number(vniEnd) || DEFAULT_FABRIC_VNI.end,
+          },
+          transportDefaults: {
+            mtu: Number(fabricMtu) || DEFAULT_FABRIC_TRANSPORT.mtu,
+            innerMssClamp: Number(fabricMssClamp) || DEFAULT_FABRIC_TRANSPORT.innerMssClamp,
+            defaultTunnelType: fabricTunnelType,
+          },
+          ipam: {
+            clusterNetworkPool: {
+              cidr: fabricClusterCidr || DEFAULT_FABRIC_IPAM.clusterNetworkPool.cidr,
+              blockPrefixLength:
+                Number(fabricClusterBlock) || DEFAULT_FABRIC_IPAM.clusterNetworkPool.blockPrefixLength,
+            },
+            serviceNetworkPool: {
+              cidr: fabricServiceCidr || DEFAULT_FABRIC_IPAM.serviceNetworkPool.cidr,
+              blockPrefixLength:
+                Number(fabricServiceBlock) || DEFAULT_FABRIC_IPAM.serviceNetworkPool.blockPrefixLength,
+            },
+            machineNetworkPool: {
+              cidr: fabricMachineCidr || DEFAULT_FABRIC_IPAM.machineNetworkPool.cidr,
+              blockPrefixLength:
+                Number(fabricMachineBlock) || DEFAULT_FABRIC_IPAM.machineNetworkPool.blockPrefixLength,
+            },
+            hybridOverlayReserved:
+              overlay.length > 0 ? overlay : DEFAULT_FABRIC_IPAM.hybridOverlayReserved,
+            denyOverlappingClusterCidrs: fabricDenyOverlap,
+          },
+          ...(fabricBgwName || fabricBgwLoopback || fabricBgwVaultRef
+            ? {
+                borderGateway: {
+                  ...(fabricBgwName ? { name: fabricBgwName } : {}),
+                  ...(fabricBgwLoopback ? { loopback: fabricBgwLoopback } : {}),
+                  ...(fabricBgwVaultRef ? { vaultCredentialRef: fabricBgwVaultRef } : {}),
+                },
+              }
+            : {}),
         };
+      }
       case 'cloudgateway':
         return {
           enabled: true,
@@ -1417,8 +1496,20 @@ export function CreateResourceForm({
 
               {type === 'hybridfabric' && (
                 <>
+                  <FormGroup label="Enabled" fieldId="hf-enabled">
+                    <Switch
+                      id="hf-enabled"
+                      isChecked={fabricEnabled}
+                      onChange={(_e, v) => setFabricEnabled(v)}
+                      label={fabricEnabled ? 'Enabled' : 'Disabled'}
+                    />
+                  </FormGroup>
                   <FormGroup label="Domain ASN" fieldId="hf-asn" isRequired>
                     <TextInput id="hf-asn" value={domainAsn} onChange={(_e, v) => setDomainAsn(v)} />
+                    <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                      Unique fabric ASN (e.g. Acme 65010, Chad 65020). Hub RR local ASN uses the
+                      lowest ASN among fabrics that share route-reflector IPs.
+                    </p>
                   </FormGroup>
                   <FormGroup label="VNI pool start" fieldId="hf-vni-start">
                     <TextInput id="hf-vni-start" value={vniStart} onChange={(_e, v) => setVniStart(v)} />
@@ -1434,6 +1525,136 @@ export function CreateResourceForm({
                     options={namesWithReady(entities.items)}
                     isRequired
                   />
+                  <ExpandableSection
+                    toggleText={fabricAdvancedOpen ? 'Hide advanced fabric options' : 'Show advanced fabric options'}
+                    onToggle={(_e, isOpen) => setFabricAdvancedOpen(isOpen)}
+                    isExpanded={fabricAdvancedOpen}
+                  >
+                    <FormGroup label="Default tunnel type" fieldId="hf-tunnel">
+                      <FormSelect
+                        id="hf-tunnel"
+                        value={fabricTunnelType}
+                        onChange={(_e, v) => setFabricTunnelType(v as FabricTunnelType)}
+                        aria-label="Default tunnel type"
+                      >
+                        <FormSelectOption value="none" label="None (native EVPN underlay)" />
+                        <FormSelectOption value="wireguard" label="WireGuard" />
+                        <FormSelectOption value="ipsec" label="IPsec" />
+                        <FormSelectOption value="macsec" label="MACsec" />
+                      </FormSelect>
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        Lab default is None — FR6 / OCP EVPN do not require an overlay tunnel.
+                      </p>
+                    </FormGroup>
+                    <FormGroup label="MTU" fieldId="hf-mtu">
+                      <TextInput id="hf-mtu" value={fabricMtu} onChange={(_e, v) => setFabricMtu(v)} />
+                    </FormGroup>
+                    <FormGroup label="Inner MSS clamp" fieldId="hf-mss">
+                      <TextInput
+                        id="hf-mss"
+                        value={fabricMssClamp}
+                        onChange={(_e, v) => setFabricMssClamp(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Route reflectors" fieldId="hf-rr">
+                      <TextArea
+                        id="hf-rr"
+                        value={fabricRrText}
+                        onChange={(_e, v) => setFabricRrText(v)}
+                        rows={3}
+                      />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        One per line as <code>name=address</code>. Defaults deploy managed hub FRR
+                        pods on these IPs.
+                      </p>
+                    </FormGroup>
+                    <FormGroup label="Cluster network pool CIDR" fieldId="hf-cluster-cidr">
+                      <TextInput
+                        id="hf-cluster-cidr"
+                        value={fabricClusterCidr}
+                        onChange={(_e, v) => setFabricClusterCidr(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Cluster block prefix length" fieldId="hf-cluster-block">
+                      <TextInput
+                        id="hf-cluster-block"
+                        value={fabricClusterBlock}
+                        onChange={(_e, v) => setFabricClusterBlock(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Service network pool CIDR" fieldId="hf-svc-cidr">
+                      <TextInput
+                        id="hf-svc-cidr"
+                        value={fabricServiceCidr}
+                        onChange={(_e, v) => setFabricServiceCidr(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Service block prefix length" fieldId="hf-svc-block">
+                      <TextInput
+                        id="hf-svc-block"
+                        value={fabricServiceBlock}
+                        onChange={(_e, v) => setFabricServiceBlock(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Machine network pool CIDR" fieldId="hf-mach-cidr">
+                      <TextInput
+                        id="hf-mach-cidr"
+                        value={fabricMachineCidr}
+                        onChange={(_e, v) => setFabricMachineCidr(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Machine block prefix length" fieldId="hf-mach-block">
+                      <TextInput
+                        id="hf-mach-block"
+                        value={fabricMachineBlock}
+                        onChange={(_e, v) => setFabricMachineBlock(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Hybrid overlay reserved CIDRs" fieldId="hf-overlay">
+                      <TextArea
+                        id="hf-overlay"
+                        value={fabricOverlayReserved}
+                        onChange={(_e, v) => setFabricOverlayReserved(v)}
+                        rows={2}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Deny overlapping cluster CIDRs" fieldId="hf-deny-overlap">
+                      <Switch
+                        id="hf-deny-overlap"
+                        isChecked={fabricDenyOverlap}
+                        onChange={(_e, v) => setFabricDenyOverlap(v)}
+                        label={fabricDenyOverlap ? 'Enabled' : 'Disabled'}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Border gateway name (optional)" fieldId="hf-bgw-name">
+                      <TextInput
+                        id="hf-bgw-name"
+                        value={fabricBgwName}
+                        onChange={(_e, v) => setFabricBgwName(v)}
+                        placeholder="central-bgw-acme"
+                      />
+                    </FormGroup>
+                    <FormGroup label="Border gateway loopback (optional)" fieldId="hf-bgw-lo">
+                      <TextInput
+                        id="hf-bgw-lo"
+                        value={fabricBgwLoopback}
+                        onChange={(_e, v) => setFabricBgwLoopback(v)}
+                        placeholder="10.255.10.10"
+                      />
+                    </FormGroup>
+                    <FormGroup label="Border gateway Vault credential ref (optional)" fieldId="hf-bgw-vault">
+                      <TextInput
+                        id="hf-bgw-vault"
+                        value={fabricBgwVaultRef}
+                        onChange={(_e, v) => setFabricBgwVaultRef(v)}
+                        placeholder="fabric/acme/bgw"
+                      />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        Leave blank unless an external border gateway is configured. Never paste
+                        secrets here — Vault path only.
+                      </p>
+                    </FormGroup>
+                  </ExpandableSection>
                 </>
               )}
 

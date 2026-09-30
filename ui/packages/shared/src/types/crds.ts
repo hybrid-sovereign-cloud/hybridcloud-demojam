@@ -328,6 +328,13 @@ export interface HybridFabricSpec {
     innerMssClamp?: number;
     defaultTunnelType?: 'wireguard' | 'ipsec' | 'macsec' | 'none';
   };
+  ipam?: {
+    clusterNetworkPool?: { cidr?: string; blockPrefixLength?: number };
+    serviceNetworkPool?: { cidr?: string; blockPrefixLength?: number };
+    machineNetworkPool?: { cidr?: string; blockPrefixLength?: number };
+    hybridOverlayReserved?: string[];
+    denyOverlappingClusterCidrs?: boolean;
+  };
 }
 export type HybridFabric = K8sResource<HybridFabricSpec>;
 
