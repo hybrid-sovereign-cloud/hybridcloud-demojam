@@ -296,19 +296,36 @@
                   EVPN router {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr has
                   evpn_vni={{ np_router_obj.evpn_vni }} but HybridNetwork VNI is {{ np_vni }}.
 
+            # Design §10.3.3 step 4: attach with --advertise-host. If the subnet
+            # was previously attached without advertise-host, remove+re-add so
+            # Type-5 host-route advertisement is actually enabled (adopt path).
             - name: Advertise subnet host routes into the EVPN router
               when:
                 - np_backend_fail_reason | default('') == ''
                 - (np_neutron_router_id | default('')) | length > 0
-              ansible.builtin.command: >-
-                openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host
-                {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
-                {{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ item }}
+              ansible.builtin.shell: |
+                set -euo pipefail
+                RTR="{{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr"
+                SUB="{{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ item }}"
+                OUT=$(openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host "$RTR" "$SUB" 2>&1) && {
+                  echo "$OUT"
+                  exit 0
+                }
+                if echo "$OUT" | grep -qi 'already has a port on subnet'; then
+                  openstack --os-cloud {{ np_os_cloud_name }} router remove subnet "$RTR" "$SUB"
+                  openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host "$RTR" "$SUB"
+                  echo "re-attached $SUB on $RTR with --advertise-host"
+                  exit 0
+                fi
+                echo "$OUT" >&2
+                exit 1
               environment: "{{ np_os_env }}"
               loop: "{{ range(0, np_spec.prefixes | default([]) | length) | list }}"
               register: np_router_add_subnet
-              changed_when: (np_router_add_subnet.rc | default(1) | int) == 0
-              failed_when: false
+              changed_when: >-
+                ('re-attached' in (np_router_add_subnet.stdout | default('')))
+                or (np_router_add_subnet.rc | default(1) | int) == 0
+              failed_when: (np_router_add_subnet.rc | default(1) | int) != 0
 
             - name: Set backend-applied facts (FR6 EVPN router Ready)
               when: np_backend_fail_reason | default('') == ''
