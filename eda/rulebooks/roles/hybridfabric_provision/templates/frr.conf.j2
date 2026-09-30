@@ -20,7 +20,6 @@ router bgp {{ hf_rr_local_asn }}
   neighbor SPOKES activate
   neighbor SPOKES soft-reconfiguration inbound
   neighbor SPOKES attribute-unchanged as-path next-hop med
-  neighbor SPOKES route-reflector-client
  exit-address-family
 !
 line vty

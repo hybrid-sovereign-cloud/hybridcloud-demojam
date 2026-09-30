@@ -960,12 +960,12 @@ Backend + prefixes; read-only VNI/RT card from parent network status. Disable ba
 ### 13.2 Success criteria
 
 - [x] Acme: HCP1 CUDN primary IP-VRF `10.110.0.0/24` VNI `51000` TransportAccepted; intra-site pod↔pod PASS (lab 2026-09-30; see **§20**)  
-- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM traceroute via EVPN VRF (**blocked in lab until hub RR `10.255.10.1/2` is reachable**; OSO FR6 `--evpn-vni` router Ready independently)  
+- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM traceroute via EVPN VRF (**lab underlay**: hub RR pods Running on CENTRAL but `10.255.10.1/2` not reachable from HCP VTEPs; OSO FR6 `--evpn-vni` router ACTIVE independently)  
 - [x] Chad: HCP2 / HCP3 each have `chad-app` CUDN VNI `52000` TransportAccepted; intra-site pod↔pod PASS  
-- [ ] Chad: HCP2 ↔ HCP3 cross-site on `chad-app` (requires hub RR / Type-5 reflection)  
+- [ ] Chad: HCP2 ↔ HCP3 cross-site on `chad-app` (hub RR pods Ready; BGP sessions / Type-5 reflection still blocked by underlay)  
 - [x] Negative: Chad HCP2 UDN (`10.120.0.0/24`) cannot ping Acme UDN (`10.110.0.0/24`) — 100% loss  
-- [ ] CENTRAL RR shows Type-2/Type-5 per fabric without cross-import (hub RR not deployed in this lab)  
-- [ ] Tenant UI has no VNI/RT editors; admin UI shows pool utilization; **§18 dropdowns** for entity tagging / fabric attach / BackendSelect (AWS PO excluded)  
+- [ ] CENTRAL RR shows Type-2/Type-5 per fabric without cross-import (**pods Ready**, peers not Established until underlay routes `10.255.10/24`; hub RT export filters still TODO)  
+- [x] Tenant UI has no VNI/RT editors; admin HybridFabric create/edit exposes full fabric options with defaults; **§18 dropdowns** for entity tagging / fabric attach / BackendSelect (AWS PO excluded)  
 - [x] Introducing each CR layer only succeeds when Ansible preflight for that layer passes (CloudGateway / TransportLink / NetworkPlacement Ready on Acme+Chad)  
 - [ ] Workshop [lab-06](../docs/workshop/lab-06-hybrid-fabric.md) exercises Acme + Chad + UI selectors  
 
@@ -1649,9 +1649,9 @@ When placing a HybridNetwork onto a PlatformOpenshift backend, Ansible `validate
 
 - [x] CRD fields on HybridFabric + PlatformOpenshift  
 - [x] IPAM allocate + conflict task; hosted networking wired  
-- [ ] UI: show allocated CIDRs on PlatformOpenshift detail; warn on create if fabric IPAM exhausted  
-- [ ] NetworkPlacement playbook overlap check against `status.networking`  
-- [ ] `platform_fabric_join` refuses Joined phase when `conflictCheck != passed`
+- [x] UI: show allocated CIDRs on PlatformOpenshift detail; warn on create if fabric pool exhausted (VNI signal today; CIDR ledger follow-up)  
+- [x] NetworkPlacement playbook overlap check against `status.networking`  
+- [x] `platform_fabric_join` refuses Joined phase when `conflictCheck != passed`
 
 ### 16.7 Sample PlatformOpenshift (explicit CIDRs)
 
@@ -1862,11 +1862,11 @@ Map to CR on submit (no raw typing of CR names in required fields).
 
 ### 18.11 Acceptance tests (UI)
 
-- [ ] Admin can tag one or more Entities on HybridFabric **only** via EntityMultiSelect (no required free-text entity field).  
-- [ ] PlatformOpenshift create exposes JoinPolicySelect + FabricSelect/MultiSelect for **hosted/openstack**; **AWS hides fabric controls** (§15.0).  
-- [ ] Tenant BackendSelect lists only CloudOSO / CloudVirt / fabric-joined hosted|openstack PlatformOpenshift — never AWS PlatformOpenshift for EVPN placement.  
-- [ ] Identical selector behavior in Console plugins and standalone admin/tenant dashboards (shared package).  
-- [ ] Changing FabricSelect re-filters PlatformOpenshiftSelect / BackendSelect options without page reload.
+- [x] Admin can tag one or more Entities on HybridFabric **only** via EntityMultiSelect (no required free-text entity field).  
+- [x] PlatformOpenshift create exposes JoinPolicySelect + FabricSelect/MultiSelect for **hosted/openstack**; **AWS hides fabric controls** (§15.0).  
+- [x] Tenant BackendSelect lists only CloudOSO / CloudVirt / fabric-joined hosted|openstack PlatformOpenshift — never AWS PlatformOpenshift for EVPN placement.  
+- [x] Identical selector behavior in Console plugins and standalone admin/tenant dashboards (shared package).  
+- [x] Changing FabricSelect re-filters PlatformOpenshiftSelect / BackendSelect options without page reload.
 
 ### 18.12 Summary
 
@@ -2430,27 +2430,27 @@ Optional packet proof (when hub RR + underlay VTEP reachability exist):
 2. From HCP1 UDN pod: `ping` / `traceroute` to `10.110.1.x`  
 3. Confirm path stays inside VNI `51000` / RT `65010:51000`
 
-**LIVE:** Neutron EVPN router Ready with `evpn_vni: 51000` when control plane healthy; HCP1→`10.110.1.1` Type-5 exchange **not verified** in this run (hub RR absent; Galera intermittent). Sovereign `NetworkPlacement/acme-core-oso1` still `backendApplied=true` from AAP FR6 adopt path.
+**LIVE (retest 2026-09-30 ~14:50Z):** Neutron EVPN router ACTIVE `evpn_vni: 51000`; HCP1→`10.110.1.1` still **BLOCKED** (hub RR loopbacks `10.255.10.1/2` not on underlay path from HCP VTEPs — hub nodes `10.10.10.10/11` are reachable, but RR `/32` on `lo` is not). Hub RR Deployments Available; spoke FRR peers stay BGP `Active` (0 msgs) until underlay advertises those RR IPs.
 
 ### 20.8 Act VII — Scoreboard & encore checklist
 
-| Scene | Probe | Result (2026-09-30) |
-|-------|-------|---------------------|
-| I | Fabric / gateway / link / placement Ready | **PASS** |
-| II | CNO FRR + routeAdvertisements + VTEP/RA/CUDN Accepted | **PASS** |
-| III | Acme HCP1 intra UDN ping `10.110.0.0/24` | **PASS** |
-| IV | Chad intra HCP2 / HCP3 | **PASS** |
-| IV | Chad HCP2 ↔ HCP3 cross-site | **BLOCKED** (no hub RR) |
+| Scene | Probe | Result (retest 2026-09-30 14:50Z) |
+|-------|-------|-------------------------------------|
+| I | Fabric / gateway / link / placement Ready | **PASS** (`hubRrReady=true`) |
+| II | CNO FRR + RA + VTEP/CUDN Accepted | **PASS** |
+| III | Acme HCP1 intra UDN | **PASS** (`10.110.0.5↔.7`) |
+| IV | Chad intra HCP2 / HCP3 | **PASS** (`10.120.0.12↔.14`, `10.120.1.77↔.79`) |
+| IV | Chad HCP2 ↔ HCP3 cross-site | **BLOCKED** (underlay → hub RR) |
 | V | Chad ↛ Acme / Acme ↛ Chad | **PASS** |
-| VI | OSO FR6 `--evpn-vni` object | **PASS** (API) |
-| VI | HCP1 ↔ OSO1 traceroute | **BLOCKED** (no hub RR / OSO DB flaps) |
+| VI | OSO FR6 `--evpn-vni` object | **PASS** (ACTIVE) |
+| VI | HCP1 ↔ OSO1 traceroute | **BLOCKED** (underlay → hub RR) |
 
-**Encore (next rehearsal — unblock cross-site)**
+**Encore (unblock cross-site)**
 
-1. HybridFabric reconcile deploys managed hub FRR pods on `spec.routeReflectors[]` (`hostNetwork`, bind address on `lo`) — see §8.1.  
-2. Prove underlay: HCP VTEP IPs (`10.255.11.0/24`, `10.255.21.0/24`, `10.255.22.0/24`) and OSO FRR chassis can reach those RRs (`ping` + `vtysh -c 'show bgp l2vpn evpn'`).  
-3. Re-run Act IV cross-site and Act VI HCP↔OSO traceroute.  
-4. Capture Type-5 on RR: Acme RT `65010:51000` must never import Chad RT `65020:52000`.
+1. ~~Deploy managed hub FRR pods~~ — **done** (`hub-rr-10-255-10-{1,2}` Running).  
+2. **Underlay still missing:** advertise `10.255.10.1/2` on the path HCP VTEPs / OSO chassis use (or change `spec.routeReflectors[]` to underlay-reachable hub node IPs and re-peer). Prove with `ping` + `vtysh -c 'show bgp l2vpn evpn'`.  
+3. Re-run Act IV cross-site and Act VI HCP↔OSO.  
+4. Hub RT export filters so Acme `65010:51000` never imports Chad `65020:52000`.
 
 ### 20.9 Operator’s cheat sheet (commands in show order)
 
