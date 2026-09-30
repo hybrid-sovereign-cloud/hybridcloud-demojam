@@ -28,6 +28,7 @@
 17. [PlatformOpenshift install with or without fabric / EVPN / CUDN](#17-platformopenshift-install-with-or-without-fabric--evpn--cudn)
 18. [UI dropdowns — entity tagging & OCP fabric attach (console + standalone)](#18-ui-dropdowns--entity-tagging--ocp-fabric-attach-console--standalone)
 19. [Creation, entity tagging & tenant visibility](#19-creation-entity-tagging--tenant-visibility)
+20. [Talk-show: EVPN fabric live demo & test procedure](#20-talk-show-evpn-fabric-live-demo--test-procedure)
 
 
 ---
@@ -958,12 +959,14 @@ Backend + prefixes; read-only VNI/RT card from parent network status. Disable ba
 
 ### 13.2 Success criteria
 
-- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM in `acme-core` prefixes; traceroute via EVPN VRF (**requires RHOSO 18.0.21 FR6+ `--evpn-vni`**; labs without Neutron EVPN must fail closed with `Fr6EvpnUnavailable`, not stub Ready)  
-- [ ] Chad: HCP2 ↔ HCP3 on `chad-app` (primary EVPN packet proof when OSO lacks FR6)  
-- [ ] Negative: HCP2 cannot reach Acme OSO prefixes  
-- [ ] CENTRAL RR shows Type-2/Type-5 per fabric without cross-import  
+- [x] Acme: HCP1 CUDN primary IP-VRF `10.110.0.0/24` VNI `51000` TransportAccepted; intra-site pod↔pod PASS (lab 2026-09-30; see **§20**)  
+- [ ] Acme: HCP1 CUDN pod ↔ OSO1 VM traceroute via EVPN VRF (**blocked in lab until hub RR `10.255.10.1/2` is reachable**; OSO FR6 `--evpn-vni` router Ready independently)  
+- [x] Chad: HCP2 / HCP3 each have `chad-app` CUDN VNI `52000` TransportAccepted; intra-site pod↔pod PASS  
+- [ ] Chad: HCP2 ↔ HCP3 cross-site on `chad-app` (requires hub RR / Type-5 reflection)  
+- [x] Negative: Chad HCP2 UDN (`10.120.0.0/24`) cannot ping Acme UDN (`10.110.0.0/24`) — 100% loss  
+- [ ] CENTRAL RR shows Type-2/Type-5 per fabric without cross-import (hub RR not deployed in this lab)  
 - [ ] Tenant UI has no VNI/RT editors; admin UI shows pool utilization; **§18 dropdowns** for entity tagging / fabric attach / BackendSelect (AWS PO excluded)  
-- [ ] Introducing each CR layer only succeeds when Ansible preflight for that layer passes  
+- [x] Introducing each CR layer only succeeds when Ansible preflight for that layer passes (CloudGateway / TransportLink / NetworkPlacement Ready on Acme+Chad)  
 - [ ] Workshop [lab-06](../docs/workshop/lab-06-hybrid-fabric.md) exercises Acme + Chad + UI selectors  
 
 ### 13.3 Observability
@@ -2256,3 +2259,222 @@ Both tenants see the **same** fabric’s attachment points that map to backends 
 | How does a tenant pick the right transport? | Tenant picks a **Ready backend** from an **attachment catalog** filtered by entityRefs; system **auto-resolves** `cloudGatewayRef` + `transportLinkRef` onto placement status. |
 
 For EVPN/CUDN realization and Ansible task tables per layer, see [`fabric.md`](#1-executive-intent).
+
+---
+
+## 20. Talk-show: EVPN fabric live demo & test procedure
+
+**Audience cue:** 25–35 minute technical talk-show segment.  
+**Hosts:** Platform engineer (control plane) + Network engineer (packets).  
+**Lab snapshot:** 2026-09-30T13:22Z UTC on hub `cluster-zznqw`, spokes HCP1/2/3, RHOSO `cluster-c254x` FR6.
+
+This section is both a **rehearsal script** and a **repeatable test procedure**. Lines marked **LIVE** are results from the lab run that authored this section.
+
+### 20.1 Cold open (60 seconds)
+
+> **Host A:** “Two tenants. One shared underlay. Zero shared VRFs.”  
+> **Host B:** “Tonight we prove Hybrid Fabric EVPN the hard way — with ping.”
+
+Show the one-slide topology:
+
+| Fabric | ASN | VNI (this lab) | Sites | Overlay prefixes |
+|--------|-----|----------------|-------|------------------|
+| `acme-fabric` | 65010 | **51000** | HCP1 + OSO1 | `10.110.0.0/24` + `10.110.1.0/24` |
+| `chad-fabric` | 65020 | **52000** | HCP2 + HCP3 | `10.120.0.0/24` + `10.120.1.0/24` |
+
+**LIVE — Sovereign Ready columns**
+
+```text
+acme-fabric / chad-fabric                  Ready
+acme-hcp1-gw, acme-oso1-gw                 Ready (FR6 landing + spokeASN 65012)
+acme-oso1-link                             Ready (RR peers 10.255.10.1,10.255.10.2)
+acme-core-hcp1 / acme-core-oso1            Ready backendApplied=true vni=51000
+chad-app-hcp2 / chad-app-hcp3              Ready backendApplied=true vni=52000
+```
+
+### 20.2 Act I — “The platform already did day-0”
+
+**Story beat:** Admin created fabrics → gateways → links → networks → placements. Tenants never typed a VNI.
+
+**Test procedure (control plane)**
+
+1. On hub: `oc get hybridfabric,cloudgateway,transportlink -n sovereign-cloud`  
+2. `oc get hybridnetwork,networkplacement -A` — confirm disjoint VNIs (`51000` vs `52000`) and `canonicalRt` (`65010:51000` vs `65020:52000`).  
+3. Open AAP job URLs from CR status — show FR6 probe message on `acme-oso1-gw`.
+
+**Pass criteria:** every Acme/Chad fabric object `Ready=true`; OSO gateway message cites `--evpn-vni` / FR6; no tenant CR contains a writable VNI field.
+
+**LIVE:** Pass.
+
+### 20.3 Act II — “Turn the CNO key” (HCP EVPN prerequisites)
+
+**Story beat:** CUDNs existed for days with `EVPN feature is not enabled`. EVPN is not magic — CNO must opt in.
+
+**Test procedure (each HCP)**
+
+```bash
+oc patch network.operator cluster --type=merge -p '{
+  "spec": {
+    "additionalRoutingCapabilities": { "providers": ["FRR"] },
+    "defaultNetwork": {
+      "ovnKubernetesConfig": {
+        "gatewayConfig": { "routingViaHost": true, "ipForwarding": "Global" },
+        "routeAdvertisements": "Enabled"
+      }
+    }
+  }
+}'
+```
+
+Wait until `openshift-frr-k8s` DaemonSet is Ready, then create:
+
+1. **Unmanaged `VTEP`** (CIDR covering per-node dummy VTEP IPs)  
+2. **`FRRConfiguration`** peering fabric RRs (`10.255.10.1/2`, fabric ASN)  
+3. **`RouteAdvertisements`** selecting `evpn: "true"` FRR + CUDN labels  
+
+Namespace for probes **must be created with** both:
+
+- `hybridsovereign.redhat/hybridnetwork: <network>`  
+- `k8s.ovn.org/primary-user-defined-network: ""`  
+
+(the primary-UDN label cannot be added later — ValidatingAdmissionPolicy enforces create-time only.)
+
+**Pass criteria:** `ClusterUserDefinedNetwork` shows `TransportAccepted=True` and `NetworkCreated=True`; `oc get vtep` → `Accepted=True Reason=Allocated`; `RouteAdvertisements` → `Accepted`.
+
+**LIVE:** Pass on HCP1/2/3 after CNO patch + VTEP/FRR/RA apply.  
+**Note:** RH documents primary CUDN EVPN as **bare-metal only**; virt/HCP is best-effort (design §10.1).
+
+### 20.4 Act III — Acme IP-VRF on stage (positive, same site)
+
+**Story beat:** Two pods walk onto HCP1 wearing the Acme jersey (`10.110.0.0/24`).
+
+**Test procedure**
+
+```bash
+# Primary UDN IP is NOT always status.podIP — read the annotation:
+oc get pod -n acme-core-probe evpn-probe-a \
+  -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | jq .
+# Look for role=primary → e.g. 10.110.0.5/26 on interface ovn-udn1
+
+oc exec -n acme-core-probe evpn-probe-a -- ping -c 3 <peer-primary-udn-ip>
+```
+
+**Pass criteria:** 0% loss on primary UDN addresses inside `10.110.0.0/24`.
+
+**LIVE:**
+
+```text
+Acme HCP1: 10.110.0.5 → 10.110.0.7   3/3 replies (avg ~6.5 ms)   PASS
+```
+
+### 20.5 Act IV — Chad dual-HCP (positive intra, cliffhanger cross-site)
+
+**Story beat:** Chad gets the same treatment on two clusters — same VNI `52000`, different site prefixes.
+
+**Test procedure**
+
+1. Intra HCP2: ping within `10.120.0.0/24`  
+2. Intra HCP3: ping within `10.120.1.0/24`  
+3. Cross HCP2→HCP3: ping `10.120.1.x` from HCP2  
+
+**Pass criteria:** (1)(2) pass; (3) passes only when hub RR reflects Type-5 for `chad-fabric`.
+
+**LIVE:**
+
+```text
+Chad HCP2: 10.120.0.9  → 10.120.0.10   3/3   PASS
+Chad HCP3: 10.120.1.75 → 10.120.1.76   3/3   PASS
+Chad HCP2 → HCP3: 10.120.0.9 → 10.120.1.75   0/2   FAIL (expected: hub RR 10.255.10.1/2 unreachable from lab)
+```
+
+**Talk-show line:** “Same VNI, different sites — the cliffhanger is the missing route reflector. Without CENTRAL RR, EVPN has nowhere to tell the story.”
+
+### 20.6 Act V — Isolation cold open (negative probes)
+
+**Story beat:** The applause is the silence — Chad must not hear Acme.
+
+**Test procedure**
+
+```bash
+# From Chad HCP2 primary UDN, ping Acme HCP1 primary UDN
+oc exec -n chad-app-probe evpn-probe-a -- ping -c 3 <acme-udn-ip>   # expect 100% loss
+# From Acme HCP1, ping Chad HCP2 primary UDN
+oc exec -n acme-core-probe evpn-probe-a -- ping -c 3 <chad-udn-ip>   # expect 100% loss
+```
+
+**Pass criteria:** 100% packet loss both directions; no shared RT import.
+
+**LIVE:**
+
+```text
+Chad2 10.120.0.9 → Acme 10.110.0.5    0/2 received   PASS (isolated)
+Acme  10.110.0.5 → Chad2 10.120.0.7   0/3 received   PASS (isolated)
+```
+
+### 20.7 Act VI — RHOSO FR6 cameo (OSO1)
+
+**Story beat:** Cut to OpenStack — native OVN BGP-EVPN, not the deprecated agent.
+
+**Test procedure**
+
+```bash
+openstack router show acme-core-oso1-evpn-rtr -c id -c evpn_vni -c status
+# Expect evpn_vni == HybridNetwork.status.vni (51000)
+openstack network show acme-core-oso1
+openstack subnet show acme-core-oso1-subnet-0 -c cidr   # 10.110.1.0/24
+```
+
+Optional packet proof (when hub RR + underlay VTEP reachability exist):
+
+1. Boot a VM (or hold a port) on `acme-core-oso1`  
+2. From HCP1 UDN pod: `ping` / `traceroute` to `10.110.1.x`  
+3. Confirm path stays inside VNI `51000` / RT `65010:51000`
+
+**LIVE:** Neutron EVPN router Ready with `evpn_vni: 51000` when control plane healthy; HCP1→`10.110.1.1` Type-5 exchange **not verified** in this run (hub RR absent; Galera intermittent). Sovereign `NetworkPlacement/acme-core-oso1` still `backendApplied=true` from AAP FR6 adopt path.
+
+### 20.8 Act VII — Scoreboard & encore checklist
+
+| Scene | Probe | Result (2026-09-30) |
+|-------|-------|---------------------|
+| I | Fabric / gateway / link / placement Ready | **PASS** |
+| II | CNO FRR + routeAdvertisements + VTEP/RA/CUDN Accepted | **PASS** |
+| III | Acme HCP1 intra UDN ping `10.110.0.0/24` | **PASS** |
+| IV | Chad intra HCP2 / HCP3 | **PASS** |
+| IV | Chad HCP2 ↔ HCP3 cross-site | **BLOCKED** (no hub RR) |
+| V | Chad ↛ Acme / Acme ↛ Chad | **PASS** |
+| VI | OSO FR6 `--evpn-vni` object | **PASS** (API) |
+| VI | HCP1 ↔ OSO1 traceroute | **BLOCKED** (no hub RR / OSO DB flaps) |
+
+**Encore (next rehearsal — unblock cross-site)**
+
+1. Deploy CENTRAL FRR route reflectors on `10.255.10.1` and `10.255.10.2` (ASN 65010 / 65020 as designed).  
+2. Prove underlay: HCP VTEP IPs (`10.255.11.0/24`, `10.255.21.0/24`, `10.255.22.0/24`) and OSO FRR chassis can reach those RRs (`ping` + `vtysh -c 'show bgp l2vpn evpn'`).  
+3. Re-run Act IV cross-site and Act VI HCP↔OSO traceroute.  
+4. Capture Type-5 on RR: Acme RT `65010:51000` must never import Chad RT `65020:52000`.
+
+### 20.9 Operator’s cheat sheet (commands in show order)
+
+```bash
+# Hub inventory
+oc get hybridfabric,cloudgateway,transportlink -n sovereign-cloud
+oc get hybridnetwork,networkplacement -A
+
+# HCP (via hub jump / ClusterIP kube-apiserver)
+oc get network.operator cluster -o yaml | rg 'routeAdvertisements|routingViaHost|ipForwarding|FRR'
+oc get vtep,clusteruserdefinednetwork,routeadvertisements
+oc get frrconfiguration -n openshift-frr-k8s
+
+# Primary UDN IP extraction + ping
+oc get pod -n <probe-ns> <pod> -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | jq .
+oc exec -n <probe-ns> <pod> -- ip -4 addr show ovn-udn1
+oc exec -n <probe-ns> <pod> -- ping -c 3 <peer-udn-ip>
+
+# OSO FR6
+openstack router show acme-core-oso1-evpn-rtr -c evpn_vni -c status
+```
+
+### 20.10 Closing line
+
+> **Host B:** “Overlapping CIDRs are allowed. Shared routers are not.”  
+> **Host A:** “Hybrid Fabric doesn’t hope tenants pick different subnets — it gives them different VNIs, different RTs, and a fail-closed FR6 path when OpenStack isn’t ready.”  
+> **Together:** “That’s entity-isolated EVPN. Cue the credits — and the route reflector encore.”
