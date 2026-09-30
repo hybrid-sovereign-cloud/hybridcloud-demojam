@@ -123,13 +123,52 @@
 
     - name: Handle tunnelType none (EVPN/VXLAN adjacency only, no WG/IPsec)
       when: (transportlink_spec.tunnelType | default('none')) == 'none'
-      ansible.builtin.set_fact:
-        tl_tunnel_up: true
-        tl_ready: true
-        tl_border_endpoint: >-
-          {{ tl_fabric.spec.borderGateway.loopback | default(tl_fabric.spec.routeReflectors | default([]) | map(attribute='address') | list | first | default('', true)) }}
-        tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
-        tl_message: "tunnelType=none: EVPN BGP adjacency assumed over existing underlay (lab)."
+      block:
+        - name: Collect fabric route-reflector addresses (design §10.3.2 / §10.3.5)
+          ansible.builtin.set_fact:
+            tl_rr_addrs: >-
+              {{
+                tl_fabric.spec.routeReflectors | default([])
+                | map(attribute='address') | select('string') | list
+              }}
+            tl_spoke_asn: "{{ tl_gateway.spec.domainAsn | default(0) | int }}"
+            tl_fabric_asn: "{{ tl_fabric.spec.domainAsn | default(0) | int }}"
+
+        - name: Fail closed when openstack TransportLink has no fabric RRs
+          when:
+            - (tl_gateway.spec.cloud | default('')) == 'openstack'
+            - (tl_rr_addrs | default([]) | length) == 0
+          ansible.builtin.fail:
+            msg: >-
+              TransportLink {{ transportlink_cr_name }} cloud=openstack requires
+              HybridFabric {{ transportlink_spec.fabricRef }} spec.routeReflectors[]
+              for FRR l2vpn evpn peering (design/fabric.md §10.3.2).
+
+        - name: Fail closed when openstack TransportLink missing spoke ASN
+          when:
+            - (tl_gateway.spec.cloud | default('')) == 'openstack'
+            - (tl_spoke_asn | int) == 0
+          ansible.builtin.fail:
+            msg: >-
+              TransportLink {{ transportlink_cr_name }}: CloudGateway
+              {{ transportlink_spec.cloudGatewayRef }} requires spec.domainAsn
+              for FR6 EVPN spoke ASN (design/fabric.md §10.3.2).
+
+        - name: Set tunnelType=none Ready facts (RR peer intent recorded)
+          ansible.builtin.set_fact:
+            tl_tunnel_up: true
+            tl_ready: true
+            tl_border_endpoint: >-
+              {{
+                tl_fabric.spec.borderGateway.loopback
+                | default(tl_rr_addrs | default([]) | first | default('', true), true)
+              }}
+            tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
+            tl_message: >-
+              tunnelType=none: underlay EVPN adjacency for cloud={{ tl_gateway.spec.cloud | default('unknown') }};
+              spokeASN={{ tl_spoke_asn }} fabricASN={{ tl_fabric_asn }}
+              RR peers={{ tl_rr_addrs | default([]) | join(',') }}
+              (FRR l2vpn evpn toward HybridFabric routeReflectors — design §10.3.5).
 
     - name: Handle tunneled transport (wireguard/ipsec/macsec)
       when: (transportlink_spec.tunnelType | default('none')) != 'none'

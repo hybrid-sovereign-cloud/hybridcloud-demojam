@@ -234,13 +234,43 @@
               (reason=Fr6EvpnUnavailable; landingZoneReady kept false).
           when: not (fr6_probe_available | default(false))
 
-        - name: Set OpenStack landing zone facts (FR6 verified)
+        - name: Require spoke domainAsn for FR6 EVPN landing (design §10.3.2)
+          when: (cloudgateway_spec.domainAsn | default(0) | int) == 0
+          ansible.builtin.fail:
+            msg: >-
+              CloudGateway {{ cloudgateway_cr_name }} cloud=openstack requires
+              spec.domainAsn (spoke ASN) for FR6 OVN BGP-EVPN.
+
+        - name: Collect fabric RR peers for landing readiness
+          ansible.builtin.set_fact:
+            cgw_rr_addrs: >-
+              {{
+                cgw_fabric.spec.routeReflectors | default([])
+                | map(attribute='address') | select('string') | list
+              }}
+
+        - name: Fail closed when fabric has no routeReflectors for OSO landing
+          when: (cgw_rr_addrs | default([]) | length) == 0
+          ansible.builtin.fail:
+            msg: >-
+              CloudGateway {{ cloudgateway_cr_name }}: HybridFabric
+              {{ cloudgateway_spec.fabricRef }} has empty spec.routeReflectors[];
+              cannot peer FRR l2vpn evpn (design/fabric.md §10.3.2).
+
+        - name: Set OpenStack landing zone facts (FR6 verified + RR peer intent)
           ansible.builtin.set_fact:
             cgw_landing_zone_ready: true
             cgw_transport_ready: true
-            cgw_gateway_address: "{{ cgw_cloudoso.status.apiVIP | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default('')) }}"
+            cgw_peer_count: "{{ cgw_rr_addrs | default([]) | length }}"
+            cgw_gateway_address: >-
+              {{
+                cgw_cloudoso.status.apiVIP
+                | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true)
+              }}
             cgw_message: >-
-              OpenStack landing zone verified on CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }}: {{ fr6_probe_message }}
+              OpenStack FR6 landing Ready on CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }}:
+              {{ fr6_probe_message }}; spokeASN={{ cloudgateway_spec.domainAsn }}
+              RR peers={{ cgw_rr_addrs | join(',') }} (native OVN BGP-EVPN Type-5).
 
     # ---------------------------------------------------------------
     # OpenShift: HCP/Virt hosted landing (tunnelType none prep)
