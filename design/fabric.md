@@ -282,10 +282,10 @@ flowchart TB
 | Validate pool | `vniPool.end >= start`; no overlap with other Ready fabrics’ pools (query API) |
 | Validate ASN uniqueness | `domainAsn` not reused by another fabric |
 | Create numbering store | ConfigMap (or CR status ledger) `fabric-numbering-<name>` with bitmap/next-VNI |
-| Program hub RR intent | Render FRR/Nexus config fragments **or** document RR IPs for external ToR (lab may mock Ready when IPs reachable) |
+| Program hub RR | For each `spec.routeReflectors[]` address, apply a **shared** `hostNetwork` FRR Deployment + ConfigMap (`hub-rr-<addr>`) in the fabric namespace (SA `hub-rr` + SCC `hub-rr-hostnetwork`). One BGP instance per RR IP (TCP/179): local ASN = **min** of all `domainAsn` values from HybridFabrics listing that address (lab: `65010` when Acme+Chad share RRs). Speaks must peer that local ASN. `l2vpn evpn` + listen-range + attribute-unchanged for Type-5 reflection. Gate `status.hubRrReady` (and Ready) on Deployment Available — fail closed. Lab underlay still must route VTEPs → RR IPs. |
 | Border gateway | If `borderGateway` set: fetch Vault creds; configure BGW loopback + EVPN toward RR; never write keys to Git |
-| Status | `fabricBaseReady`, `borderBgwReady`, `availableVniCount`, `ready` |
-| Teardown | Only if `allocatedVniCount==0` and no TransportLinks reference fabric; else block |
+| Status | `fabricBaseReady`, `borderBgwReady`, `hubRrReady`, `availableVniCount`, `ready` |
+| Teardown | Only if `allocatedVniCount==0` and no TransportLinks reference fabric; else block. Delete hub RR pods only when **no other** HybridFabric still references that RR address. |
 
 **Idempotency:** re-run must not reallocate VNIs or reset the ledger.
 
@@ -2447,7 +2447,7 @@ Optional packet proof (when hub RR + underlay VTEP reachability exist):
 
 **Encore (next rehearsal — unblock cross-site)**
 
-1. Deploy CENTRAL FRR route reflectors on `10.255.10.1` and `10.255.10.2` (ASN 65010 / 65020 as designed).  
+1. HybridFabric reconcile deploys managed hub FRR pods on `spec.routeReflectors[]` (`hostNetwork`, bind address on `lo`) — see §8.1.  
 2. Prove underlay: HCP VTEP IPs (`10.255.11.0/24`, `10.255.21.0/24`, `10.255.22.0/24`) and OSO FRR chassis can reach those RRs (`ping` + `vtysh -c 'show bgp l2vpn evpn'`).  
 3. Re-run Act IV cross-site and Act VI HCP↔OSO traceroute.  
 4. Capture Type-5 on RR: Acme RT `65010:51000` must never import Chad RT `65020:52000`.

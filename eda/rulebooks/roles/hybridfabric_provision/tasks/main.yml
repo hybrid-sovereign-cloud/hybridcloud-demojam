@@ -198,25 +198,8 @@
         hf_allocated_count: "{{ hf_allocated_map | length }}"
         hf_pool_size: "{{ (hf_pool_end | int) - (hf_pool_start | int) + 1 }}"
 
-    - name: Best-effort route reflector reachability check (never blocks Ready)
-      ansible.builtin.command: "ping -c1 -W1 {{ item.address }}"
-      loop: "{{ hybridfabric_spec.routeReflectors | default([]) }}"
-      loop_control:
-        label: "{{ item.name | default(item.address) }}"
-      register: hf_rr_ping
-      changed_when: false
-      failed_when: false
-
-    - name: Summarize route reflector reachability
-      ansible.builtin.set_fact:
-        hf_rr_unreachable: >-
-          {{
-            hf_rr_ping.results
-            | default([])
-            | rejectattr('rc', 'equalto', 0)
-            | map(attribute='item.name')
-            | list
-          }}
+    - name: Deploy managed hub FRR route reflector pods (hostNetwork)
+      ansible.builtin.include_tasks: deploy_hub_rr.yml
 
     - name: Best-effort border gateway credential check (never blocks Ready)
       when: (hybridfabric_spec.borderGateway.vaultCredentialRef | default('')) | length > 0
@@ -286,11 +269,12 @@
             fabric-numbering-{{ hybridfabric_cr_name }} ledger ok
             (pool {{ hf_pool_start }}-{{ hf_pool_end }}, allocated={{ hf_allocated_count }},
             available={{ hf_pool_size | int - hf_allocated_count | int }}). {{ hf_border_message }}
-            {% if hf_rr_unreachable | length > 0 %}Unreachable route reflectors (non-blocking): {{ hf_rr_unreachable | join(', ') }}.{% endif %}
+            {{ hf_hub_rr_message | default('') }}
           lastReconciledAt: "{{ hybridfabric_status_transition_time }}"
           observedGeneration: "{{ hybridfabric_generation }}"
           fabricBaseReady: true
           borderBgwReady: "{{ hf_border_bgw_ready }}"
+          hubRrReady: "{{ hf_hub_rr_ready | default(false) }}"
           allocatedVniCount: "{{ hf_allocated_count | int }}"
           availableVniCount: "{{ (hf_pool_size | int) - (hf_allocated_count | int) }}"
           ipamReady: "{{ hf_ipam_ready }}"
@@ -299,7 +283,9 @@
               status: "True"
               lastTransitionTime: "{{ hybridfabric_status_transition_time }}"
               reason: EDASucceeded
-              message: "HybridFabric base + numbering ledger provisioned"
+              message: >-
+                HybridFabric base + numbering ledger provisioned;
+                hubRrReady={{ hf_hub_rr_ready | default(false) }}
 
   rescue:
     - name: Mark HybridFabric failed

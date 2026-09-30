@@ -74,6 +74,10 @@
         name: "fabric-numbering-{{ hybridfabric_cr_name }}"
         namespace: "{{ hybridfabric_cr_namespace }}"
 
+    - name: Remove hub RR pods if no other fabric shares the address
+      when: hf_teardown_allocated_count | int == 0
+      ansible.builtin.include_tasks: remove_hub_rr.yml
+
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:

@@ -1,0 +1,41 @@
+---
+# Remove shared hub RR pods only when no remaining HybridFabric references the address.
+
+- name: List HybridFabric CRs in the namespace
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridFabric
+    namespace: "{{ hybridfabric_cr_namespace }}"
+  register: hf_teardown_fabrics
+
+- name: Read deleting HybridFabric for its routeReflectors
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridFabric
+    name: "{{ hybridfabric_cr_name }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"
+  register: hf_teardown_self
+
+- name: Set RR addresses owned by the deleting fabric
+  ansible.builtin.set_fact:
+    hf_teardown_rrs: >-
+      {{
+        (hf_teardown_self.resources | default([{}]))[0].spec.routeReflectors
+        | default([])
+        if hf_teardown_self.resources | default([]) | length > 0
+        else []
+      }}
+
+- name: Delete each hub RR not referenced by another fabric
+  ansible.builtin.include_tasks: remove_one_hub_rr.yml
+  loop: "{{ hf_teardown_rrs }}"
+  loop_control:
+    loop_var: hf_rr_item
+    label: "{{ hf_rr_item.address | default('none') }}"
+  when: hf_teardown_rrs | length > 0

@@ -3156,6 +3156,11 @@ spec:
                   type: boolean
                 borderBgwReady:
                   type: boolean
+                hubRrReady:
+                  type: boolean
+                  description: >-
+                    True when managed hostNetwork FRR hub route-reflector pods for
+                    spec.routeReflectors[] are Available (or none configured).
                 allocatedVniCount:
                   type: integer
                 availableVniCount:

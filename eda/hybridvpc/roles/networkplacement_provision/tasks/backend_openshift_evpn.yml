@@ -139,9 +139,60 @@
           ansible.builtin.set_fact:
             np_frr_neighbors: []
 
+        # Hub RR pods use local ASN = min(domainAsn) across fabrics that share the
+        # same routeReflector address (one BGP instance per IP:179). Spoke neighbor
+        # ASN must match that hub local ASN — not necessarily this fabric's domainAsn.
+        - name: List HybridFabrics for shared hub ASN resolution
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: HybridFabric
+            namespace: "{{ networkplacement_cr_namespace | default(hn_fabric_cr.metadata.namespace) | default('sovereign-cloud') }}"
+          register: np_hub_fabrics_lookup
+          failed_when: false
+
+        - name: Resolve hub RR local ASN for spoke FRR neighbors
+          ansible.builtin.shell: |
+            python3 <<'PY'
+            import json, os
+            fabrics = json.loads(os.environ["FABRICS"])
+            my_addrs = set(json.loads(os.environ["MY_ADDRS"]))
+            asns = set()
+            for fab in fabrics:
+                spec = fab.get("spec") or {}
+                asn = spec.get("domainAsn")
+                rrs = spec.get("routeReflectors") or []
+                if asn is None:
+                    continue
+                addrs = {rr.get("address") for rr in rrs if rr.get("address")}
+                if addrs & my_addrs:
+                    asns.add(int(asn))
+            if not asns:
+                asns.add(int(os.environ.get("FALLBACK_ASN") or "0"))
+            print(min(asns))
+            PY
+          environment:
+            FABRICS: "{{ np_hub_fabrics_lookup.resources | default([hn_fabric_cr]) | to_json }}"
+            MY_ADDRS: "{{ hn_fabric_cr.spec.routeReflectors | default([]) | map(attribute='address') | list | to_json }}"
+            FALLBACK_ASN: "{{ hn_fabric_cr.spec.domainAsn | default(0) | string }}"
+          register: np_hub_asn_cmd
+          changed_when: false
+          failed_when: false
+
+        - name: Set hub local ASN fact
+          ansible.builtin.set_fact:
+            np_hub_rr_asn: >-
+              {{
+                (np_hub_asn_cmd.stdout | trim | int)
+                if (np_hub_asn_cmd.rc | default(1) == 0 and (np_hub_asn_cmd.stdout | trim | length) > 0)
+                else (hn_fabric_cr.spec.domainAsn | default(0) | int)
+              }}
+
         - name: Build FRR neighbor list from fabric route reflectors
           ansible.builtin.set_fact:
-            np_frr_neighbors: "{{ np_frr_neighbors + [{'address': item.address, 'asn': (hn_fabric_cr.spec.domainAsn | default(0) | int)}] }}"
+            np_frr_neighbors: "{{ np_frr_neighbors + [{'address': item.address, 'asn': (np_hub_rr_asn | int)}] }}"
           loop: "{{ hn_fabric_cr.spec.routeReflectors | default([]) }}"
           loop_control:
             label: "{{ item.name | default(item.address) }}"

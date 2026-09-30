@@ -1,1 +1,7 @@
 ---
+# Lab hub RR pods (design/fabric.md §8.1) — hostNetwork FRR reflecting
+# l2vpn evpn for every domainAsn that lists the same routeReflector address.
+hf_hub_rr_image: "quay.io/frrouting/frr:10.2.2"
+hf_hub_rr_namespace: "{{ hybridfabric_cr_namespace }}"
+# Fail HybridFabric Ready when routeReflectors are set but pods are not Available.
+hf_hub_rr_required: true

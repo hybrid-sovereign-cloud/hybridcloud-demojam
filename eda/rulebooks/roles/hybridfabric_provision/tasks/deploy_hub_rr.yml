@@ -1,0 +1,159 @@
+---
+# Deploy shared hostNetwork FRR hub route reflectors for HybridFabric.spec.routeReflectors[].
+# Multiple fabrics that list the same address share one Deployment. One BGP instance per
+# RR IP (TCP/179); local ASN = min(domainAsn) among fabrics that share the address.
+
+- name: Skip hub RR deploy when no routeReflectors configured
+  ansible.builtin.set_fact:
+    hf_hub_rr_ready: true
+    hf_hub_rr_message: "No routeReflectors in spec — hub RR pods not managed."
+  when: (hybridfabric_spec.routeReflectors | default([])) | length == 0
+
+- name: Deploy hub RR pods for each routeReflector
+  when: (hybridfabric_spec.routeReflectors | default([])) | length > 0
+  block:
+    - name: Build asn map (address -> [domainAsn, ...]) from all fabrics in namespace
+      ansible.builtin.shell: |
+        python3 <<'PY'
+        import json, os
+        fabrics = json.loads(os.environ["FABRICS"])
+        targets = set(json.loads(os.environ["TARGET_ADDRS"]))
+        self_asn = int(os.environ["SELF_ASN"])
+        asn_map = {a: set() for a in targets}
+        for fab in fabrics:
+            spec = fab.get("spec") or {}
+            asn = spec.get("domainAsn")
+            rrs = spec.get("routeReflectors") or []
+            if asn is None:
+                continue
+            for rr in rrs:
+                addr = rr.get("address")
+                if addr in asn_map:
+                    asn_map[addr].add(int(asn))
+        for addr in targets:
+            asn_map[addr].add(self_asn)
+        out = {a: sorted(list(v)) for a, v in asn_map.items()}
+        print(json.dumps(out))
+        PY
+      environment:
+        FABRICS: "{{ hf_all_fabrics.resources | default([]) | to_json }}"
+        TARGET_ADDRS: "{{ hybridfabric_spec.routeReflectors | map(attribute='address') | list | to_json }}"
+        SELF_ASN: "{{ hf_domain_asn | string }}"
+      register: hf_rr_asn_map_cmd
+      changed_when: false
+
+    - name: Set asn map fact
+      ansible.builtin.set_fact:
+        hf_rr_asn_map: "{{ hf_rr_asn_map_cmd.stdout | from_json }}"
+
+    - name: Ensure hub-rr ServiceAccount exists
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: hub-rr
+            namespace: "{{ hf_hub_rr_namespace }}"
+            labels:
+              app.kubernetes.io/name: hub-rr
+              hybridsovereign.redhat/hub-rr: "true"
+
+    # OpenShift: privileged SCC required for hostNetwork + binding RR IP on lo.
+    - name: Ensure hub-rr hostNetwork SCC exists
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: security.openshift.io/v1
+          kind: SecurityContextConstraints
+          metadata:
+            name: hub-rr-hostnetwork
+            labels:
+              hybridsovereign.redhat/hub-rr: "true"
+          allowHostDirVolumePlugin: false
+          allowHostIPC: false
+          allowHostNetwork: true
+          allowHostPID: false
+          allowHostPorts: true
+          allowPrivilegeEscalation: true
+          allowPrivilegedContainer: true
+          allowedCapabilities:
+            - NET_ADMIN
+            - NET_RAW
+          defaultAddCapabilities: null
+          fsGroup:
+            type: RunAsAny
+          groups: []
+          priority: 10
+          readOnlyRootFilesystem: false
+          requiredDropCapabilities:
+            - MKNOD
+          runAsUser:
+            type: RunAsAny
+          seLinuxContext:
+            type: RunAsAny
+          supplementalGroups:
+            type: RunAsAny
+          users:
+            - "system:serviceaccount:{{ hf_hub_rr_namespace }}:hub-rr"
+          volumes:
+            - configMap
+            - secret
+            - emptyDir
+            - projected
+            - downwardAPI
+      register: hf_scc_apply
+      failed_when: false
+
+    - name: Apply ConfigMap + Deployment per route reflector
+      ansible.builtin.include_tasks: deploy_one_hub_rr.yml
+      loop: "{{ hybridfabric_spec.routeReflectors }}"
+      loop_control:
+        loop_var: hf_rr_item
+        label: "{{ hf_rr_item.name | default(hf_rr_item.address) }}"
+
+    - name: Wait for hub RR Deployments to become Available
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: apps/v1
+        kind: Deployment
+        name: "hub-rr-{{ item.address | replace('.', '-') }}"
+        namespace: "{{ hf_hub_rr_namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 180
+      loop: "{{ hybridfabric_spec.routeReflectors }}"
+      loop_control:
+        label: "{{ item.name | default(item.address) }}"
+      register: hf_rr_wait
+
+    - name: Mark hub RR ready
+      ansible.builtin.set_fact:
+        hf_hub_rr_ready: true
+        hf_hub_rr_message: >-
+          Managed hub RR pods Available for
+          {{ hybridfabric_spec.routeReflectors | map(attribute='address') | list | join(', ') }}
+          (local ASN = min domainAsn per shared address).
+  rescue:
+    - name: Record hub RR deploy failure
+      ansible.builtin.set_fact:
+        hf_hub_rr_ready: false
+        hybridfabric_fail_reason: HubRrDeployFailed
+        hf_hub_rr_message: "{{ ansible_failed_result.msg | default('hub RR deploy failed') }}"
+
+    - name: Fail closed when hub RR is required
+      ansible.builtin.fail:
+        msg: >-
+          HybridFabric {{ hybridfabric_cr_name }} hub RR deploy failed:
+          {{ hf_hub_rr_message }}
+      when: hf_hub_rr_required | default(true) | bool

@@ -1,0 +1,47 @@
+---
+# Apply one shared hub RR (ConfigMap + hostNetwork Deployment) for hf_rr_item.
+
+- name: Set per-RR facts
+  ansible.builtin.set_fact:
+    hf_rr_name: "{{ hf_rr_item.name | default('rr-' ~ (hf_rr_item.address | replace('.', '-'))) }}"
+    hf_rr_address: "{{ hf_rr_item.address }}"
+    hf_rr_resource_name: "hub-rr-{{ hf_rr_item.address | replace('.', '-') }}"
+    hf_rr_asns: >-
+      {{
+        (hf_rr_asn_map[hf_rr_item.address | string] | default([hf_domain_asn | int]))
+        | map('int') | unique | list | sort
+      }}
+
+- name: Choose single local ASN for this RR IP (BGP listens once on :179)
+  ansible.builtin.set_fact:
+    # Stable across fabrics that share the address: lowest domainAsn wins.
+    # Spoke FRRConfiguration neighbor ASN must match this value (Acme 65010;
+    # Chad lab FRR already peers 65010 on shared RRs).
+    hf_rr_local_asn: "{{ hf_rr_asns | map('int') | min }}"
+
+- name: Fail when RR has no ASNs to serve
+  ansible.builtin.fail:
+    msg: >-
+      Hub RR {{ hf_rr_address }} has empty ASN list; HybridFabric.spec.domainAsn
+      must be set.
+  when: hf_rr_asns | length == 0
+
+- name: Render FRR config text
+  ansible.builtin.set_fact:
+    hf_rr_frr_conf: "{{ lookup('template', 'frr.conf.j2') }}"
+
+- name: Render hub RR manifests
+  ansible.builtin.set_fact:
+    hf_rr_manifest_yaml: "{{ lookup('template', 'hub-rr-pod.yml.j2') }}"
+
+- name: Apply hub RR ConfigMap and Deployment
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    apply: true
+    definition: "{{ item }}"
+  loop: "{{ hf_rr_manifest_yaml | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"

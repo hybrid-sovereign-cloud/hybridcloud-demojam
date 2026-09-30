@@ -1,0 +1,41 @@
+---
+- name: Check whether another fabric still references this RR address
+  ansible.builtin.set_fact:
+    hf_rr_still_referenced: >-
+      {{
+        hf_teardown_fabrics.resources
+        | default([])
+        | rejectattr('metadata.name', 'equalto', hybridfabric_cr_name)
+        | map(attribute='spec')
+        | map(attribute='routeReflectors')
+        | select('defined')
+        | flatten
+        | selectattr('address', 'defined')
+        | selectattr('address', 'equalto', hf_rr_item.address)
+        | list
+        | length > 0
+      }}
+
+- name: Delete hub RR Deployment when unreferenced
+  when: not (hf_rr_still_referenced | bool)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: apps/v1
+    kind: Deployment
+    name: "hub-rr-{{ hf_rr_item.address | replace('.', '-') }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"
+
+- name: Delete hub RR ConfigMap when unreferenced
+  when: not (hf_rr_still_referenced | bool)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: ConfigMap
+    name: "hub-rr-{{ hf_rr_item.address | replace('.', '-') }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"

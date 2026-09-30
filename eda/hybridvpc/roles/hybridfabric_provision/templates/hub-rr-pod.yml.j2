@@ -1,0 +1,168 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ hf_rr_resource_name }}
+  namespace: {{ hf_hub_rr_namespace }}
+  labels:
+    app.kubernetes.io/name: hub-rr
+    app.kubernetes.io/component: evpn-route-reflector
+    hybridsovereign.redhat/hub-rr: "true"
+    hybridsovereign.redhat/rr-name: "{{ hf_rr_name }}"
+    hybridsovereign.redhat/rr-address: "{{ hf_rr_address | replace('.', '-') }}"
+  annotations:
+    hybridsovereign.redhat/rr-address: "{{ hf_rr_address }}"
+    hybridsovereign.redhat/domain-asns: "{{ hf_rr_asns | join(',') }}"
+    hybridsovereign.redhat/last-fabric: "{{ hybridfabric_cr_name }}"
+data:
+  daemons: |
+    bgpd=yes
+    ospfd=no
+    ospf6d=no
+    ripd=no
+    ripngd=no
+    isisd=no
+    pimd=no
+    ldpd=no
+    nhrpd=no
+    eigrpd=no
+    babeld=no
+    sharpd=no
+    pbrd=no
+    bfdd=no
+    fabricd=no
+    vrrpd=no
+    pathd=no
+    vtysh_enable=yes
+    zebra_options="  -A 127.0.0.1 -s 90000000"
+    bgpd_options="   -A 127.0.0.1"
+  frr.conf: {{ hf_rr_frr_conf | tojson }}
+  vtysh.conf: |
+    service integrated-vtysh-config
+  start-rr.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    RR_ADDR="${RR_ADDRESS:?}"
+    ip addr replace "${RR_ADDR}/32" dev lo
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+    # ConfigMap mount is read-only; FRR needs a writable /etc/frr.
+    mkdir -p /etc/frr-run /var/run/frr /var/log/frr
+    cp -a /etc/frr-ro/. /etc/frr-run/
+    rm -rf /etc/frr
+    ln -s /etc/frr-run /etc/frr
+    chown -R frr:frr /etc/frr-run /var/run/frr /var/log/frr 2>/dev/null || true
+    chmod 644 /etc/frr-run/frr.conf /etc/frr-run/daemons /etc/frr-run/vtysh.conf
+    chmod 755 /etc/frr-run/start-rr.sh
+    if [ -x /usr/lib/frr/docker-start ]; then
+      exec /usr/lib/frr/docker-start
+    fi
+    if [ -x /usr/lib/frr/frrinit.sh ]; then
+      /usr/lib/frr/frrinit.sh start
+      exec tail -F /var/log/frr/frr.log /var/log/frr/bgpd.log
+    fi
+    echo "No FRR start script found in image" >&2
+    exit 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ hf_rr_resource_name }}
+  namespace: {{ hf_hub_rr_namespace }}
+  labels:
+    app.kubernetes.io/name: hub-rr
+    app.kubernetes.io/component: evpn-route-reflector
+    hybridsovereign.redhat/hub-rr: "true"
+    hybridsovereign.redhat/rr-name: "{{ hf_rr_name }}"
+    hybridsovereign.redhat/rr-address: "{{ hf_rr_address | replace('.', '-') }}"
+  annotations:
+    hybridsovereign.redhat/rr-address: "{{ hf_rr_address }}"
+    hybridsovereign.redhat/domain-asns: "{{ hf_rr_asns | join(',') }}"
+    hybridsovereign.redhat/last-fabric: "{{ hybridfabric_cr_name }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/hub-rr: "true"
+      hybridsovereign.redhat/rr-address: "{{ hf_rr_address | replace('.', '-') }}"
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hub-rr
+        app.kubernetes.io/component: evpn-route-reflector
+        hybridsovereign.redhat/hub-rr: "true"
+        hybridsovereign.redhat/rr-name: "{{ hf_rr_name }}"
+        hybridsovereign.redhat/rr-address: "{{ hf_rr_address | replace('.', '-') }}"
+      annotations:
+        hybridsovereign.redhat/rr-address: "{{ hf_rr_address }}"
+    spec:
+      serviceAccountName: hub-rr
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    hybridsovereign.redhat/hub-rr: "true"
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: frr
+          image: {{ hf_hub_rr_image }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/etc/frr-ro/start-rr.sh"]
+          env:
+            - name: RR_ADDRESS
+              value: "{{ hf_rr_address }}"
+            - name: RR_ASNS
+              value: "{{ hf_rr_asns | join(',') }}"
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          volumeMounts:
+            - name: frr-config
+              mountPath: /etc/frr-ro
+              readOnly: true
+            - name: frr-run
+              mountPath: /etc/frr-run
+            - name: frr-run-dir
+              mountPath: /var/run/frr
+            - name: frr-log
+              mountPath: /var/log/frr
+          readinessProbe:
+            tcpSocket:
+              port: 179
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 179
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: frr-config
+          configMap:
+            name: {{ hf_rr_resource_name }}
+            defaultMode: 0755
+        - name: frr-run
+          emptyDir: {}
+        - name: frr-run-dir
+          emptyDir: {}
+        - name: frr-log
+          emptyDir: {}
