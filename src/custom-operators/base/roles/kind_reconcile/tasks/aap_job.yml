@@ -48,20 +48,35 @@
     job_is_failed: "{{ aap_job_status in ['failed', 'error', 'canceled', 'missing'] }}"
     tracked_is_teardown: "{{ (teardown_template_name in (aap_job_name | default(''))) | bool }}"
 
-- name: Mark ready when AAP provision job successful (always wins over relaunch)
+# Playbook owns ready/message (PendingPrereq / EvpnPrepPending may exit 0 with ready=false).
+# Only treat AAP success as terminal when the CR is already ready from the playbook.
+- name: Record successful AAP job when playbook already marked CR ready
   when:
     - job_is_success | bool
     - not (is_delete | bool)
+    - (hs_status.ready | default(false) | bool)
   block:
-    - name: Patch ready status
+    - name: Patch aapJob + reinforce ready
       operator_sdk.util.k8s_status:
         api_version: "{{ hs_api_version }}"
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'provisioned', 'ready': true, 'message': 'AAP job successful', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
+        status: "{{ {'phase': (hs_status.phase | default('provisioned')), 'ready': true, 'message': (hs_status.message | default('AAP job successful')), 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
     - name: End after ready
       ansible.builtin.meta: end_play
+
+- name: Keep aapJob successful but allow relaunch when playbook left CR not ready
+  when:
+    - job_is_success | bool
+    - not (is_delete | bool)
+    - not (hs_status.ready | default(false) | bool)
+  operator_sdk.util.k8s_status:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+    status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': hs_generation | int} }}"
 
 - name: On delete — allow finalizer clear only after deletionComplete
   when:
@@ -115,6 +130,10 @@
             (job_is_failed | bool) or
             (aap_job_status == 'none') or
             (hs_force_hourly_retry | default(false) | bool) or
+            (
+              job_is_success | bool and
+              not (hs_status.ready | default(false) | bool)
+            ) or
             (
               job_is_running | bool and
               (job_age_seconds | int) > (job_stale_seconds | int)

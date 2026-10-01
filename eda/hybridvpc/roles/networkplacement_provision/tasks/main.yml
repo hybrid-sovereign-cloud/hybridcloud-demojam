@@ -104,7 +104,11 @@
                 PendingPrereq: HybridNetwork '{{ np_spec.network | default('') }}' does not exist yet or is not allocated.
               lastReconciledAt: "{{ networkplacement_status_transition_time }}"
               observedGeneration: "{{ networkplacement_generation }}"
-        - ansible.builtin.meta: end_host
+        # Fail (not end_host) so AAP marks the job failed and the operator relaunches
+        # once HybridNetwork.allocated becomes true.
+        - ansible.builtin.fail:
+            msg: >-
+              PendingPrereq: HybridNetwork '{{ np_spec.network | default('') }}' does not exist yet or is not allocated.
 
     - name: Set numbering facts from allocated HybridNetwork
       ansible.builtin.set_fact:
@@ -244,7 +248,10 @@
                 {{ np_spec.backend.kind }}/{{ np_backend_name }} on fabric {{ hn_selected_fabric_name }}.
               lastReconciledAt: "{{ networkplacement_status_transition_time }}"
               observedGeneration: "{{ networkplacement_generation }}"
-        - ansible.builtin.meta: end_host
+        - ansible.builtin.fail:
+            msg: >-
+              Blocked: no Ready CloudGateway/TransportLink found for backend
+              {{ np_spec.backend.kind }}/{{ np_backend_name }} on fabric {{ hn_selected_fabric_name }}.
 
     - name: Set prerequisiteReady true + fabricApplied best-effort (design §8.5.4)
       ansible.builtin.set_fact:

@@ -119,25 +119,26 @@
       ansible.builtin.set_fact:
         pfj_fabric_cr: "{{ pfj_ready_fabrics | selectattr('metadata.name', 'equalto', pfj_selected_fabric) | list | first }}"
 
-    # design/fabric.md §16.6 — refuse Joined when fabric IPAM conflictCheck != passed
+    # design/fabric.md §16.6 — refuse Joined when fabric IPAM conflictCheck != passed.
+    # Re-read the live CR: hosted/openstack IPAM patches networking in the same
+    # playbook before this include, so the earlier platformopenshift_cr register
+    # is stale (conflictCheck still empty → permanent Pending).
+    - name: Re-read PlatformOpenshift for networking.conflictCheck gate
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: PlatformOpenshift
+        name: "{{ platformopenshift_cr_name }}"
+        namespace: "{{ platformopenshift_cr_namespace }}"
+      register: pfj_po_live
+      failed_when: false
+
     - name: Read PlatformOpenshift networking status for conflictCheck gate
       ansible.builtin.set_fact:
-        pfj_net_status: >-
-          {{
-            (platformopenshift_cr.resources | default([{}]))[0].status.networking
-            | default({})
-            if (platformopenshift_cr is defined)
-            else {}
-          }}
-        pfj_conflict_check: >-
-          {{
-            (
-              (platformopenshift_cr.resources | default([{}]))[0].status.networking
-              | default({})
-            ).get('conflictCheck', '')
-            if (platformopenshift_cr is defined)
-            else ''
-          }}
+        pfj_net_status: "{{ (pfj_po_live.resources | default([{}]))[0].status.networking | default({}) }}"
+        pfj_conflict_check: "{{ ((pfj_po_live.resources | default([{}]))[0].status.networking | default({})).conflictCheck | default('') }}"
 
     - name: Patch fabricMembership Pending when networking conflictCheck not passed
       when:
@@ -161,7 +162,11 @@
                   message: >-
                     Refusing Joined until PlatformOpenshift.status.networking.conflictCheck=passed
                     (current={{ pfj_conflict_check | default('unset') }}; design §16.6).
-        - ansible.builtin.meta: end_host
+        # Fail so the operator relaunches after IPAM/networking catches up.
+        - ansible.builtin.fail:
+            msg: >-
+              Pending fabric join: networking.conflictCheck={{ pfj_conflict_check | default('unset') }}
+              (need passed) for {{ platformopenshift_cr_namespace }}/{{ platformopenshift_cr_name }}
 
     - name: Compute idempotent gateway/link names (design §15.10)
       ansible.builtin.set_fact:
