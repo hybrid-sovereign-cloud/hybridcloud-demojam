@@ -306,30 +306,47 @@
           register: np_vtep_apply
           ignore_errors: true
 
+        - name: Write FRRConfiguration manifest JSON (integer ASN — avoid Jinja stringification)
+          when: spoke_evpn_prep_ready | default(false) | bool
+          ansible.builtin.copy:
+            dest: "/tmp/np-{{ networkplacement_cr_name }}-frr.json"
+            mode: "0600"
+            content: |
+              {
+                "apiVersion": "frrk8s.metallb.io/v1beta1",
+                "kind": "FRRConfiguration",
+                "metadata": {
+                  "name": {{ (np_spec.network ~ '-evpn') | to_json }},
+                  "namespace": "openshift-frr-k8s",
+                  "labels": {
+                    "evpn": "true",
+                    "hybridsovereign.redhat/fabric": {{ (hn_selected_fabric_name | default('')) | to_json }}
+                  }
+                },
+                "spec": {
+                  "nodeSelector": {},
+                  "raw": {
+                    "priority": 5,
+                    "rawConfig": {{ np_frr_raw_config | to_json }}
+                  },
+                  "bgp": {
+                    "routers": [
+                      {
+                        "asn": {{ np_domain_asn | int }},
+                        "neighbors": {{ np_frr_neighbors | to_json }}
+                      }
+                    ]
+                  }
+                }
+              }
+
         - name: Apply FRRConfiguration on the spoke (BGP neighbors = fabric RRs)
           when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
             validate_certs: false
             state: present
-            definition:
-              apiVersion: frrk8s.metallb.io/v1beta1
-              kind: FRRConfiguration
-              metadata:
-                name: "{{ np_spec.network }}-evpn"
-                namespace: openshift-frr-k8s
-                labels:
-                  evpn: "true"
-                  hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
-              spec:
-                nodeSelector: {}
-                raw:
-                  priority: 5
-                  rawConfig: "{{ np_frr_raw_config }}"
-                bgp:
-                  routers:
-                    - asn: "{{ np_domain_asn | int }}"
-                      neighbors: "{{ np_frr_neighbors }}"
+            src: "/tmp/np-{{ networkplacement_cr_name }}-frr.json"
           register: np_frr_apply
           ignore_errors: true
 
@@ -397,6 +414,7 @@
                 name: "advertise-{{ np_spec.network }}-evpn"
               spec:
                 advertisements: ["PodNetwork"]
+                nodeSelector: {}
                 frrConfigurationSelector:
                   matchLabels:
                     evpn: "true"
