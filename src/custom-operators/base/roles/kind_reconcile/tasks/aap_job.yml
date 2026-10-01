@@ -50,19 +50,20 @@
 
 # Playbook owns ready/message (PendingPrereq / EvpnPrepPending may exit 0 with ready=false).
 # Only treat AAP success as terminal when the CR is already ready from the playbook.
+# Use == true (not bare | bool) so string/bool false from the API never looks ready.
 - name: Record successful AAP job when playbook already marked CR ready
   when:
     - job_is_success | bool
     - not (is_delete | bool)
-    - (hs_status.ready | default(false) | bool)
+    - (hs_status.ready | default(false) | bool) == true
   block:
-    - name: Patch aapJob + reinforce ready
+    - name: Patch aapJob only (preserve playbook ready/message)
       operator_sdk.util.k8s_status:
         api_version: "{{ hs_api_version }}"
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': (hs_status.phase | default('provisioned')), 'ready': true, 'message': (hs_status.message | default('AAP job successful')), 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
+        status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': hs_generation | int} }}"
     - name: End after ready
       ansible.builtin.meta: end_play
 
@@ -70,7 +71,7 @@
   when:
     - job_is_success | bool
     - not (is_delete | bool)
-    - not (hs_status.ready | default(false) | bool)
+    - (hs_status.ready | default(false) | bool) != true
   operator_sdk.util.k8s_status:
     api_version: "{{ hs_api_version }}"
     kind: "{{ hs_kind }}"
