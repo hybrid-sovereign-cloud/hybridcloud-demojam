@@ -118,6 +118,14 @@ spec:
                     nodePoolReplicas:
                       type: integer
                       default: 2
+                    workerCores:
+                      type: integer
+                      description: "KubeVirt worker vCPU count (default 4 for ACM+FRR headroom)"
+                      default: 4
+                    workerMemory:
+                      type: string
+                      description: "KubeVirt worker memory (default 16Gi for ACM policy addons + FRR-k8s)"
+                      default: "16Gi"
                 toolRbac:
                   description: Controls who gets roles on the provisioned OpenShift cluster (Layer 2 RBAC)
                   type: object
