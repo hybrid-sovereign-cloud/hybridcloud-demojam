@@ -4,7 +4,8 @@
   kind: Persona
   role: kind_reconcile
   snakeCaseParameters: false
-  reconcilePeriod: 1h
+  watchAnnotationsChanges: true
+  reconcilePeriod: 120s
   finalizer:
     name: persona.hybridsovereign.redhat/finalizer
     role: kind_reconcile

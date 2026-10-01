@@ -1,0 +1,87 @@
+# Tenant EVPN networks — acme-core on HCP1 only; chad-app on HCP2+HCP3.
+# No CloudOSO / OSO1 placements.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridNetwork
+metadata:
+  name: acme-core
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "60"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  description: Acme core VRF — HCP1 via EVPN IP-VRF (no RHOSO spoke in ZTP)
+  fabricRef: acme-fabric
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: acme-core-hcp1
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "65"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  network: acme-core
+  backend:
+    kind: PlatformOpenshift
+    name: hcp1
+  prefixes:
+    - 10.110.0.0/24
+  state: present
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridNetwork
+metadata:
+  name: chad-app
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "60"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  description: Chad app VRF — HCP2 + HCP3 only
+  fabricRef: chad-fabric
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: chad-app-hcp2
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "65"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  network: chad-app
+  backend:
+    kind: PlatformOpenshift
+    name: hcp2
+  prefixes:
+    - 10.120.0.0/24
+  state: present
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: NetworkPlacement
+metadata:
+  name: chad-app-hcp3
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "65"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  network: chad-app
+  backend:
+    kind: PlatformOpenshift
+    name: hcp3
+  prefixes:
+    - 10.120.1.0/24
+  state: present

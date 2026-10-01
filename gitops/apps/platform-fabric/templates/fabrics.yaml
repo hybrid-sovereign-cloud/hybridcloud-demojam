@@ -1,0 +1,84 @@
+# HybridFabrics — design/fabric.md §3–§6 / §11 (HCP spokes only; no RHOSO/OSO).
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridFabric
+metadata:
+  name: acme-fabric
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  enabled: true
+  domainAsn: 65010
+  entityRefs:
+    - name: acme-corp
+  routeReflectors:
+    - name: central-rr-a
+      address: 10.255.10.1
+    - name: central-rr-b
+      address: 10.255.10.2
+  vniPool:
+    start: 51000
+    end: 51127
+  ipam:
+    clusterNetworkPool:
+      cidr: 10.128.0.0/12
+      blockPrefixLength: 14
+    serviceNetworkPool:
+      cidr: 172.30.0.0/15
+      blockPrefixLength: 16
+    machineNetworkPool:
+      cidr: 192.168.64.0/18
+      blockPrefixLength: 24
+    hybridOverlayReserved:
+      - 10.110.0.0/16
+    denyOverlappingClusterCidrs: true
+  transportDefaults:
+    mtu: 9000
+    innerMssClamp: 1360
+    defaultTunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: HybridFabric
+metadata:
+  name: chad-fabric
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  labels:
+    hybridsovereign.redhat/entity: chad
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  enabled: true
+  domainAsn: 65020
+  entityRefs:
+    - name: chad
+  routeReflectors:
+    - name: central-rr-a
+      address: 10.255.10.1
+    - name: central-rr-b
+      address: 10.255.10.2
+  vniPool:
+    start: 52000
+    end: 52127
+  ipam:
+    clusterNetworkPool:
+      cidr: 10.144.0.0/12
+      blockPrefixLength: 14
+    serviceNetworkPool:
+      cidr: 172.32.0.0/15
+      blockPrefixLength: 16
+    machineNetworkPool:
+      cidr: 192.168.128.0/18
+      blockPrefixLength: 24
+    hybridOverlayReserved:
+      - 10.120.0.0/16
+    denyOverlappingClusterCidrs: true
+  transportDefaults:
+    mtu: 9000
+    defaultTunnelType: none

@@ -65,7 +65,8 @@ data:
       kind: Entity
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: entity.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -89,6 +90,8 @@ spec:
       hybridsovereign.redhat/operator-kind: Entity
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: Entity
         hybridsovereign.redhat/gitops-owned: "true"

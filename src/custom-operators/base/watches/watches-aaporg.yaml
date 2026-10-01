@@ -3,8 +3,9 @@
   group: hybridsovereign.redhat
   kind: AAPOrg
   role: kind_reconcile
-  reconcilePeriod: 1h
+  reconcilePeriod: 120s
   snakeCaseParameters: false
+  watchAnnotationsChanges: true
   finalizer:
     name: aaporg.hybridsovereign.redhat/finalizer
     role: kind_reconcile

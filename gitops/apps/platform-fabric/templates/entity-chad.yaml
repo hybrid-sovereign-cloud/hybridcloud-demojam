@@ -1,0 +1,85 @@
+# Chad tenant — dual-HCP fabric isolation (design/fabric.md §6). Always-on ZTP.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    hybridsovereign.redhat/entity: chad
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Entity
+metadata:
+  name: chad
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  description: >-
+    Chad — ZTP tenant for HCP2 ↔ HCP3 EVPN fabric isolation (no RHOSO).
+  billingID: CHAD-2026-001
+  websiteLink: https://chad.example.com
+  namespaceRbac:
+    entityAdmin:
+      - chad-platform-admins
+    auditor:
+      - chad-viewers
+    platformOpenshiftAdmin:
+      - chad-platform-admins
+    platformOpenshiftView:
+      - chad-viewers
+---
+{{- $ns := "entity-chad" }}
+{{- $cfg := "keycloak-sovereign-tenants-services" }}
+{{- $rbacs := list
+  (dict "name" "chad-platform-admins" "desc" "Chad platform administrators")
+  (dict "name" "chad-viewers" "desc" "Chad read-only observers")
+  (dict "name" "chad-infra-team" "desc" "Chad infrastructure engineers")
+}}
+{{- range $rbacs }}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Rbac
+metadata:
+  name: {{ .name }}
+  namespace: {{ $ns }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  config: {{ $cfg }}
+  description: {{ .desc | quote }}
+{{- end }}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudVirt
+metadata:
+  name: local-virt
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/local-cluster: "true"
+spec:
+  vaultPath: virt/accounts/local
+  baseDomain: cnv.local
+  storageClass: ocs-external-storagecluster-ceph-rbd
+  enableVRF: false
+  toolRbac:
+    environmentAdminRbac:
+      - chad-platform-admins
+    environmentPoweruserRbac:
+      - chad-infra-team
+    environmentViewerRbac:
+      - chad-viewers

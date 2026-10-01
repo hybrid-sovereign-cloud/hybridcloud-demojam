@@ -38,7 +38,8 @@ data:
       kind: RbacConfig
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: rbacconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -61,6 +62,8 @@ spec:
       hybridsovereign.redhat/operator-kind: RbacConfig
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: RbacConfig
         hybridsovereign.redhat/gitops-owned: "true"
@@ -151,7 +154,8 @@ data:
       kind: AAPConfig
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: aapconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -174,6 +178,8 @@ spec:
       hybridsovereign.redhat/operator-kind: AAPConfig
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: AAPConfig
         hybridsovereign.redhat/gitops-owned: "true"
@@ -264,7 +270,8 @@ data:
       kind: QuayConfig
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: quayconfig.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -287,6 +294,8 @@ spec:
       hybridsovereign.redhat/operator-kind: QuayConfig
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: QuayConfig
         hybridsovereign.redhat/gitops-owned: "true"
@@ -377,7 +386,8 @@ data:
       kind: HybridFabric
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: hybridfabric.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -400,6 +410,8 @@ spec:
       hybridsovereign.redhat/operator-kind: HybridFabric
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: HybridFabric
         hybridsovereign.redhat/gitops-owned: "true"
@@ -490,7 +502,8 @@ data:
       kind: CloudGateway
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: cloudgateway.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -513,6 +526,8 @@ spec:
       hybridsovereign.redhat/operator-kind: CloudGateway
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: CloudGateway
         hybridsovereign.redhat/gitops-owned: "true"
@@ -603,7 +618,8 @@ data:
       kind: TransportLink
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: transportlink.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -626,6 +642,8 @@ spec:
       hybridsovereign.redhat/operator-kind: TransportLink
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: TransportLink
         hybridsovereign.redhat/gitops-owned: "true"
@@ -716,7 +734,8 @@ data:
       kind: UIHealthChecker
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: uihealthchecker.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -739,6 +758,8 @@ spec:
       hybridsovereign.redhat/operator-kind: UIHealthChecker
   template:
     metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: UIHealthChecker
         hybridsovereign.redhat/gitops-owned: "true"

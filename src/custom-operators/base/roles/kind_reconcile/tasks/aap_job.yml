@@ -196,13 +196,13 @@
             name: "{{ hs_name }}"
             namespace: "{{ hs_namespace }}"
             status: "{{ {'phase': 'pending', 'message': 'JobTemplate ' ~ ((is_delete | bool) | ternary(teardown_template_name, job_template_name)) ~ ' not found in AAP', 'observedGeneration': hs_generation | int} }}"
-        - name: End on missing provision JT
-          ansible.builtin.meta: end_play
-          when: not (is_delete | bool)
-        - name: Keep finalizer when teardown JT missing
+        # Fail (do not end_play) so ansible-operator requeues with backoff instead of
+        # waiting a full reconcilePeriod after ZTP JT-seed races.
+        - name: Requeue until JobTemplate exists
           ansible.builtin.fail:
-            msg: "JobTemplate {{ teardown_template_name }} not found in AAP"
-          when: is_delete | bool
+            msg: >-
+              JobTemplate {{ (is_delete | bool) | ternary(teardown_template_name, job_template_name) }}
+              not found in AAP; will retry
 
     - name: Build event note from live CR spec
       ansible.builtin.set_fact:

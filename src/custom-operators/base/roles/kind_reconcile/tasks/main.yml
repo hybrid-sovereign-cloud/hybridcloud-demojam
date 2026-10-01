@@ -81,8 +81,8 @@
       )
 
 # Periodic retry for non-ready / failed CRs (watches reconcilePeriod also requeues).
-# If lastReconciledAt is older than 1h (or missing) and not ready, force AAP path below.
-- name: Detect stale failure / pending needing hourly retry
+# If lastReconciledAt is older than reconcile window (or missing) and not ready, force AAP path.
+- name: Detect stale failure / pending needing periodic retry
   ansible.builtin.set_fact:
     hs_status_failed: >-
       {{
@@ -91,26 +91,28 @@
         or (cur_phase | string | lower) in ['pending', 'failed', 'error']
       }}
     hs_last_reconciled: "{{ hs_status.lastReconciledAt | default('') | string }}"
+    # Match watches reconcilePeriod (120s); keep a small floor for clock skew.
+    hs_retry_after_seconds: 120
 
-- name: Compute hours since lastReconciledAt
+- name: Compute seconds since lastReconciledAt
   when: hs_last_reconciled | length > 0
   ansible.builtin.set_fact:
-    hs_hours_since_reconcile: "{{ ((now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%S.%fZ')).strftime('%s') | int) / 3600 }}"
+    hs_seconds_since_reconcile: "{{ (now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%S.%fZ')).strftime('%s') | int }}"
   ignore_errors: true
 
 - name: Fallback datetime without micros
-  when: hs_last_reconciled | length > 0 and (hs_hours_since_reconcile is not defined)
+  when: hs_last_reconciled | length > 0 and (hs_seconds_since_reconcile is not defined)
   ansible.builtin.set_fact:
-    hs_hours_since_reconcile: "{{ ((now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%SZ')).strftime('%s') | int) / 3600 }}"
+    hs_seconds_since_reconcile: "{{ (now(utc=true, fmt='%s') | int) - (hs_last_reconciled | to_datetime('%Y-%m-%dT%H:%M:%SZ')).strftime('%s') | int }}"
   ignore_errors: true
 
-- name: Flag hourly retry when failed/pending and stale or never reconciled
+- name: Flag periodic retry when failed/pending and stale or never reconciled
   ansible.builtin.set_fact:
     hs_force_hourly_retry: >-
       {{
         (hs_status_failed | bool) and (
           (hs_last_reconciled | length == 0) or
-          ((hs_hours_since_reconcile | default(999) | float) >= 1.0)
+          ((hs_seconds_since_reconcile | default(999999) | int) >= (hs_retry_after_seconds | int))
         )
       }}
 
@@ -136,7 +138,7 @@
   ansible.builtin.include_tasks: aap_job.yml
   when: lookup('env', 'AAP_TOKEN') | length > 0 or lookup('env', 'AAP_PASSWORD') | length > 0
 
-- name: End when AAP credentials missing (status note only once)
+- name: End when AAP credentials missing (requeue until secret exists)
   when: lookup('env', 'AAP_TOKEN') | length == 0 and lookup('env', 'AAP_PASSWORD') | length == 0
   block:
     - name: Patch waiting-for-aap status
@@ -147,7 +149,6 @@
         namespace: "{{ hs_namespace }}"
         status: "{{ {'phase': 'pending', 'message': 'Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)', 'observedGeneration': hs_generation | int} }}"
       when: cur_phase != 'pending'
-    - name: Keep finalizer while AAP credentials missing on delete
+    - name: Requeue until AAP credentials are available
       ansible.builtin.fail:
-        msg: Waiting for AAP credentials to run teardown
-      when: is_delete | bool
+        msg: Waiting for AAP credentials (AAP_TOKEN or AAP_PASSWORD env)

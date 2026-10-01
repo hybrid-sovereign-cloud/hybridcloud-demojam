@@ -1,5 +1,6 @@
 # Acme + Chad Hybrid Fabric lab manifests (design/fabric.md §11).
-# Apply after CloudVirt Ready. Secrets must NOT be committed — create CloudOSO secret separately.
+# Canonical ZTP path: gitops/apps/platform-fabric (Argo hs-platform-fabric).
+# ZTP omits RHOSO/OSO1 — this sample file also has no CloudOSO gateway/link.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
@@ -118,24 +119,6 @@ spec:
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
 metadata:
-  name: acme-oso1-gw
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
-spec:
-  enabled: true
-  cloud: openstack
-  region: regionOne
-  domainAsn: 65012
-  fabricRef: acme-fabric
-  transport:
-    type: none
-  openstackCloudOSORef: oso1
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
   name: chad-hcp2-gw
   namespace: sovereign-cloud
   labels:
@@ -182,17 +165,6 @@ spec:
   enabled: true
   fabricRef: acme-fabric
   cloudGatewayRef: acme-hcp1-gw
-  tunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: acme-oso1-link
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  fabricRef: acme-fabric
-  cloudGatewayRef: acme-oso1-gw
   tunnelType: none
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1

@@ -1,0 +1,97 @@
+# Hosted Control Planes — design/fabric.md §3 (all three HCPs in ZTP).
+# No type=openstack / CloudOSO. Shared CNV underlay via per-entity CloudVirt/local-virt.
+# nodePoolReplicas=1 keeps workshop footprint workable on compact hubs.
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp1
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/fabric: acme-fabric
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 1
+  networking:
+    allocateFromFabric: true
+    fabricRef: acme-fabric
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - acme-fabric
+    # Gateways/links are owned by this chart (EVPN zoning); do not double-create.
+    manageGatewayAndLink: false
+    tunnelType: none
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterViewerRbac:
+      - acme-viewers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp2
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/fabric: chad-fabric
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 1
+  networking:
+    allocateFromFabric: true
+    fabricRef: chad-fabric
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - chad-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  toolRbac:
+    clusterAdminRbac:
+      - chad-platform-admins
+    clusterViewerRbac:
+      - chad-viewers
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: hcp3
+  namespace: entity-chad
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/fabric: chad-fabric
+spec:
+  type: hosted
+  hosted:
+    environment: local-virt
+    nodePoolReplicas: 1
+  networking:
+    allocateFromFabric: true
+    fabricRef: chad-fabric
+  fabric:
+    joinPolicy: ExplicitOnly
+    fabricRefs:
+      - chad-fabric
+    manageGatewayAndLink: false
+    tunnelType: none
+  toolRbac:
+    clusterAdminRbac:
+      - chad-platform-admins
+    clusterViewerRbac:
+      - chad-viewers

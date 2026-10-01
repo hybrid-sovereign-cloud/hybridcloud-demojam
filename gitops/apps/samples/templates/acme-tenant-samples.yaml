@@ -79,5 +79,5 @@ metadata:
 spec:
   rbac: acme-viewers
   type: auditor
-# HybridFabric / CloudGateway / TransportLink samples moved to
-# samples/hybridvpc/acme-chad-fabric.yaml (Acme + Chad EVPN lab). Do not recreate lab-fabric/aws stubs.
+# HybridFabric / HCP / EVPN zoning is always-on ZTP via hs-platform-fabric
+# (gitops/apps/platform-fabric) — HCP1–3 only, no RHOSO/CloudOSO.

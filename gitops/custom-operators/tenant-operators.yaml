@@ -39,7 +39,8 @@ data:
       kind: Rbac
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: rbac.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -151,7 +152,8 @@ data:
       kind: Team
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: team.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -263,7 +265,8 @@ data:
       kind: Project
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: project.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -375,7 +378,8 @@ data:
       kind: Persona
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: persona.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -487,7 +491,8 @@ data:
       kind: Assignment
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: assignment.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -599,7 +604,8 @@ data:
       kind: Vault
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: vault.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -711,7 +717,8 @@ data:
       kind: VaultKV
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: vaultkv.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -823,7 +830,8 @@ data:
       kind: AAPOrg
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: aaporg.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -847,7 +855,7 @@ spec:
   template:
     metadata:
       annotations:
-        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: AAPOrg
         hybridsovereign.redhat/gitops-owned: "true"
@@ -938,7 +946,8 @@ data:
       role: kind_reconcile
       # Requeue failed/stuck CRs without relying on annotate-only reconcileNow
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: quayorg.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -962,7 +971,7 @@ spec:
   template:
     metadata:
       annotations:
-        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: QuayOrg
         hybridsovereign.redhat/gitops-owned: "true"
@@ -1052,7 +1061,8 @@ data:
       kind: HybridNetwork
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: hybridnetwork.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1164,7 +1174,8 @@ data:
       kind: NetworkPlacement
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: networkplacement.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1276,7 +1287,8 @@ data:
       kind: CloudOSO
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: cloudoso.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1388,7 +1400,8 @@ data:
       kind: CloudAWS
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: cloudaws.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1500,7 +1513,8 @@ data:
       kind: CloudVirt
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: cloudvirt.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1524,7 +1538,7 @@ spec:
   template:
     metadata:
       annotations:
-        hybridsovereign.redhat/watches-epoch: "20260924-ztp-quayvirt-1"
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
       labels:
         hybridsovereign.redhat/operator-kind: CloudVirt
         hybridsovereign.redhat/gitops-owned: "true"
@@ -1614,7 +1628,8 @@ data:
       kind: PlatformOpenshift
       role: kind_reconcile
       snakeCaseParameters: false
-      reconcilePeriod: 1h
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
       finalizer:
         name: platformopenshift.hybridsovereign.redhat/finalizer
         role: kind_reconcile
@@ -1640,7 +1655,7 @@ spec:
       labels:
         hybridsovereign.redhat/operator-kind: PlatformOpenshift
       annotations:
-        hybridsovereign.redhat/watches-epoch: "20260924-ztp-virt-aci-1"
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
         hybridsovereign.redhat/gitops-owned: "true"
     spec:
       serviceAccountName: hybridsovereign-platformopenshift-operator

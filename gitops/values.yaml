@@ -38,6 +38,8 @@ provision:
   operators: true
   platformConfigs: true  # ZTP prereq — RbacConfig / AAPConfig / QuayConfig (default on)
   platformSmoke: true    # always-on ACME Entity + local CloudVirt + dummy tool CRs
+  # Hybrid Fabric ZTP (design/fabric.md): fabrics + HCP1–3 + EVPN zoning; no RHOSO/CloudOSO
+  platformFabric: true
   ui: true
   samples: true  # seed workshop sample CRs once (no selfHeal — UI deletes stay deleted)
   aapConfig: true  # JobTemplates / org config only (not AAP instance)
