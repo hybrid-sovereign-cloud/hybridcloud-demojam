@@ -419,6 +419,13 @@
               reason: "{{ 'EDASucceeded' if (np_backend_ready | default(false)) else (networkplacement_fail_reason | default('BackendNotReady')) }}"
               message: "{{ np_backend_message | default('') }}"
 
+    - name: Fail so operator relaunches when EVPN backend not Ready (EvpnPrepPending)
+      when: not (np_backend_ready | default(false) | bool)
+      ansible.builtin.fail:
+        msg: >-
+          NetworkPlacement {{ networkplacement_cr_name }} not Ready:
+          {{ np_backend_message | default(networkplacement_fail_reason | default('BackendNotReady')) }}
+
   rescue:
     - name: Mark NetworkPlacement failed
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"

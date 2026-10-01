@@ -54,8 +54,9 @@
         | default(virt_cloud_cr.resources[0].spec.baseDomain | default(''))
       }}
     hc_node_replicas: "{{ (platform_spec['hosted'] | default({}))['nodePoolReplicas'] | default(2) }}"
-    hc_worker_cores: 2
-    hc_worker_memory: "8Gi"
+    # 8Gi cannot schedule ACM policy addons + FRR-k8s on a single worker (lab OOM).
+    hc_worker_cores: "{{ (platform_spec['hosted'] | default({}))['workerCores'] | default(4) }}"
+    hc_worker_memory: "{{ (platform_spec['hosted'] | default({}))['workerMemory'] | default('16Gi') }}"
     hc_pull_secret_name: "pullsecret-cluster-{{ platformopenshift_cr_name }}"
     hc_etcd_storage_class: >-
       {{
@@ -393,7 +394,8 @@
             | combine({
                 'hybridsovereign.redhat/sso': 'enabled',
                 'hybridsovereign.redhat/platformopenshift': platformopenshift_cr_name,
-                'hybridsovereign.redhat/platform-type': 'hosted'
+                'hybridsovereign.redhat/platform-type': 'hosted',
+                'hybridsovereign.redhat/evpn': 'true'
               })
           }}
   failed_when: false

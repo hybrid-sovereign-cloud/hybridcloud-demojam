@@ -132,10 +132,23 @@
         np_backend_fail_reason: EvpnPrepPending
         np_backend_message: "EvpnPrepPending: no readable spoke kubeconfig for {{ np_backend_name }}."
 
-    - name: Realize CUDN/FRR/RA on the spoke when kubeconfig file exists
+    - name: Realize CUDN/FRR/VTEP/RA on the spoke when kubeconfig file exists
       when: np_spoke_kube_stat.stat.exists | default(false)
       block:
+        # design §10.1 / §20.3 — CNO must opt in before FRR/RA/VTEP CRDs exist
+        - name: Run spoke EvpnPrep (CNO FRR + routeAdvertisements)
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/spoke_evpn_prep.yml"
+
+        - name: Defer placement when EvpnPrep not ready
+          when: not (spoke_evpn_prep_ready | default(false) | bool)
+          ansible.builtin.set_fact:
+            np_backend_applied: false
+            np_backend_ready: false
+            np_backend_fail_reason: EvpnPrepPending
+            np_backend_message: "{{ spoke_evpn_prep_message | default('EvpnPrepPending') }}"
+
         - name: Reset FRR neighbor accumulator
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.set_fact:
             np_frr_neighbors: []
 
@@ -143,6 +156,7 @@
         # same routeReflector address (one BGP instance per IP:179). Spoke neighbor
         # ASN must match that hub local ASN — not necessarily this fabric's domainAsn.
         - name: List HybridFabrics for shared hub ASN resolution
+          when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s_info:
             host: "{{ services_api_host }}"
             api_key: "{{ services_bearer_token }}"
@@ -154,6 +168,7 @@
           failed_when: false
 
         - name: Resolve hub RR local ASN for spoke FRR neighbors
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.shell: |
             python3 <<'PY'
             import json, os
@@ -182,6 +197,7 @@
           failed_when: false
 
         - name: Set hub local ASN fact
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.set_fact:
             np_hub_rr_asn: >-
               {{
@@ -191,17 +207,53 @@
               }}
 
         - name: Build FRR neighbor list from fabric route reflectors
+          when: spoke_evpn_prep_ready | default(false) | bool
+          # Do NOT set ebgpMultiHop on the CRD field: OVN-generated FRRConfigurations
+          # copy neighbors without that field and the MetalLB merge webhook rejects the conflict.
+          # Inject ebgp-multihop via rawConfig instead (see Apply FRRConfiguration below).
           ansible.builtin.set_fact:
-            np_frr_neighbors: "{{ np_frr_neighbors + [{'address': item.address, 'asn': (np_hub_rr_asn | int)}] }}"
+            np_frr_neighbors: >-
+              {{
+                np_frr_neighbors + [{
+                  'address': item.address,
+                  'asn': (np_hub_rr_asn | int),
+                  'disableMP': false,
+                  'toAdvertise': {'allowed': {'mode': 'all'}},
+                  'toReceive': {'allowed': {'mode': 'all'}}
+                }]
+              }}
           loop: "{{ hn_fabric_cr.spec.routeReflectors | default([]) }}"
           loop_control:
             label: "{{ item.name | default(item.address) }}"
 
+        - name: Build spoke FRR rawConfig for ebgp-multihop + allowas-in
+          when: spoke_evpn_prep_ready | default(false) | bool
+          # remote-as MUST precede ebgp-multihop/allowas-in when rawConfig is merged
+          # before the CRD neighbor block (FRR: "Specify remote-as ... first").
+          ansible.builtin.set_fact:
+            np_frr_raw_config: |
+              router bgp {{ np_domain_asn | int }}
+              {% for n in np_frr_neighbors %}
+               neighbor {{ n.address }} remote-as {{ n.asn | int }}
+               neighbor {{ n.address }} ebgp-multihop 32
+               address-family l2vpn evpn
+                neighbor {{ n.address }} activate
+                neighbor {{ n.address }} allowas-in 1
+               exit-address-family
+               address-family ipv4 unicast
+                neighbor {{ n.address }} activate
+                neighbor {{ n.address }} allowas-in 1
+               exit-address-family
+              {% endfor %}
+              exit
+
         - name: Reset CUDN subnet accumulator
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.set_fact:
             np_cudn_subnets: []
 
         - name: Build CUDN subnet list from placement prefixes
+          when: spoke_evpn_prep_ready | default(false) | bool
           # hostSubnet must be MORE specific than cidr (OCP CUDN validation).
           # For a /24 placement prefix use /26 node slices; never equal masks.
           ansible.builtin.set_fact:
@@ -216,7 +268,46 @@
               }}
           loop: "{{ np_spec.prefixes | default([]) }}"
 
+        - name: Resolve Unmanaged VTEP CIDR (fabric overlay or machineNetwork)
+          when: spoke_evpn_prep_ready | default(false) | bool
+          ansible.builtin.set_fact:
+            np_vtep_name: "{{ np_spec.network }}-evpn-vtep"
+            np_vtep_cidr: >-
+              {{
+                hn_fabric_cr.spec.vtepCidr
+                | default(
+                    (
+                      (np_po_lookup.resources | default([{}]))[0].status.networking.machineNetwork
+                      | default(['10.255.11.0/24'])
+                      | first
+                    ),
+                    true
+                  )
+              }}
+
+        - name: Apply Unmanaged VTEP on the spoke (design §8.5.2 / OCP 4.22)
+          when: spoke_evpn_prep_ready | default(false) | bool
+          kubernetes.core.k8s:
+            kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: k8s.ovn.org/v1
+              kind: VTEP
+              metadata:
+                name: "{{ np_vtep_name }}"
+                labels:
+                  hybridsovereign.redhat/network: "{{ np_spec.network }}"
+                  hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
+              spec:
+                mode: Unmanaged
+                cidrs:
+                  - "{{ np_vtep_cidr }}"
+          register: np_vtep_apply
+          ignore_errors: true
+
         - name: Apply FRRConfiguration on the spoke (BGP neighbors = fabric RRs)
+          when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
             validate_certs: false
@@ -232,6 +323,9 @@
                   hybridsovereign.redhat/fabric: "{{ hn_selected_fabric_name | default('') }}"
               spec:
                 nodeSelector: {}
+                raw:
+                  priority: 5
+                  rawConfig: "{{ np_frr_raw_config }}"
                 bgp:
                   routers:
                     - asn: "{{ np_domain_asn | int }}"
@@ -240,6 +334,7 @@
           ignore_errors: true
 
         - name: Write CUDN manifest JSON (integer VNI — avoid Jinja stringification)
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.copy:
             dest: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
             mode: "0600"
@@ -269,7 +364,7 @@
                     },
                     "transport": "EVPN",
                     "evpn": {
-                      "vtep": {{ (np_spec.network ~ '-evpn-vtep') | to_json }},
+                      "vtep": {{ np_vtep_name | to_json }},
                       "ipVRF": {
                         "vni": {{ np_vni | int }},
                         "routeTarget": {{ np_canonical_rt | to_json }}
@@ -280,6 +375,7 @@
               }
 
         - name: Apply ClusterUserDefinedNetwork on the spoke (transport EVPN)
+          when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
             validate_certs: false
@@ -289,6 +385,7 @@
           ignore_errors: true
 
         - name: Apply RouteAdvertisements on the spoke
+          when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"
             validate_certs: false
@@ -312,36 +409,46 @@
           register: np_ra_apply
           ignore_errors: true
 
-        - name: Set backend-applied facts (CUDN required; FRR/RA optional when CRDs absent)
+        - name: Set backend-applied facts (CUDN+FRR+VTEP+RA required for full EVPN ZTP)
+          when: spoke_evpn_prep_ready | default(false) | bool
           ansible.builtin.set_fact:
-            np_backend_applied: "{{ not (np_cudn_apply is failed) }}"
-            np_backend_ready: "{{ not (np_cudn_apply is failed) }}"
+            np_backend_applied: >-
+              {{
+                not (np_cudn_apply is failed)
+                and not (np_frr_apply is failed)
+                and not (np_vtep_apply is failed)
+                and not (np_ra_apply is failed)
+              }}
+            np_backend_ready: >-
+              {{
+                not (np_cudn_apply is failed)
+                and not (np_frr_apply is failed)
+                and not (np_vtep_apply is failed)
+                and not (np_ra_apply is failed)
+              }}
             np_backend_fail_reason: >-
               {{
                 ''
-                if not (np_cudn_apply is failed)
-                else 'BackendApplyFailed'
+                if (
+                  not (np_cudn_apply is failed)
+                  and not (np_frr_apply is failed)
+                  and not (np_vtep_apply is failed)
+                  and not (np_ra_apply is failed)
+                )
+                else (
+                  'EvpnPrepPending'
+                  if ((np_frr_apply is failed) or (np_vtep_apply is failed) or (np_ra_apply is failed))
+                  else 'BackendApplyFailed'
+                )
               }}
             np_backend_message: >-
               {{
-                (
-                  'CUDN applied on spoke for HybridNetwork '
-                  ~ np_spec.network
-                  ~ ' (vni=' ~ (np_vni | string) ~ ', rt=' ~ np_canonical_rt ~ ').'
-                  ~ (
-                    ' FRRConfiguration skipped/unavailable: '
-                    ~ (np_frr_apply.msg | default('ok'))
-                    if (np_frr_apply is failed) else ' FRRConfiguration applied.'
-                  )
-                  ~ (
-                    ' RouteAdvertisements skipped/unavailable: '
-                    ~ (np_ra_apply.msg | default('ok'))
-                    if (np_ra_apply is failed) else ' RouteAdvertisements applied.'
-                  )
-                )
-                if not (np_cudn_apply is failed)
-                else (
-                  'CUDN apply failed on spoke: '
-                  ~ (np_cudn_apply.msg | default('unknown error'))
-                )
+                'EVPN applied on spoke for HybridNetwork '
+                ~ np_spec.network
+                ~ ' (vni=' ~ (np_vni | string) ~ ', rt=' ~ np_canonical_rt
+                ~ ', vtep=' ~ np_vtep_name ~ '/' ~ np_vtep_cidr ~ ').'
+                ~ (' FRRConfiguration applied.' if not (np_frr_apply is failed) else (' FRRConfiguration failed: ' ~ (np_frr_apply.msg | default('err'))))
+                ~ (' VTEP applied.' if not (np_vtep_apply is failed) else (' VTEP failed: ' ~ (np_vtep_apply.msg | default('err'))))
+                ~ (' RouteAdvertisements applied.' if not (np_ra_apply is failed) else (' RouteAdvertisements failed: ' ~ (np_ra_apply.msg | default('err'))))
+                ~ (' CUDN applied.' if not (np_cudn_apply is failed) else (' CUDN failed: ' ~ (np_cudn_apply.msg | default('err'))))
               }}

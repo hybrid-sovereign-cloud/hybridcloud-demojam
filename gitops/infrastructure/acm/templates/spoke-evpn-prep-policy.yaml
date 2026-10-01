@@ -1,0 +1,92 @@
+---
+# ZTP ACM Policy — EvpnPrep on Hosted (HCP) ManagedClusters (design/fabric.md §10.1 / §20.3).
+# Patches Network.operator to enable FRR-k8s + RouteAdvertisements so
+# NetworkPlacement can apply FRRConfiguration / VTEP / RA / CUDN.
+#
+# Requires ACM config-policy-controller Available on the spoke (HCP workers
+# need enough memory — PlatformOpenshift hosted.workerMemory >= 16Gi).
+# Ansible spoke_evpn_prep.yml is the belt-and-suspenders path when ACM
+# addons are still scheduling.
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: hs-spoke-evpn-prep
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: hybridsovereign.redhat/platformopenshift
+              operator: Exists
+            - key: hybridsovereign.redhat/platform-type
+              operator: In
+              values: ["hosted"]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: hs-spoke-evpn-prep
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "31"
+placementRef:
+  name: hs-spoke-evpn-prep
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: hs-spoke-evpn-prep
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: hs-spoke-evpn-prep
+  namespace: open-cluster-management
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "32"
+    policy.open-cluster-management.io/standards: "NIST SP 800-53"
+    policy.open-cluster-management.io/categories: "SC System and Communications Protection"
+    policy.open-cluster-management.io/controls: "SC-7 Boundary Protection"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: hs-spoke-evpn-cno
+        spec:
+          remediationAction: enforce
+          severity: high
+          pruneObjectBehavior: None
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: Network
+                metadata:
+                  name: cluster
+                spec:
+                  additionalRoutingCapabilities:
+                    providers:
+                      - FRR
+                  defaultNetwork:
+                    ovnKubernetesConfig:
+                      gatewayConfig:
+                        routingViaHost: true
+                        ipForwarding: Global
+                      routeAdvertisements: Enabled

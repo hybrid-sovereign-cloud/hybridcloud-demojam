@@ -1,0 +1,143 @@
+---
+# Spoke EvpnPrep — CNO FRR + routeAdvertisements (design/fabric.md §10.1 / §20.3).
+# Idempotent. Expected vars:
+#   np_spoke_kubeconfig_file  (path to spoke kubeconfig)
+# Optional:
+#   spoke_evpn_prep_timeout_retries (default 40), spoke_evpn_prep_delay (default 15)
+#
+# Sets facts:
+#   spoke_evpn_prep_ready (bool)
+#   spoke_evpn_prep_message (string)
+
+- name: Default EvpnPrep control facts
+  ansible.builtin.set_fact:
+    spoke_evpn_prep_ready: false
+    spoke_evpn_prep_message: ""
+    spoke_evpn_prep_timeout_retries: "{{ spoke_evpn_prep_timeout_retries | default(40) }}"
+    spoke_evpn_prep_delay: "{{ spoke_evpn_prep_delay | default(15) }}"
+
+- name: Fail soft when spoke kubeconfig path missing
+  when: (np_spoke_kubeconfig_file | default('')) | length == 0
+  ansible.builtin.set_fact:
+    spoke_evpn_prep_ready: false
+    spoke_evpn_prep_message: "EvpnPrepPending: spoke kubeconfig path not set"
+
+- name: Patch CNO for FRR + RouteAdvertisements + gatewayConfig (design §10.1)
+  when: (np_spoke_kubeconfig_file | default('')) | length > 0
+  block:
+    - name: Read Network.operator cluster on spoke
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: operator.openshift.io/v1
+        kind: Network
+        name: cluster
+      register: spoke_cno_get
+      failed_when: false
+
+    - name: Merge EvpnPrep fields onto Network.operator
+      when: (spoke_cno_get.resources | default([])) | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        state: present
+        merge_type: merge
+        definition:
+          apiVersion: operator.openshift.io/v1
+          kind: Network
+          metadata:
+            name: cluster
+          spec:
+            additionalRoutingCapabilities:
+              providers:
+                - FRR
+            defaultNetwork:
+              ovnKubernetesConfig:
+                gatewayConfig:
+                  routingViaHost: true
+                  ipForwarding: Global
+                routeAdvertisements: Enabled
+      register: spoke_cno_patch
+
+    - name: Wait for FRRConfiguration CRD (openshift-frr-k8s)
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: frrconfigurations.frrk8s.metallb.io
+      register: spoke_frr_crd
+      until: (spoke_frr_crd.resources | default([])) | length > 0
+      retries: "{{ spoke_evpn_prep_timeout_retries | int }}"
+      delay: "{{ spoke_evpn_prep_delay | int }}"
+      failed_when: false
+
+    - name: Wait for RouteAdvertisements CRD
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: routeadvertisements.k8s.ovn.org
+      register: spoke_ra_crd
+      until: (spoke_ra_crd.resources | default([])) | length > 0
+      retries: "{{ spoke_evpn_prep_timeout_retries | int }}"
+      delay: "{{ spoke_evpn_prep_delay | int }}"
+      failed_when: false
+
+    - name: Wait for VTEP CRD
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: vteps.k8s.ovn.org
+      register: spoke_vtep_crd
+      until: (spoke_vtep_crd.resources | default([])) | length > 0
+      retries: "{{ spoke_evpn_prep_timeout_retries | int }}"
+      delay: "{{ spoke_evpn_prep_delay | int }}"
+      failed_when: false
+
+    - name: Wait for openshift-frr-k8s DaemonSet Ready
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: apps/v1
+        kind: DaemonSet
+        namespace: openshift-frr-k8s
+        label_selectors:
+          - "app=frr-k8s"
+      register: spoke_frr_ds
+      until: >-
+        (spoke_frr_ds.resources | default([]) | length > 0)
+        and (
+          (spoke_frr_ds.resources[0].status.numberReady | default(0) | int)
+          >= (spoke_frr_ds.resources[0].status.desiredNumberScheduled | default(1) | int)
+        )
+      retries: "{{ spoke_evpn_prep_timeout_retries | int }}"
+      delay: "{{ spoke_evpn_prep_delay | int }}"
+      failed_when: false
+
+    - name: Set EvpnPrep result facts
+      ansible.builtin.set_fact:
+        spoke_evpn_prep_ready: >-
+          {{
+            ((spoke_frr_crd.resources | default([])) | length > 0)
+            and ((spoke_ra_crd.resources | default([])) | length > 0)
+            and ((spoke_vtep_crd.resources | default([])) | length > 0)
+          }}
+        spoke_evpn_prep_message: >-
+          {{
+            'EvpnPrep Ready: CNO FRR+RA enabled; FRRConfiguration/RouteAdvertisements/VTEP CRDs present'
+            if (
+              ((spoke_frr_crd.resources | default([])) | length > 0)
+              and ((spoke_ra_crd.resources | default([])) | length > 0)
+              and ((spoke_vtep_crd.resources | default([])) | length > 0)
+            )
+            else (
+              'EvpnPrepPending: waiting for spoke CRDs after CNO patch'
+              ~ ' frrCRD=' ~ (((spoke_frr_crd.resources | default([])) | length > 0) | string)
+              ~ ' raCRD=' ~ (((spoke_ra_crd.resources | default([])) | length > 0) | string)
+              ~ ' vtepCRD=' ~ (((spoke_vtep_crd.resources | default([])) | length > 0) | string)
+            )
+          }}

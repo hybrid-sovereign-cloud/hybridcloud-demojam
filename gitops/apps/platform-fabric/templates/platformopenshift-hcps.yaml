@@ -18,6 +18,9 @@ spec:
   hosted:
     environment: local-virt
     nodePoolReplicas: 1
+    # ACM policy addons + openshift-frr-k8s need headroom on the single worker.
+    workerCores: 4
+    workerMemory: 16Gi
   networking:
     allocateFromFabric: true
     fabricRef: acme-fabric
@@ -50,6 +53,9 @@ spec:
   hosted:
     environment: local-virt
     nodePoolReplicas: 1
+    # ACM policy addons + openshift-frr-k8s need headroom on the single worker.
+    workerCores: 4
+    workerMemory: 16Gi
   networking:
     allocateFromFabric: true
     fabricRef: chad-fabric
@@ -81,6 +87,9 @@ spec:
   hosted:
     environment: local-virt
     nodePoolReplicas: 1
+    # ACM policy addons + openshift-frr-k8s need headroom on the single worker.
+    workerCores: 4
+    workerMemory: 16Gi
   networking:
     allocateFromFabric: true
     fabricRef: chad-fabric
