@@ -1,6 +1,6 @@
 # Hybrid Fabric EVPN — Live Verification Report
 
-**Captured:** 2026-10-02T14:51Z · **WireGuard retest:** 2026-10-02T15:12Z  
+**Captured:** 2026-10-02T14:51Z · **Full-fabric retest:** 2026-10-02T16:22Z  
 **Audience:** Network architects (underlay / overlay / BGP-EVPN control plane)  
 **Lab fabric:** `acme-fabric` (ASN **65010**) — spokes HCP1 (OpenShift hosted) + OSO1 (RHOSO)
 
@@ -8,231 +8,132 @@
 |-------|--------|
 | HCP1 local EVPN (CUDN / VTEP / RA / UDN ping) | **PASS** |
 | HCP1 ↔ hub RR underlay (WireGuard) | **PASS** |
-| HCP1 ↔ hub RR-A BGP + Type-5 reflection | **PASS** |
-| HCP1 ↔ hub RR-B | **FAIL** (RR-B on different node; no WG path yet) |
-| HCP1 ↔ OSO Type-5 / dataplane | **NOT DONE** (OSO WG + BGP still TODO) |
+| HCP1 ↔ hub RR-A + RR-B BGP | **PASS** (both Established) |
+| Hub Type-5 reflection (HCP1 ↔ OSO) | **PASS** |
+| OSO ↔ hub underlay (SSH TUN; WG blocked by UDP NAT) | **PASS** |
+| OSO ↔ hub BGP + Type-5 origin | **PASS** (GoBGP ASN 65010) |
+| VTEP underlay HCP1 `10.255.11.11` ↔ OSO `10.255.12.1` | **PASS** |
+| Overlay cross-ping HCP1 UDN ↔ OSO VM `10.110.1.63` | **FAIL** (OVN programs BGP route; OSO Neutron dataplane not bound to manual VTEP) |
 
 ---
 
 ## 1. Executive summary
 
-WireGuard VTEP underlay was brought up between CENTRAL (`10.10.10.10:51820`) and HCP1 worker. With hub RR pinned to the same node as the WG hub and hub FRR using **iBGP** `remote-as 65010` (OVN-generated spoke FRR is locked to ASN 65010), BGP **Established** and the hub received HCP1’s EVPN Type-5 for `10.110.0.0/26` / RT `65010:51001`.
+Full **EVPN control plane** across both hub route-reflectors and both spokes is up:
 
-OSO remains local-only (Neutron EVPN router + VM). Chad links unchanged (`tunnelType: none`).
+- Hub RR-A (`10.255.10.1`) and RR-B (`10.255.10.2`) each have **Established** sessions to HCP1 (`10.255.11.11`) and OSO (`10.255.12.1`), with **PfxRcd=1 / PfxSnt=2** (reflect both Type-5s).
+- Hub EVPN RIB holds both prefixes: HCP1 `10.110.0.0/26` and OSO `10.110.1.0/24`, RT `65010:51001`.
+- HCP1 FRR learns OSO’s Type-5 via RR; OVN installs `10.110.1.0/24` in the UDN table toward VTEP `10.255.12.1`.
+- VTEP ICMP HCP1↔OSO works once routes use `src` = local VTEP (not WG tunnel IP).
+
+**Overlay dataplane cross-ping still fails:** OSO’s Type-5 is originated by lab GoBGP on the compute host, which is **not** wired into RHOSO OVN/Neutron EVPN forwarding for VM `10.110.1.63`. Closing that gap needs OVN-native BGP-EVPN on the OSO gateway (not a parallel speaker on the compute).
 
 ---
 
 ## 2. Connectivity model (architect view)
 
-### 2.1 Planes
-
 ```
-                    ┌──────────────────────────────────────────────────┐
-                    │ CENTRAL services OCP                               │
-                    │  node control-plane-…-1 (10.10.10.10)             │
-                    │    lo: 10.255.10.1/32   ← hub-rr-A (hostNetwork) │
-                    │    wg0: 10.254.254.1/24 ← fabric-wg-hub :51820/UDP│
-                    │         route 10.255.11.0/24 dev wg0               │
-                    │  node worker-…-2 (10.10.10.31)                     │
-                    │    lo: 10.255.10.2/32   ← hub-rr-B (no WG yet)    │
-                    └────────────────────▲─────────────────────────────┘
-                                         │ WireGuard UDP/51820
-                                         │ AllowedIPs: VTEP↔RR CIDRs
-                    ┌────────────────────┴─────────────────────────────┐
-                    │ HCP1 worker hcp1-workers-… (10.232.0.42)           │
-                    │  evpn-vtep0: 10.255.11.11/32                       │
-                    │  wg0: 10.254.254.11/32 → Endpoint 10.10.10.10:51820│
-                    │       route 10.255.10.0/24 dev wg0                 │
-                    │  FRR ASN 65010, update-source 10.255.11.11         │
-                    │  peers 10.255.10.1 (Established), .2 (Connect)     │
-                    │  CUDN acme-core VNI 51001 RT 65010:51001           │
-                    │  UDN 10.110.0.0/24 (probes .5/.6)                  │
-                    └──────────────────────────────────────────────────┘
+ CENTRAL control-plane-…-1 (10.10.10.10)
+   lo: 10.255.10.1  hub-rr-A
+   wg0: 10.254.254.1 ←→ HCP1 WG
+   tun0: 10.254.253.1 ←→ OSO SSH TUN (oc port-forward + Point-to-Point)
+   routes: 10.255.11.0/24 dev wg0 ; 10.255.12.1 via tun0 ; 10.255.10.2 via 10.10.10.31
+
+ CENTRAL worker-…-2 (10.10.10.31)
+   lo: 10.255.10.2  hub-rr-B
+   host routes back to OSO/HCP1 via 10.10.10.10
+
+ HCP1 worker (10.232.0.42)
+   evpn-vtep0: 10.255.11.11
+   wg0 → 10.10.10.10:51820
+   AllowedIPs: 10.255.10.0/24, 10.255.12.0/24, 10.254.254.0/24
+   FRR ASN 65010 → both RRs Established
+
+ OSO compute01
+   evpn-vtep0: 10.255.12.1
+   tun0: 10.254.253.2 → CENTRAL :2222 (via oc port-forward)
+   GoBGP ASN 65010 → both RRs Established; advertises Type-5 10.110.1.0/24 label 51001
 ```
 
-### 2.2 Address / ASN table
+### Address / ASN table
 
 | Role | Address / ID | Notes |
 |------|----------------|-------|
-| Fabric ASN | 65010 | HybridFabric + hub RR + live HCP1 FRR (OVN-locked) |
-| CloudGateway spoke ASN (spec) | 65011 | Intent; MetalLB merge forces FRR ASN 65010 with OVN RA |
-| Hub RR-A / RR-B | `10.255.10.1`, `10.255.10.2` | `/32` on node `lo`; pin Deployments to owning nodes |
-| HCP1 VTEP | `10.255.11.11` | Unmanaged VTEP CIDR `10.255.11.0/24` |
-| WG hub / spoke | `10.254.254.1/24`, `10.254.254.11/32` | Transport only; EVPN NH stays VTEP |
-| Overlay HCP1 | `10.110.0.0/24` | CUDN Layer3 Primary |
-| Overlay OSO | `10.110.1.0/24` | Neutron; router `evpn_vni=51001` |
+| Fabric ASN | 65010 | Hub RR + HCP1 OVN FRR + OSO GoBGP (lab) |
+| Hub RR-A / RR-B | `10.255.10.1`, `10.255.10.2` | hostNetwork `lo`; RR-B return routes via hub node |
+| HCP1 VTEP | `10.255.11.11` | WG underlay to hub |
+| OSO VTEP | `10.255.12.1` | SSH TUN underlay (WG UDP/51820 fails through NAT) |
+| Overlay HCP1 | `10.110.0.0/26` (UDN probes `.5`/`.6`) | CUDN VNI 51001 |
+| Overlay OSO | `10.110.1.0/24` (VM `.63`) | Neutron `evpn_vni=51001` |
 | VNI / RT | 51001 / `65010:51001` | HybridNetwork `acme-core` |
 
-### 2.3 Why `tunnelType: none` failed
+---
 
-TransportLink Ready with `none` only records RR peer **intent**. HCP1 had a blackhole-ish route `10.255.10.0/24 via 10.232.0.1` (CNV default GW) — ICMP/TCP to RRs never reached hub FRR. WireGuard replaces that path with `dev wg0`.
+## 3. Live pass/fail board (2026-10-02T16:22Z)
 
-### 2.4 WireGuard policy (critical)
+### 3.1 BGP / EVPN (hub RR-A)
 
-| Side | Routes on wg0 | Must NOT route into wg0 |
-|------|----------------|-------------------------|
-| Hub | `10.255.11.0/24` (spoke VTEPs) | `10.255.10.0/24` (own RR loopbacks) |
-| Spoke | `10.255.10.0/24` (hub RRs) | own VTEP / machineNetwork |
+```
+Neighbor        AS   State/PfxRcd  PfxSnt  Desc
+*10.255.11.11 65010  1             2       FRRouting/10.4.3
+*10.255.12.1  65010  1             2       GoBGP/3.29.0
 
-Default playbook `hubRoutes: 10.255.0.0/16` would steal RR loopbacks — **fixed** to `10.255.11.0/24`.
+[5]:[0]:[26]:[10.110.0.0]  NH 10.255.11.11  RT:65010:51001
+[5]:[0]:[24]:[10.110.1.0]  NH 10.255.12.1   RT:65010:51001
+```
 
-### 2.5 BGP mode that works with OVN
+RR-B mirrors the same two neighbors / two Type-5s.
 
-OVN RouteAdvertisements generates `FRRConfiguration` with **ASN 65010** and neighbors ASN 65010. Hub `remote-as external` rejects same-ASN peers → Idle/Notifications.
+### 3.2 Hub FRR config that stays stable
 
-**Fix:** hub RR `neighbor SPOKES remote-as 65010` (iBGP RR + `bgp listen range` + `attribute-unchanged`). Spoke `update-source 10.255.11.11` so the dynamic neighbor is the VTEP IP (EVPN NH).
+`soft-reconfiguration inbound` + heavy `attribute-unchanged` on the dynamic `SPOKES` group **crashed** hub `bgpd` (FRR 10.2.2) under multi-spoke load. Working ConfigMap shape:
+
+```
+router bgp 65010
+ bgp router-id <rr-ip>
+ bgp cluster-id <rr-ip>
+ neighbor SPOKES peer-group
+ neighbor SPOKES remote-as 65010
+ bgp listen range 0.0.0.0/0 peer-group SPOKES
+ address-family l2vpn evpn
+  neighbor SPOKES activate
+  neighbor SPOKES route-reflector-client
+  neighbor SPOKES attribute-unchanged next-hop
+```
+
+Templates updated: `eda/*/roles/hybridfabric_provision/templates/frr.conf.j2`.
+
+### 3.3 Underlay notes
+
+| Path | Mechanism | Result |
+|------|-----------|--------|
+| HCP1 ↔ RR-A/B | WireGuard UDP/51820 | PASS |
+| OSO ↔ RR-A/B | SSH TUN `10.254.253.0/30` over `oc port-forward` to `fabric-ssh-tunnel:2222` | PASS (WG handshake never completes through public NAT) |
+| HCP1 VTEP ↔ OSO VTEP | WG ↔ hub ↔ TUN, routes with `src` = VTEP | PASS (~8–12 ms) |
+| RR-B reachability | Host route `10.255.10.2 via 10.10.10.31` on hub; return routes on worker for `10.255.11/12` | PASS |
+
+### 3.4 Overlay cross-ping
+
+- HCP1 OVN table `1055`: `10.110.1.0/24 … dst 10.255.12.1 … proto bgp` — **programmed**.
+- `ping 10.110.1.63` from UDN pod `10.110.0.15` — **100% loss**.
+- Root cause: OSO advertisement is **lab GoBGP** on compute01; Neutron EVPN router / OVN gateway is not the BGP speaker/VTEP dataplane for that Type-5. Need OVN-native FRR on the RHOSO gateway peered to the hub (same ASN/RT), not a second speaker.
 
 ---
 
-## 3. Live pass/fail board (post-WireGuard)
+## 4. Lab artifacts (not in Git)
 
-### 3.1 Control plane CRs
-
-| Object | Ready | Notes |
-|--------|-------|-------|
-| `hybridfabric/acme-fabric` | true | `hubRrReady=true` |
-| `cloudgateway/acme-hcp1-gw` | true | GitOps → `transport.type: wireguard` |
-| `transportlink/acme-hcp1-link` | true → wireguard | GitOps: `tunnelType: wireguard`, `vaultConfigRef: fabric/wireguard/hub` |
-| `hybridnetwork/acme-core` | true | VNI 51001 |
-| `networkplacement/acme-core-hcp1` | true | Local EVPN applied |
-| `cloudoso/oso1` + `acme-core-oso1` | true | Local Neutron only |
-
-### 3.2 WireGuard
-
-| Check | Result |
-|-------|--------|
-| Vault `hybridsovereign/fabric/wireguard/hub` | Present (keys + peers; never commit) |
-| Hub `fabric-wg-hub` on `control-plane-…-1` | Ready; listen UDP/51820 |
-| Spoke `fabric-wg-hcp1` on HCP1 worker | Ready; handshake up |
-| Ping `10.255.10.1` from spoke via wg0 | **PASS** (~1–2 ms) |
-| TCP/179 to RR-A | **PASS** |
-| TCP/179 to RR-B | **FAIL** (RR-B not on WG hub node) |
-
-### 3.3 BGP / EVPN
-
-| Check | Result | Evidence |
-|-------|--------|----------|
-| Hub RR-A neighbor | **PASS** | `*10.255.11.11` dynamic, Established, PfxRcd=1 |
-| Hub Type-5 | **PASS** | `[5]:[0]:[26]:[10.110.0.0]` NH `10.255.11.11` RT `65010:51001` |
-| HCP1 FRR ↔ 10.255.10.1 | **PASS** | Established; PfxSnt=1 |
-| HCP1 FRR ↔ 10.255.10.2 | **FAIL** | Connect |
-| HCP1 local CUDN / RA / UDN ping | **PASS** | unchanged from prior section |
-
-### 3.4 OSO (unchanged)
-
-| Object | Value |
-|--------|-------|
-| Network | `acme-core-oso1` geneve ACTIVE |
-| Subnet | `10.110.1.0/24` |
-| Router | `evpn_vni=51001` |
-| VM | `acme-core-oso1-evpn-vm` `10.110.1.63` ACTIVE |
+| Item | Location |
+|------|----------|
+| WG / SSH keys | `/tmp/fabric-wg`, `/tmp/fabric-ssh` |
+| Vault | `hybridsovereign/fabric/wireguard/hub` |
+| OSO GoBGP | `/tmp/gobgpd.yml` on compute01 |
+| CENTRAL kubeconfig | `/tmp/fabric-ssh/central.kubeconfig` |
 
 ---
 
-## 4. Command wiring
+## 5. Remaining work
 
-### 4.1 Access
-
-| Target | How |
-|--------|-----|
-| CENTRAL | default `oc` kubeconfig |
-| HCP1 | Jump pod + secret `hcp1-admin-kubeconfig-verify` (API NodePort `10.10.10.10:32323`) |
-| Vault | `oc exec -n vault vault-0` + root token from `vault-init` |
-| OSO | `oso-clouds-oso1` → `clouds.yaml` |
-
-### 4.2 WireGuard status
-
-```bash
-# Hub
-oc -n sovereign-cloud get pods -l app=fabric-wg-hub -o wide
-oc -n sovereign-cloud exec deploy/fabric-wg-hub -- /binaries/wg show
-oc -n sovereign-cloud exec deploy/fabric-wg-hub -- ip route | grep 10.255
-
-# Spoke (inside HCP1 jump)
-oc -n fabric-wg get pods -o wide
-oc -n fabric-wg exec deploy/fabric-wg-hcp1 -- /binaries/wg show
-oc -n fabric-wg exec deploy/fabric-wg-hcp1 -- bash -lc \
-  'ping -c 2 10.255.10.1; timeout 3 bash -c "echo >/dev/tcp/10.255.10.1/179" && echo RR1_OK'
-```
-
-### 4.3 Hub RR + Type-5
-
-```bash
-oc -n sovereign-cloud get pods -o wide | grep hub-rr
-# RR-A MUST be on same node as fabric-wg-hub (owns 10.255.10.1)
-oc -n sovereign-cloud exec deploy/hub-rr-10-255-10-1 -- vtysh -c 'show running-config'
-oc -n sovereign-cloud exec deploy/hub-rr-10-255-10-1 -- vtysh -c 'show bgp l2vpn evpn summary'
-oc -n sovereign-cloud exec deploy/hub-rr-10-255-10-1 -- vtysh -c 'show bgp l2vpn evpn'
-# Expect: neighbor *10.255.11.11 Established, Type-5 10.110.0.0 RT 65010:51001
-```
-
-### 4.4 HCP1 FRR / OVN (jump)
-
-```bash
-export KUBECONFIG=/kube/kubeconfig
-oc get vtep,clusteruserdefinednetwork,routeadvertisements
-oc get frrconfiguration -n openshift-frr-k8s
-FRR=$(oc -n openshift-frr-k8s get pods -l app=frr-k8s -o jsonpath='{.items[0].metadata.name}')
-oc -n openshift-frr-k8s exec "$FRR" -c frr -- vtysh -c 'show bgp l2vpn evpn summary'
-oc -n openshift-frr-k8s exec "$FRR" -c frr -- vtysh -c 'show bgp l2vpn evpn'
-
-# UDN ping (CAP_NET_RAW)
-oc -n acme-core-udn exec evpn-probe-ping -- ping -c 3 -W 2 10.110.0.5
-```
-
-### 4.5 Vault ref (no secrets in Git)
-
-```text
-vaultConfigRef: fabric/wireguard/hub
-mount: hybridsovereign
-fields: hubPrivateKey, hubEndpoint, hubNodeName, hubRoutes, spokeRoutes, peers[]
-```
-
-### 4.6 GitOps intent (platform-fabric)
-
-```yaml
-# TransportLink acme-hcp1-link
-tunnelType: wireguard
-vaultConfigRef: fabric/wireguard/hub
-# CloudGateway acme-hcp1-gw
-transport:
-  type: wireguard
-```
-
----
-
-## 5. What was fixed in this pass
-
-1. **Generated WG keys** → Vault `fabric/wireguard/hub` (not in Git).  
-2. **Hub WG** Deployment in `sovereign-cloud` (hostNetwork, node `control-plane-…-1`, routes `10.255.11.0/24`).  
-3. **Spoke WG** on HCP1 (`fabric-wg` ns), routes `10.255.10.0/24`, removed conflicting `via 10.232.0.1` route.  
-4. **Hub RR iBGP** `remote-as 65010` (template + live ConfigMaps).  
-5. **Pinned** `hub-rr-10-255-10-1` to node owning `10.255.10.1` / WG hub (RR had drifted → TCP/179 refused).  
-6. **Spoke FRR** `update-source 10.255.11.11` so hub dynamic neighbor = VTEP.  
-7. **GitOps** `acme-hcp1-link` / GW → wireguard + vaultConfigRef; playbook hubRoutes default corrected.
-
----
-
-## 6. Remaining gaps
-
-| Gap | Impact | Next step |
-|-----|--------|-----------|
-| RR-B not on WG path | Second RR stays Connect | Second WG hub endpoint, or route `10.255.10.2` via hub cluster to RR-B node |
-| OSO WireGuard + BGP | No HCP1↔OSO EVPN | Peer OSO in Vault `peers[]`, deploy spoke WG, advertise `10.110.1.0/24` |
-| AAP playbook spoke deploy | Hub-only in `deploy_wireguard.yml` v1 | Extend to apply `wg-spoke-deploy.yml.j2` with spoke kubeconfig |
-| ASN 65011 vs 65010 | Spec vs OVN lock | Document as OVN constraint; keep hub iBGP 65010 |
-| RR nodeSelector persistence | Must survive HybridFabric reconcile | Ensure `hf_rr_node_name` / `nodeName` on `routeReflectors[]` |
-
----
-
-## 7. Verdict
-
-**HCP1 → hub RR-A fabric EVPN control plane: PASS** (WireGuard underlay + iBGP + Type-5 on hub).
-
-**Full fabric (both RRs + OSO + cross-ping): NOT complete** — enable RR-B reachability and OSO WG/BGP next.
-
-```bash
-# Golden hub check after any change:
-oc -n sovereign-cloud exec deploy/hub-rr-10-255-10-1 -- vtysh -c 'show bgp l2vpn evpn summary'
-# Expect: *10.255.11.11 … Established … PfxRcd ≥ 1
-```
+1. **OSO OVN-native EVPN** — peer gateway FRR to hub RRs; withdraw compute GoBGP; confirm VNI label + RMAC match OVN expectations.
+2. **Persist** RR-B host routes, SSH TUN, and HCP1 WG `AllowedIPs` (`10.255.12.0/24`) in TransportLink / hub playbooks (today: live lab).
+3. **GitOps** `acme-oso1-link` still `tunnelType: none` — promote SSH-TUN or future WG once NAT path exists.
+4. Re-run UDN → `10.110.1.63` cross-ping after (1).
