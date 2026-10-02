@@ -473,24 +473,29 @@
     cacert = cloud_cfg.get('cacert') or None
     # Prefer cacert only when verify is enabled and a path is set; otherwise honor verify=false.
     verify_arg = cacert if (verify and cacert) else verify
-    try:
-        conn = openstack.connect(
-            auth=auth,
-            region_name=cloud_cfg.get('region_name', 'regionOne'),
-            identity_api_version='3',
-            verify=verify_arg,
-        )
-        cred_name = 'sovereign-{{ ep_project }}'
-        existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
-        if existing:
-            print(json.dumps({'exists': True, 'id': existing[0].id}))
-        else:
-            print(json.dumps({'exists': False}))
-    except Exception as e:
-        # Treat auth/TLS failures as missing so the create path can recreate.
-        print(json.dumps({'exists': False, 'error': str(e)}))
-        sys.exit(0)
-    "
+        try:
+            conn = openstack.connect(
+                auth=auth,
+                region_name=cloud_cfg.get('region_name', 'regionOne'),
+                identity_api_version='3',
+                verify=verify_arg,
+            )
+            cred_name = 'sovereign-{{ ep_project }}'
+            # Keystone rejects ?name= on application_credentials in some RHOSO builds
+            # (InvalidResourceQuery: Invalid query params: name). Filter client-side.
+            existing = [
+                c for c in conn.identity.application_credentials(user=conn.current_user_id)
+                if getattr(c, 'name', None) == cred_name
+            ]
+            if existing:
+                print(json.dumps({'exists': True, 'id': existing[0].id}))
+            else:
+                print(json.dumps({'exists': False}))
+        except Exception as e:
+            # Treat auth/TLS failures as missing so the create path can recreate.
+            print(json.dumps({'exists': False, 'error': str(e)}))
+            sys.exit(0)
+        "
   environment:
     OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
   register: cred_check_raw
@@ -531,7 +536,10 @@
     try:
         conn = openstack.connect(auth=auth, region_name=cloud_cfg.get('region_name','regionOne'), identity_api_version='3', verify=verify_arg)
         cred_name = 'sovereign-{{ ep_project }}'
-        existing = list(conn.identity.application_credentials(user=conn.current_user_id, name=cred_name))
+        existing = [
+            c for c in conn.identity.application_credentials(user=conn.current_user_id)
+            if getattr(c, 'name', None) == cred_name
+        ]
         for old in existing:
             conn.identity.delete_application_credential(conn.current_user_id, old.id)
         c = conn.identity.create_application_credential(
