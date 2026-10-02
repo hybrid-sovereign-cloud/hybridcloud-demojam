@@ -40,18 +40,11 @@
     - name: Probe RHOSO FR6 native OVN BGP-EVPN support
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
 
-    - name: Fail closed when FR6 EVPN cannot be verified (design §5 / §10.3.2)
-      when: not (fr6_probe_available | default(false))
-      ansible.builtin.set_fact:
-        np_backend_applied: false
-        np_backend_ready: false
-        np_backend_fail_reason: Fr6EvpnUnavailable
-        np_backend_message: >-
-          Fr6EvpnUnavailable: {{ fr6_probe_message | default('cannot verify openstack router create --evpn-vni') }}
-          — NetworkPlacement {{ networkplacement_cr_name }} not realized on CloudOSO {{ np_backend_name }}.
-
-    - name: Realize EVPN router when FR6 is verified
-      when: fr6_probe_available | default(false)
+    # Always attempt Neutron network/subnet realization so the tenant project
+    # shows a visible network even when FR6 EVPN is unavailable. EVPN router
+    # create remains gated on fr6_probe_available (and still fail-softs when
+    # Neutron rejects --evpn-vni despite CLI help advertising it).
+    - name: Realize Neutron network (and FR6 EVPN router when available)
       block:
         # Prefer the CloudOSO-provisioned per-project clouds.yaml written to
         # Vault at oso/projects/<name>/clouds-config (app-cred scoped). Fall
@@ -61,6 +54,7 @@
           ansible.builtin.set_fact:
             vault_kv_data: {}
             np_clouds_yaml_source: ""
+            np_backend_fail_reason: ""
 
         - name: Attempt to load per-project clouds.yaml from Vault
           ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
@@ -112,24 +106,34 @@
             np_backend_message: >-
               OpenStack clouds.yaml unavailable for CloudOSO {{ np_backend_name }}
               (tried Vault oso/projects/{{ np_backend_name }}/clouds-config and
-              credentialsSecretRef); FR6 EVPN router create for
+              credentialsSecretRef); Neutron network for
               {{ networkplacement_cr_name }} deferred.
 
         - name: Create Neutron network/subnet/EVPN router when credentials are available
           when: (vault_kv_data['clouds.yaml'] | default('')) | length > 0
           block:
-            - name: Write clouds.yaml for this NetworkPlacement job (lab TLS + region)
+            - name: Write clouds.yaml for this NetworkPlacement job (lab TLS + tenant project)
               ansible.builtin.shell: |
                 python3 - <<'PY'
                 import yaml, pathlib, os
                 src = os.environ["CLOUDS_YAML"]
                 region = os.environ.get("FORCE_REGION", "").strip()
+                project = os.environ.get("FORCE_PROJECT", "").strip()
+                domain = os.environ.get("FORCE_PROJECT_DOMAIN", "Default").strip() or "Default"
                 cfg = yaml.safe_load(src)
                 for _name, cloud in (cfg.get("clouds") or {}).items():
                     if isinstance(cloud, dict):
                         cloud["verify"] = False
                         if region:
                             cloud["region_name"] = region
+                        auth = cloud.get("auth") or {}
+                        # Password-auth admin clouds.yaml: force tenant project so
+                        # networks appear in CloudOSO.status.projectName / spec.project.
+                        # Application-credential auth is already project-scoped.
+                        if project and auth.get("username") and not auth.get("application_credential_id"):
+                            auth["project_name"] = project
+                            auth["project_domain_name"] = domain
+                            cloud["auth"] = auth
                 dest = pathlib.Path(os.environ["DEST"])
                 dest.write_text(yaml.safe_dump(cfg, default_flow_style=False))
                 dest.chmod(0o600)
@@ -139,6 +143,16 @@
                 DEST: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
                 # Prefer CloudGateway.spec.region when set; else regionOne (RHOSO lab).
                 FORCE_REGION: "{{ (np_gateway.spec.region | default('regionOne')) if (np_gateway is defined) else 'regionOne' }}"
+                FORCE_PROJECT: >-
+                  {{
+                    np_cloudoso.status.projectName
+                    | default(np_cloudoso.spec.project | default(''), true)
+                  }}
+                FORCE_PROJECT_DOMAIN: >-
+                  {{
+                    np_cloudoso.status.domainName
+                    | default(np_cloudoso.spec.projectDomain | default('Default'), true)
+                  }}
               no_log: true
 
             - name: Resolve cloud name from clouds.yaml
@@ -214,6 +228,7 @@
             # with `-f value` — multi-column value output order is ambiguous and
             # previously caused np_neutron_router_id to be set to the VNI.
             - name: Look up existing EVPN router
+              when: fr6_probe_available | default(false)
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
@@ -224,7 +239,9 @@
               failed_when: false
 
             - name: Create EVPN router when missing (--evpn-vni MUST equal HybridNetwork.status.vni)
-              when: (np_router_existing.rc | default(1) | int) != 0
+              when:
+                - fr6_probe_available | default(false)
+                - (np_router_existing.rc | default(1) | int) != 0
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router create
                 --evpn-vni {{ np_vni }} {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
@@ -238,23 +255,20 @@
             # Treat Unrecognized attribute(s) 'evpn_vni' as Fr6EvpnUnavailable (design §10.3.2).
             - name: Detect server-side FR6 EVPN API unavailable
               when:
+                - fr6_probe_available | default(false)
                 - (np_router_existing.rc | default(1) | int) != 0
                 - (np_router_create.rc | default(1) | int) != 0
                 - >-
                   ('evpn_vni' in (np_router_create.stderr | default('')))
                   or ('Unrecognized attribute' in (np_router_create.stderr | default('')))
               ansible.builtin.set_fact:
-                np_backend_applied: false
-                np_backend_ready: false
-                np_backend_fail_reason: Fr6EvpnUnavailable
-                np_backend_message: >-
-                  Fr6EvpnUnavailable: Neutron rejected router create --evpn-vni
-                  ({{ np_router_create.stderr | default('unrecognized attribute') | trim }}).
-                  CLI help is not proof of RHOSO 18.0.21 FR6 server support — fail closed
-                  per design/fabric.md §10.3.2.
+                np_backend_fail_reason: Fr6EvpnDeferred
+                fr6_probe_available: false
 
             - name: Show EVPN router JSON (canonical id + VNI)
-              when: np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
+              when:
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') not in ['Fr6EvpnUnavailable', 'Fr6EvpnDeferred']
               ansible.builtin.command: >-
                 openstack --os-cloud {{ np_os_cloud_name }} router show
                 {{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr
@@ -266,7 +280,8 @@
 
             - name: Parse router show JSON and set router id
               when:
-                - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') not in ['Fr6EvpnUnavailable', 'Fr6EvpnDeferred']
                 - (np_router_show_json.rc | default(1) | int) == 0
               ansible.builtin.set_fact:
                 np_router_obj: "{{ np_router_show_json.stdout | from_json }}"
@@ -274,7 +289,8 @@
 
             - name: Fall back to create/show value id when JSON show failed
               when:
-                - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') not in ['Fr6EvpnUnavailable', 'Fr6EvpnDeferred']
                 - (np_neutron_router_id | default('')) | length == 0
               ansible.builtin.set_fact:
                 np_neutron_router_id: >-
@@ -288,7 +304,8 @@
 
             - name: Fail closed when adopted router VNI mismatches HybridNetwork VNI
               when:
-                - np_backend_fail_reason | default('') != 'Fr6EvpnUnavailable'
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') == ''
                 - np_router_obj is defined
                 - (np_router_obj.evpn_vni | default('') | string) | length > 0
                 - (np_router_obj.evpn_vni | string) != (np_vni | string)
@@ -305,6 +322,7 @@
             # Type-5 host-route advertisement is actually enabled (adopt path).
             - name: Advertise subnet host routes into the EVPN router
               when:
+                - fr6_probe_available | default(false)
                 - np_backend_fail_reason | default('') == ''
                 - (np_neutron_router_id | default('')) | length > 0
               ansible.builtin.shell: |
@@ -332,7 +350,9 @@
               failed_when: (np_router_add_subnet.rc | default(1) | int) != 0
 
             - name: Set backend-applied facts (FR6 EVPN router Ready)
-              when: np_backend_fail_reason | default('') == ''
+              when:
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') == ''
               ansible.builtin.set_fact:
                 np_backend_applied: "{{ (np_neutron_router_id | default('')) | length > 0 }}"
                 np_backend_ready: "{{ (np_neutron_router_id | default('')) | length > 0 }}"
@@ -351,3 +371,18 @@
                     )
                   }}
                 np_backend_fail_reason: "{{ '' if (np_neutron_router_id | default('')) | length > 0 else 'BackendApplyFailed' }}"
+
+            - name: Set backend-applied facts (Neutron network Ready; EVPN deferred)
+              when:
+                - not (fr6_probe_available | default(false))
+                - (np_neutron_network_id | default('')) | length > 0
+                - np_backend_fail_reason | default('') in ['', 'Fr6EvpnDeferred', 'Fr6EvpnUnavailable']
+              ansible.builtin.set_fact:
+                np_backend_applied: true
+                np_backend_ready: true
+                np_backend_fail_reason: Fr6EvpnDeferred
+                np_backend_message: >-
+                  Neutron network {{ np_spec.network }}-{{ np_backend_name }}
+                  id={{ np_neutron_network_id }} subnet={{ np_neutron_subnet_id }}
+                  realized on CloudOSO {{ np_backend_name }} (EvpnDeferred:
+                  {{ fr6_probe_message | default('FR6 EVPN unavailable') }}).

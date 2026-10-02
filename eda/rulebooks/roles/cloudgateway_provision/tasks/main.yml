@@ -219,27 +219,12 @@
             - name: Probe RHOSO FR6 native OVN BGP-EVPN support
               ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
 
-        - name: Set Fr6EvpnUnavailable failure reason before failing closed
-          ansible.builtin.set_fact:
-            cloudgateway_fail_reason: Fr6EvpnUnavailable
-          when: not (fr6_probe_available | default(false))
-
-        # Fail closed: do NOT mark ready silently when FR6 cannot be verified.
-        - name: Fail closed when FR6 native OVN BGP-EVPN cannot be verified
-          ansible.builtin.fail:
-            msg: >-
-              CloudGateway {{ cloudgateway_cr_name }} cannot verify RHOSO 18.0 FR6
-              native OVN BGP-EVPN on CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }}:
-              {{ fr6_probe_message | default('unknown probe result') }}
-              (reason=Fr6EvpnUnavailable; landingZoneReady kept false).
-          when: not (fr6_probe_available | default(false))
-
-        - name: Require spoke domainAsn for FR6 EVPN landing (design §10.3.2)
+        - name: Require spoke domainAsn for OpenStack landing (design §10.3.2)
           when: (cloudgateway_spec.domainAsn | default(0) | int) == 0
           ansible.builtin.fail:
             msg: >-
               CloudGateway {{ cloudgateway_cr_name }} cloud=openstack requires
-              spec.domainAsn (spoke ASN) for FR6 OVN BGP-EVPN.
+              spec.domainAsn (spoke ASN) for fabric peering / FR6 OVN BGP-EVPN.
 
         - name: Collect fabric RR peers for landing readiness
           ansible.builtin.set_fact:
@@ -257,7 +242,10 @@
               {{ cloudgateway_spec.fabricRef }} has empty spec.routeReflectors[];
               cannot peer FRR l2vpn evpn (design/fabric.md §10.3.2).
 
-        - name: Set OpenStack landing zone facts (FR6 verified + RR peer intent)
+        # Lab soft-realize: RHOSO without Neutron FR6 EVPN still gets a Ready
+        # CloudGateway so NetworkPlacement can create the tenant Neutron network.
+        # EVPN Type-5 remains deferred until --evpn-vni is available server-side.
+        - name: Set OpenStack landing zone facts (FR6 verified or EvpnDeferred)
           ansible.builtin.set_fact:
             cgw_landing_zone_ready: true
             cgw_transport_ready: true
@@ -267,10 +255,27 @@
                 cgw_cloudoso.status.apiVIP
                 | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true)
               }}
+            cloudgateway_fail_reason: "{{ '' if (fr6_probe_available | default(false)) else 'Fr6EvpnDeferred' }}"
             cgw_message: >-
-              OpenStack FR6 landing Ready on CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }}:
-              {{ fr6_probe_message }}; spokeASN={{ cloudgateway_spec.domainAsn }}
-              RR peers={{ cgw_rr_addrs | join(',') }} (native OVN BGP-EVPN Type-5).
+              {{
+                (
+                  'OpenStack FR6 landing Ready on CloudOSO '
+                  ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
+                  ~ (fr6_probe_message | default(''))
+                  ~ '; spokeASN=' ~ cloudgateway_spec.domainAsn
+                  ~ ' RR peers=' ~ (cgw_rr_addrs | join(','))
+                  ~ ' (native OVN BGP-EVPN Type-5).'
+                )
+                if (fr6_probe_available | default(false))
+                else (
+                  'OpenStack landing Ready (EvpnDeferred) on CloudOSO '
+                  ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
+                  ~ (fr6_probe_message | default('FR6 EVPN unavailable'))
+                  ~ '; spokeASN=' ~ cloudgateway_spec.domainAsn
+                  ~ ' RR peers=' ~ (cgw_rr_addrs | join(','))
+                  ~ ' — Neutron network placement allowed; EVPN Type-5 deferred.'
+                )
+              }}
 
     # ---------------------------------------------------------------
     # OpenShift: HCP/Virt hosted landing (tunnelType none prep)

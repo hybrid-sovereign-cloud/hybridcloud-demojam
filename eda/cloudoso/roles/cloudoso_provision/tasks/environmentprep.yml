@@ -15,7 +15,10 @@
     ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
     use_designate_dns: "{{ ((oso_spec.designateZoneId | default('', true)) | length > 0) or ((oso_spec.baseDomain | default('', true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true))) }}"
     ep_parent_zone_id: "{{ oso_spec.designateZoneId | default('', true) }}"
-    ep_reuse_existing_project: "{{ ((oso_spec.credentialsSecretRef | default({})).name | default('') | length) > 0 }}"
+    # credentialsSecretRef alone must NOT skip project creation — admin clouds.yaml
+    # is commonly supplied via Secret while spec.project names the tenant project
+    # (e.g. acme-corp). Reuse is decided after clouds.yaml is loaded (below).
+    ep_reuse_existing_project: false
 
 - name: Load OpenStack clouds.yaml from entity-namespace Secret
   when: ep_credentials_secret_name | length > 0
@@ -128,6 +131,43 @@
   ansible.builtin.set_fact:
     clouds_yaml_cloud: "{{ _clouds_cloud_detect.stdout | trim }}"
 
+- name: Detect admin user / domain / reuse from clouds.yaml
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, yaml
+        cfg = yaml.safe_load(open("{{ clouds_yaml_path }}"))
+        cloud = (cfg.get("clouds") or {}).get("{{ clouds_yaml_cloud }}") or {}
+        auth = cloud.get("auth") or {}
+        auth_project = (auth.get("project_name") or "").strip()
+        ep_project = "{{ ep_project }}".strip()
+        # Reuse only when the supplied credential is already scoped to the
+        # desired tenant project (UI project-admin flow). Admin clouds.yaml
+        # targeting project "admin" must still create spec.project.
+        reuse = bool(auth_project) and auth_project == ep_project
+        print(json.dumps({
+          "username": (auth.get("username") or "{{ openstack_admin_user }}").strip() or "{{ openstack_admin_user }}",
+          "project_domain": (
+            auth.get("project_domain_name")
+            or auth.get("user_domain_name")
+            or "{{ ep_project_domain }}"
+            or "Default"
+          ),
+          "auth_project": auth_project,
+          "reuse": reuse,
+        }))
+  register: _clouds_auth_detect
+  changed_when: false
+  no_log: true
+
+- name: Apply clouds.yaml-derived admin / domain / reuse facts
+  ansible.builtin.set_fact:
+    openstack_admin_user: "{{ (_clouds_auth_detect.stdout | from_json).username }}"
+    ep_project_domain: "{{ (_clouds_auth_detect.stdout | from_json).project_domain }}"
+    ep_reuse_existing_project: "{{ (_clouds_auth_detect.stdout | from_json).reuse | bool }}"
+
 - name: Generate deterministic slug from CR name
   ansible.builtin.set_fact:
     ep_slug: "{{ (cloudoso_cr_name | hash('sha256'))[:5] }}"
@@ -144,13 +184,14 @@
   openstack.cloud.project:
     cloud: "{{ clouds_yaml_cloud }}"
     name: "{{ ep_project }}"
+    domain: "{{ ep_project_domain }}"
     description: "Sovereign Cloud project for {{ ep_entity_name | default(cloudoso_cr_name) }}"
     state: present
   environment:
     OS_CLIENT_CONFIG_FILE: "{{ clouds_yaml_path }}"
   register: os_project
 
-- name: Assign admin role to shc_admin on new project
+- name: Assign admin role to OpenStack admin user on new project
   when: not (ep_reuse_existing_project | default(false) | bool)
   openstack.cloud.role_assignment:
     cloud: "{{ clouds_yaml_cloud }}"
@@ -475,8 +516,13 @@
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
     cloud_cfg = cfg['clouds']['{{ clouds_yaml_cloud }}']
-    # Keep admin project from clouds.yaml (do not switch to ep_project).
+    # Scope the token to the tenant project so the application credential
+    # is project-scoped to ep_project (networks/VMs appear there), not admin.
     auth = dict(cloud_cfg['auth'])
+    reuse = '{{ ep_reuse_existing_project | default(false) | bool }}'.lower() in ('1', 'true', 'yes')
+    if not reuse:
+        auth['project_name'] = '{{ ep_project }}'
+        auth['project_domain_name'] = '{{ ep_project_domain }}'
     verify = cloud_cfg.get('verify', True)
     if isinstance(verify, str):
         verify = verify.lower() not in ('0', 'false', 'no')

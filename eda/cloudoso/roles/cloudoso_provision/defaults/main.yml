@@ -10,9 +10,11 @@ clouds_yaml_path: "/tmp/eda-cloudoso-clouds.yaml"
 clouds_yaml_cloud: "default"
 
 default_external_network: "public"
-default_project_domain: "shc_domain"
+# Lab RHOSO uses Keystone domain "Default" and user "admin".
+# Override via CloudOSO.spec.projectDomain / clouds.yaml when needed.
+default_project_domain: "Default"
 default_region_name: "regionOne"
-openstack_admin_user: "shc_admin"
+openstack_admin_user: "admin"
 
 vault_init_secret_name: "vault-init"
 vault_init_secret_namespace: "vault"
