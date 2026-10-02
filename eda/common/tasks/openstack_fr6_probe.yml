@@ -73,10 +73,74 @@
     - (_fr6_cli_probe.rc | default(1) | int) == 0
     - (_fr6_flag_probe.rc | default(1) | int) != 0
 
-- name: Set FR6 EVPN probe result (available)
+- name: Set FR6 EVPN probe result (available via CLI --help)
   ansible.builtin.set_fact:
     fr6_probe_available: true
     fr6_probe_message: "RHOSO FR6 native OVN BGP-EVPN verified (--evpn-vni present)."
   when:
     - (_fr6_cli_probe.rc | default(1) | int) == 0
     - (_fr6_flag_probe.rc | default(1) | int) == 0
+
+# Authoritative server-side check: Neutron 'evpn' extension (works when AAP EE
+# has openstacksdk + OS_CLIENT_CONFIG_FILE but no openstack CLI).
+- name: Probe Neutron EVPN extension via openstacksdk when CLI probe failed
+  when:
+    - not (fr6_probe_available | default(false) | bool)
+    - (lookup('env', 'OS_CLIENT_CONFIG_FILE') | default('', true) | length) > 0
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import json, os, sys, yaml
+    try:
+        import openstack
+    except ImportError as e:
+        print(json.dumps({"available": False, "message": "openstacksdk missing: %s" % e}))
+        sys.exit(0)
+    cfg_path = os.environ.get("OS_CLIENT_CONFIG_FILE", "")
+    try:
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f) or {}
+        clouds = cfg.get("clouds") or {}
+        cloud_name = os.environ.get("OS_CLOUD") or ("default" if "default" in clouds else next(iter(clouds), None))
+        if not cloud_name:
+            print(json.dumps({"available": False, "message": "no clouds in OS_CLIENT_CONFIG_FILE"}))
+            sys.exit(0)
+        cloud = clouds[cloud_name]
+        auth = dict(cloud.get("auth") or {})
+        verify = cloud.get("verify", True)
+        if isinstance(verify, str):
+            verify = verify.lower() not in ("0", "false", "no")
+        conn = openstack.connect(
+            auth=auth,
+            region_name=cloud.get("region_name", "regionOne"),
+            identity_api_version="3",
+            interface=cloud.get("interface", "public"),
+            verify=cloud.get("cacert", verify),
+        )
+        aliases = [getattr(e, "alias", "") or "" for e in conn.network.extensions()]
+        if "evpn" in aliases:
+            print(json.dumps({
+                "available": True,
+                "message": "RHOSO FR6 native OVN BGP-EVPN verified (Neutron extension 'evpn' present).",
+            }))
+        else:
+            print(json.dumps({
+                "available": False,
+                "message": "Neutron has no 'evpn' extension (service_plugins missing evpn).",
+            }))
+    except Exception as e:
+        print(json.dumps({"available": False, "message": "%s: %s" % (type(e).__name__, e)}))
+    PY
+  register: _fr6_sdk_probe
+  changed_when: false
+  failed_when: false
+
+- name: Adopt SDK FR6 probe result when CLI path unavailable
+  when:
+    - not (fr6_probe_available | default(false) | bool)
+    - _fr6_sdk_probe is defined
+    - not (_fr6_sdk_probe.skipped | default(false) | bool)
+    - (_fr6_sdk_probe.rc | default(1) | int) == 0
+    - (_fr6_sdk_probe.stdout | default('') | length) > 0
+  ansible.builtin.set_fact:
+    fr6_probe_available: "{{ (_fr6_sdk_probe.stdout | from_json).available | default(false) | bool }}"
+    fr6_probe_message: "{{ (_fr6_sdk_probe.stdout | from_json).message | default(fr6_probe_message | default(''), true) }}"
