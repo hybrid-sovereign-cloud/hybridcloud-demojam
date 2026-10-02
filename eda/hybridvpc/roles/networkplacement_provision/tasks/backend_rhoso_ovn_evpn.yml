@@ -162,64 +162,81 @@
                   OS_CLIENT_CONFIG_FILE: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
                   PYTHONWARNINGS: ignore:Unverified HTTPS request
 
-            - name: Ensure Neutron network for this HybridNetwork placement
-              ansible.builtin.command: >-
-                openstack --os-cloud {{ np_os_cloud_name }} network show
-                {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
-              environment: "{{ np_os_env }}"
-              register: np_network_show
-              changed_when: false
-              failed_when: false
-
-            - name: Create Neutron network when missing
-              when: (np_network_show.rc | default(1)) != 0
-              ansible.builtin.command: >-
-                openstack --os-cloud {{ np_os_cloud_name }} network create
-                {{ np_spec.network }}-{{ np_backend_name }} -f value -c id
-              environment: "{{ np_os_env }}"
-              register: np_network_create
-              changed_when: true
-
-            - name: Set Neutron network id fact
-              ansible.builtin.set_fact:
-                np_neutron_network_id: >-
-                  {{
-                    ((np_network_show.stdout | default('')) | trim)
-                    | default((np_network_create.stdout | default('')) | trim, true)
-                  }}
-
-            - name: Ensure Neutron subnet(s) for placement prefixes (adopt-or-create)
+            # AAP default EE often has openstacksdk but not the `openstack` CLI.
+            # Realize network/subnet via SDK so placements succeed without a DE rebuild.
+            - name: Ensure Neutron network + subnet(s) via openstacksdk
               ansible.builtin.shell: |
-                set -euo pipefail
-                NAME="{{ np_spec.network }}-{{ np_backend_name }}-subnet-{{ np_subnet_idx }}"
-                if ID=$(openstack --os-cloud {{ np_os_cloud_name }} subnet show "$NAME" -f value -c id 2>/dev/null); then
-                  echo "$ID"
-                  exit 0
-                fi
-                openstack --os-cloud {{ np_os_cloud_name }} subnet create \
-                  --network {{ np_spec.network }}-{{ np_backend_name }} \
-                  --subnet-range {{ item }} \
-                  "$NAME" -f value -c id
-              environment: "{{ np_os_env }}"
-              loop: "{{ np_spec.prefixes | default([]) }}"
-              loop_control:
-                index_var: np_subnet_idx
-              register: np_subnet_ensure
-              changed_when: true
-              failed_when: (np_subnet_ensure.rc | default(1) | int) != 0
+                python3 - <<'PY'
+                import json, os, sys, yaml
+                try:
+                    import openstack
+                except ImportError as e:
+                    print(json.dumps({"error": "openstacksdk missing: %s" % e}))
+                    sys.exit(2)
+                cfg_path = os.environ["OS_CLIENT_CONFIG_FILE"]
+                cloud_name = os.environ.get("OS_CLOUD") or "{{ np_os_cloud_name }}"
+                net_name = "{{ np_spec.network }}-{{ np_backend_name }}"
+                prefixes = json.loads(os.environ["PREFIXES_JSON"])
+                with open(cfg_path) as f:
+                    cfg = yaml.safe_load(f)
+                cloud = (cfg.get("clouds") or {}).get(cloud_name) or next(iter((cfg.get("clouds") or {}).values()))
+                auth = dict(cloud.get("auth") or {})
+                verify = cloud.get("verify", True)
+                if isinstance(verify, str):
+                    verify = verify.lower() not in ("0", "false", "no")
+                conn = openstack.connect(
+                    auth=auth,
+                    region_name=cloud.get("region_name", "regionOne"),
+                    identity_api_version="3",
+                    interface=cloud.get("interface", "public"),
+                    verify=cloud.get("cacert", verify),
+                )
+                net = conn.network.find_network(net_name)
+                created_net = False
+                if net is None:
+                    net = conn.network.create_network(name=net_name)
+                    created_net = True
+                subnet_ids = []
+                created_subnets = False
+                for idx, cidr in enumerate(prefixes):
+                    sname = "%s-subnet-%s" % (net_name, idx)
+                    subnet = conn.network.find_subnet(sname)
+                    if subnet is None:
+                        subnet = conn.network.create_subnet(
+                            name=sname,
+                            network_id=net.id,
+                            cidr=cidr,
+                            ip_version=4,
+                        )
+                        created_subnets = True
+                    subnet_ids.append(subnet.id)
+                print(json.dumps({
+                    "network_id": net.id,
+                    "subnet_ids": subnet_ids,
+                    "created_net": created_net,
+                    "created_subnets": created_subnets,
+                }))
+                PY
+              environment: "{{ np_os_env | combine({'OS_CLOUD': np_os_cloud_name, 'PREFIXES_JSON': (np_spec.prefixes | default([]) | to_json)}) }}"
+              register: np_sdk_net_raw
+              changed_when: >-
+                (np_sdk_net_raw.rc | default(1) | int) == 0
+                and (
+                  ((np_sdk_net_raw.stdout | default('{}') | from_json).created_net | default(false))
+                  or ((np_sdk_net_raw.stdout | default('{}') | from_json).created_subnets | default(false))
+                )
+              failed_when: >-
+                (np_sdk_net_raw.rc | default(1) | int) != 0
+                or ('error' in ((np_sdk_net_raw.stdout | default('{}', true)) | from_json))
 
-            - name: Collect Neutron subnet ids
+            - name: Set Neutron network/subnet id facts from SDK result
               ansible.builtin.set_fact:
-                np_neutron_subnet_ids: >-
-                  {{
-                    np_subnet_ensure.results | default([])
-                    | map(attribute='stdout') | map('trim') | select('string') | list
-                  }}
+                np_neutron_network_id: "{{ (np_sdk_net_raw.stdout | from_json).network_id }}"
+                np_neutron_subnet_ids: "{{ (np_sdk_net_raw.stdout | from_json).subnet_ids | default([]) }}"
                 np_neutron_subnet_id: >-
                   {{
                     (
-                      np_subnet_ensure.results | default([])
-                      | map(attribute='stdout') | map('trim') | select('string') | list
+                      (np_sdk_net_raw.stdout | from_json).subnet_ids | default([])
                       | first
                     ) | default('', true)
                   }}
