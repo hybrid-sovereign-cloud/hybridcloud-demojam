@@ -55,6 +55,12 @@ spec:
                         type: string
                       address:
                         type: string
+                      nodeName:
+                        type: string
+                        description: >-
+                          Optional kubernetes.io/hostname pin for the hostNetwork hub RR
+                          pod. When omitted, the provisioner pins to the node whose
+                          InternalIP equals address (if any).
                 vniPool:
                   type: object
                   required: [start, end]

@@ -46,6 +46,38 @@
       ansible.builtin.set_fact:
         hf_rr_asn_map: "{{ hf_rr_asn_map_cmd.stdout | from_json }}"
 
+    - name: List cluster nodes for RR address pinning
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        kind: Node
+      register: hf_rr_nodes_lookup
+      failed_when: false
+
+    - name: Build node InternalIP -> hostname map for RR pinning
+      ansible.builtin.shell: |
+        python3 <<'PY'
+        import json, os
+        nodes = json.loads(os.environ.get("NODES") or "[]")
+        out = {}
+        for n in nodes:
+            name = (n.get("metadata") or {}).get("name")
+            for a in ((n.get("status") or {}).get("addresses") or []):
+                if a.get("type") == "InternalIP" and a.get("address") and name:
+                    out[a["address"]] = name
+        print(json.dumps(out))
+        PY
+      environment:
+        NODES: "{{ hf_rr_nodes_lookup.resources | default([]) | to_json }}"
+      register: hf_rr_node_by_ip_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set hf_rr_node_by_ip fact
+      ansible.builtin.set_fact:
+        hf_rr_node_by_ip: "{{ (hf_rr_node_by_ip_cmd.stdout | default('{}') | trim | from_json) if (hf_rr_node_by_ip_cmd.rc | default(1) == 0) else {} }}"
+
     - name: Ensure hub-rr ServiceAccount exists
       kubernetes.core.k8s:
         host: "{{ services_api_host }}"

@@ -20,7 +20,7 @@ spec:
   domainAsn: 65011
   fabricRef: acme-fabric
   transport:
-    type: none
+    type: wireguard
   platformOpenshiftRef: hcp1
   virtCloudVirtRef: local-virt
 ---
@@ -87,7 +87,8 @@ spec:
   enabled: true
   fabricRef: acme-fabric
   cloudGatewayRef: acme-hcp1-gw
-  tunnelType: none
+  tunnelType: wireguard
+  vaultConfigRef: fabric/wireguard/hub
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: TransportLink

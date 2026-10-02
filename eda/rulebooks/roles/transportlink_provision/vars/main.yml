@@ -1,1 +1,4 @@
 ---
+# WireGuard VTEP underlay defaults (TransportLink tunnelType=wireguard).
+tl_wg_image: "quay.io/frrouting/frr:10.3.1"
+tl_wg_namespace: fabric-wg

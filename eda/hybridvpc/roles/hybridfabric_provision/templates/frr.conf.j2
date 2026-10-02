@@ -1,6 +1,8 @@
-! Managed by HybridFabric {{ hybridfabric_cr_name }} — hub route reflector
+! Managed by HybridFabric {{ hybridfabric_cr_name }} — hub EVPN route reflector
 ! Address {{ hf_rr_address }}  localASN {{ hf_rr_local_asn }}  fabricASNs {{ hf_rr_asns | join(',') }}
-! One BGP instance per RR IP (TCP/179). Speaks use this local ASN as neighbor ASN.
+! One BGP instance per RR IP (TCP/179). Spokes peer this local ASN (iBGP) —
+! OVN-generated FRRConfiguration on OpenShift spokes is locked to the fabric ASN,
+! so remote-as external (eBGP) rejects same-ASN peers. Use remote-as {{ hf_rr_local_asn }}.
 frr defaults traditional
 hostname {{ hf_rr_name }}
 log stdout informational
@@ -8,18 +10,18 @@ service integrated-vtysh-config
 !
 router bgp {{ hf_rr_local_asn }}
  bgp router-id {{ hf_rr_address }}
- bgp cluster-id {{ hf_rr_address }}
  no bgp ebgp-requires-policy
  no bgp default ipv4-unicast
+ no bgp network import-check
  neighbor SPOKES peer-group
- neighbor SPOKES remote-as external
+ neighbor SPOKES remote-as {{ hf_rr_local_asn }}
  neighbor SPOKES ebgp-multihop 32
  bgp listen range 0.0.0.0/0 peer-group SPOKES
  !
  address-family l2vpn evpn
   neighbor SPOKES activate
   neighbor SPOKES soft-reconfiguration inbound
-  neighbor SPOKES attribute-unchanged as-path next-hop med
+  neighbor SPOKES attribute-unchanged next-hop med
  exit-address-family
 !
 line vty

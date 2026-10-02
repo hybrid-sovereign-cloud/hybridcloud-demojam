@@ -6,6 +6,8 @@
     hf_rr_name: "{{ hf_rr_item.name | default('rr-' ~ (hf_rr_item.address | replace('.', '-'))) }}"
     hf_rr_address: "{{ hf_rr_item.address }}"
     hf_rr_resource_name: "hub-rr-{{ hf_rr_item.address | replace('.', '-') }}"
+    # Optional pin: spec.routeReflectors[].nodeName, else resolve node whose InternalIP == address.
+    hf_rr_node_name: "{{ hf_rr_item.nodeName | default(hf_rr_node_by_ip[hf_rr_item.address | string] | default('')) }}"
     hf_rr_asns: >-
       {{
         (hf_rr_asn_map[hf_rr_item.address | string] | default([hf_domain_asn | int]))

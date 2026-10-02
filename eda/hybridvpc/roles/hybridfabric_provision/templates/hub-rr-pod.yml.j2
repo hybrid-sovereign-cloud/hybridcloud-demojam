@@ -100,6 +100,10 @@ spec:
       serviceAccountName: hub-rr
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+{% if hf_rr_node_name | default('') | length > 0 %}
+      nodeSelector:
+        kubernetes.io/hostname: "{{ hf_rr_node_name }}"
+{% endif %}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

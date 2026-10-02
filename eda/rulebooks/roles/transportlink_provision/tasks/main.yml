@@ -190,7 +190,12 @@
           vars:
             vault_kv_path: "{{ transportlink_spec.vaultConfigRef }}"
 
-        - name: Set tunnel-up facts from Vault-backed config
+        - name: Deploy WireGuard VTEP underlay on hub
+          when: (transportlink_spec.tunnelType | default('')) == 'wireguard'
+          ansible.builtin.include_tasks: deploy_wireguard.yml
+
+        - name: Set tunnel-up facts from Vault-backed config (non-wireguard tunnels)
+          when: (transportlink_spec.tunnelType | default('')) != 'wireguard'
           ansible.builtin.set_fact:
             tl_tunnel_up: true
             tl_ready: true

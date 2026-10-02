@@ -1,0 +1,108 @@
+---
+# Deploy WireGuard VTEP underlay for tunnelType=wireguard (design/fabric.md §8.3).
+# Vault KV (vaultConfigRef) expected keys (never logged):
+#   hubPrivateKey, hubAddress (default 10.254.254.1/24), hubListenPort (default 51820),
+#   hubEndpoint, hubNodeName (optional), hubRoutes, spokeRoutes,
+#   peers: [{name, publicKey, privateKey, address, nodeName, allowedIPs}]
+# Spoke agents are applied when spokeKubeconfig is provided per peer (optional in v1;
+# hub gateway alone is enough for Vault-backed Ready; live lab also deploys spokes).
+
+- name: Set WireGuard defaults
+  ansible.builtin.set_fact:
+    tl_wg_namespace: "{{ vault_kv_data.namespace | default('fabric-wg') }}"
+    tl_wg_image: "{{ vault_kv_data.image | default('quay.io/frrouting/frr:10.3.1') }}"
+    tl_wg_listen_port: "{{ vault_kv_data.hubListenPort | default(51820) | int }}"
+    tl_wg_hub_address: "{{ vault_kv_data.hubAddress | default('10.254.254.1/24') }}"
+    tl_wg_hub_endpoint: "{{ vault_kv_data.hubEndpoint | default('') }}"
+    tl_wg_hub_node: "{{ vault_kv_data.hubNodeName | default('') }}"
+    # Hub must NOT route its own RR loopbacks (10.255.10.0/24) into wg0.
+    # Only spoke VTEP underlays belong on the hub WG routes.
+    tl_wg_hub_routes: "{{ vault_kv_data.hubRoutes | default('10.255.11.0/24') }}"
+    tl_wg_spoke_routes: "{{ vault_kv_data.spokeRoutes | default('10.255.10.0/24') }}"
+    tl_wg_hub_secret: fabric-wg-hub
+    tl_wg_peers: "{{ vault_kv_data.peers | default([]) }}"
+    tl_wg_start_script: "{{ lookup('file', role_path ~ '/files/wg-start.sh') }}"
+
+- name: Fail closed when WireGuard Vault payload missing hub key or peers
+  ansible.builtin.fail:
+    msg: >-
+      TransportLink {{ transportlink_cr_name }} tunnelType=wireguard Vault
+      {{ transportlink_spec.vaultConfigRef }} requires hubPrivateKey and peers[].
+  when: >-
+    (vault_kv_data.hubPrivateKey | default('') | length == 0)
+    or (tl_wg_peers | length == 0)
+
+- name: Fail closed when hubEndpoint missing
+  ansible.builtin.fail:
+    msg: >-
+      TransportLink {{ transportlink_cr_name }} wireguard requires Vault hubEndpoint
+      (UDP address spokes dial, e.g. CENTRAL node IP).
+  when: (tl_wg_hub_endpoint | length == 0)
+
+- name: Ensure fabric-wg namespace on hub
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ tl_wg_namespace }}"
+        labels:
+          hybridsovereign.redhat/fabric-wg: "true"
+
+- name: Render hub WireGuard conf (Address set via ip addr in start script)
+  ansible.builtin.set_fact:
+    tl_wg_hub_conf: |
+      [Interface]
+      PrivateKey = {{ vault_kv_data.hubPrivateKey }}
+      ListenPort = {{ tl_wg_listen_port }}
+      {% for p in tl_wg_peers %}
+      [Peer]
+      # {{ p.name | default(loop.index) }}
+      PublicKey = {{ p.publicKey }}
+      AllowedIPs = {{ p.allowedIPs | default((p.vtep | default('')) ~ '/32') }}
+      PersistentKeepalive = 25
+      {% endfor %}
+
+- name: Apply hub WireGuard Secret
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ tl_wg_hub_secret }}"
+        namespace: "{{ tl_wg_namespace }}"
+        labels:
+          hybridsovereign.redhat/fabric-wg: hub
+      type: Opaque
+      stringData:
+        wg0.conf: "{{ tl_wg_hub_conf }}"
+
+- name: Apply hub WireGuard manifests (SA, SCC, scripts CM, Deployment)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'wg-hub-deploy.yml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name | default('?') }}"
+
+- name: Set WireGuard Ready facts
+  ansible.builtin.set_fact:
+    tl_tunnel_up: true
+    tl_ready: true
+    tl_border_endpoint: "{{ tl_wg_hub_endpoint }}:{{ tl_wg_listen_port }}"
+    tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
+    tl_message: >-
+      tunnelType=wireguard: hub {{ tl_wg_hub_endpoint }}:{{ tl_wg_listen_port }}
+      peers={{ tl_wg_peers | map(attribute='name') | select('defined') | list | join(',') }}
+      (VTEP CIDRs via wg0 — design/fabric.md §8.3).
