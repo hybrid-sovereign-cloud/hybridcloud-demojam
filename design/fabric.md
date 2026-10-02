@@ -502,6 +502,7 @@ metadata:
   name: advertise-acme-evpn
 spec:
   advertisements: ["PodNetwork"]
+  targetVRF: auto
   frrConfigurationSelector:
     matchLabels:
       evpn: "true"
@@ -2379,15 +2380,8 @@ Acme HCP1: 10.110.0.5 → 10.110.0.7   3/3 replies (avg ~6.5 ms)   PASS
 
 **Pass criteria:** (1)(2) pass; (3) passes only when hub RR reflects Type-5 for `chad-fabric`.
 
-**LIVE:**
-
-```text
-Chad HCP2: 10.120.0.9  → 10.120.0.10   3/3   PASS
-Chad HCP3: 10.120.1.75 → 10.120.1.76   3/3   PASS
-Chad HCP2 → HCP3: 10.120.0.9 → 10.120.1.75   0/2   FAIL (expected: hub RR 10.255.10.1/2 unreachable from lab)
-```
-
-**Talk-show line:** “Same VNI, different sites — the cliffhanger is the missing route reflector. Without CENTRAL RR, EVPN has nowhere to tell the story.”
+**LIVE (retest 2026-09-30 ~16:30Z):** Hub RR + **WireGuard VTEP underlay PASS**. Acme HCP1 cross-node UDN **PASS**. Chad HCP2↔HCP3 UDN **PASS** on BGP-active nodes (SNAT collapses per-HCP workers to one BGP TCP 5-tuple toward Chad RR :1179 — second worker stays Idle; schedule probes on Established nodes). Vault `hybridsovereign/fabric/wireguard/hub` written; HCP TransportLinks flipped to `tunnelType: wireguard` + `vaultConfigRef`. OSO WG deferred (gateway `192.168.4.77` not reachable from CENTRAL for UDP/51820).
+**Talk-show line:** “Same VNI, different sites — CENTRAL RR now tells the Type-5 story; the remaining cliffhanger is VTEP underlay reachability for the data plane.”
 
 ### 20.6 Act V — Isolation cold open (negative probes)
 
@@ -2430,27 +2424,32 @@ Optional packet proof (when hub RR + underlay VTEP reachability exist):
 2. From HCP1 UDN pod: `ping` / `traceroute` to `10.110.1.x`  
 3. Confirm path stays inside VNI `51000` / RT `65010:51000`
 
-**LIVE (retest 2026-09-30 ~14:50Z):** Neutron EVPN router ACTIVE `evpn_vni: 51000`; HCP1→`10.110.1.1` still **BLOCKED** (hub RR loopbacks `10.255.10.1/2` not on underlay path from HCP VTEPs — hub nodes `10.10.10.10/11` are reachable, but RR `/32` on `lo` is not). Hub RR Deployments Available; spoke FRR peers stay BGP `Active` (0 msgs) until underlay advertises those RR IPs.
+**LIVE (retest 2026-09-30 ~15:40Z):** Neutron EVPN router ACTIVE `evpn_vni: 51000`. Hub RR control plane **PASS**: Acme spokes Established to `10.10.10.10/11:179`, Type-5 `10.110.0.0/26`+`10.110.0.64/26` reflected (AS-path via hub `65010`). Chad uses separate hub RR pods on **:1179** (SNAT 5-tuple collision on :179). Cross-node / cross-site **dataplane** still **BLOCKED** — VTEP `/32` underlay (e.g. `10.255.11.11`↛`10.255.11.12`) is not forwarded between workers; BGP VRF routes install but VXLAN outer dest is unreachable. HCP1→`10.110.1.1` OSO likewise waits on VTEP underlay.
 
 ### 20.8 Act VII — Scoreboard & encore checklist
 
-| Scene | Probe | Result (retest 2026-09-30 14:50Z) |
+| Scene | Probe | Result (retest 2026-09-30 15:40Z) |
 |-------|-------|-------------------------------------|
 | I | Fabric / gateway / link / placement Ready | **PASS** (`hubRrReady=true`) |
 | II | CNO FRR + RA + VTEP/CUDN Accepted | **PASS** |
-| III | Acme HCP1 intra UDN | **PASS** (`10.110.0.5↔.7`) |
-| IV | Chad intra HCP2 / HCP3 | **PASS** (`10.120.0.12↔.14`, `10.120.1.77↔.79`) |
-| IV | Chad HCP2 ↔ HCP3 cross-site | **BLOCKED** (underlay → hub RR) |
+| III | Acme HCP1 intra UDN (same node) | **PASS** (`10.110.0.5↔.7`) |
+| III | Acme HCP1 cross-node UDN | **PASS** (WireGuard VTEP underlay) |
+| III | Acme Type-5 BGP reflection | **PASS** |
+| IV | Chad intra HCP2 / HCP3 | **PASS** |
+| IV | Chad Type-5 BGP reflection HCP2↔HCP3 | **PASS** (`:1179` Chad RR) |
+| IV | Chad HCP2 ↔ HCP3 dataplane | **PASS** (WireGuard; BGP node endpoints) |
 | V | Chad ↛ Acme / Acme ↛ Chad | **PASS** |
 | VI | OSO FR6 `--evpn-vni` object | **PASS** (ACTIVE) |
-| VI | HCP1 ↔ OSO1 traceroute | **BLOCKED** (underlay → hub RR) |
+| VI | HCP1 ↔ OSO1 traceroute | **BLOCKED** (VTEP underlay) |
 
-**Encore (unblock cross-site)**
+**Encore (unblock dataplane)**
 
-1. ~~Deploy managed hub FRR pods~~ — **done** (`hub-rr-10-255-10-{1,2}` Running).  
-2. **Underlay still missing:** advertise `10.255.10.1/2` on the path HCP VTEPs / OSO chassis use (or change `spec.routeReflectors[]` to underlay-reachable hub node IPs and re-peer). Prove with `ping` + `vtysh -c 'show bgp l2vpn evpn'`.  
-3. Re-run Act IV cross-site and Act VI HCP↔OSO.  
-4. Hub RT export filters so Acme `65010:51000` never imports Chad `65020:52000`.
+1. ~~Deploy managed hub FRR pods~~ — **done** (Acme `:179` + Chad `:1179`).  
+2. ~~Spoke BGP sessions + Type-5 reflection~~ — **done** (ebgp-multihop rawConfig, allowas-in 1, hub prepends ASN, FRR 10.3.1).  
+3. **VTEP underlay (WireGuard):** hub–spoke WG on CENTRAL `10.10.10.11:51820` + HCP hostNetwork agents — **PASS** for HCP VTEP/UDN. OSO WG spoke still TODO.  
+4. Re-run Act III cross-node, Act IV cross-site dataplane, Act VI HCP↔OSO.  
+5. Hub RT export filters so Acme `65010:51000` never imports Chad `65020:52000`.  
+6. Codify Chad `:1179` RR + single-speaker pin into provision Ansible (currently live lab workaround for SNAT 5-tuple collision).
 
 ### 20.9 Operator’s cheat sheet (commands in show order)
 

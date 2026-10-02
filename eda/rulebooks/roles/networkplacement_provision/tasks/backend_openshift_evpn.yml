@@ -268,21 +268,17 @@
               }}
           loop: "{{ np_spec.prefixes | default([]) }}"
 
-        - name: Resolve Unmanaged VTEP CIDR (fabric overlay or machineNetwork)
+        - name: Resolve Unmanaged VTEP CIDR (fabric vtepCidr or spoke underlay default)
           when: spoke_evpn_prep_ready | default(false) | bool
+          # Do NOT use PlatformOpenshift machineNetwork — that is the Hypershift node CIDR
+          # (e.g. 192.168.64.0/24), not the EVPN VTEP underlay. Unmanaged VTEP requires
+          # on-node IPs in this CIDR (dummy iface / annotation k8s.ovn.org/vteps).
           ansible.builtin.set_fact:
             np_vtep_name: "{{ np_spec.network }}-evpn-vtep"
             np_vtep_cidr: >-
               {{
                 hn_fabric_cr.spec.vtepCidr
-                | default(
-                    (
-                      (np_po_lookup.resources | default([{}]))[0].status.networking.machineNetwork
-                      | default(['10.255.11.0/24'])
-                      | first
-                    ),
-                    true
-                  )
+                | default('10.255.11.0/24', true)
               }}
 
         - name: Apply Unmanaged VTEP on the spoke (design §8.5.2 / OCP 4.22)
@@ -414,6 +410,7 @@
                 name: "advertise-{{ np_spec.network }}-evpn"
               spec:
                 advertisements: ["PodNetwork"]
+                targetVRF: auto
                 nodeSelector: {}
                 frrConfigurationSelector:
                   matchLabels:
