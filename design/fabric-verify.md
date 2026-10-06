@@ -18,15 +18,71 @@
 
 ---
 
-## Topology
+## Connectivity
 
+```mermaid
+flowchart LR
+  subgraph CENTRAL["CENTRAL · acme-fabric ASN 65010"]
+    RRA["RR-A<br/>10.255.10.1"]
+    RRB["RR-B<br/>10.255.10.2"]
+    WGH["WG hub :51820"]
+    SSH["SSH TUN<br/>10.254.253.0/30"]
+  end
+
+  subgraph HCP1["HCP1 spoke"]
+    HVTEP["VTEP 10.255.11.11<br/>FRR"]
+    HPFX["Type-5 10.110.0.0/26"]
+  end
+
+  subgraph OSO1["OSO1 spoke"]
+    OVTEP["VTEP 10.255.12.1<br/>GoBGP"]
+    OPFX["Type-5 10.110.1.0/24"]
+    VM["VM 10.110.1.63 ACTIVE"]
+  end
+
+  WGH -. WireGuard .-> HVTEP
+  SSH -. SSH TUN .-> OVTEP
+  HVTEP -->|BGP EVPN :179| RRA
+  HVTEP -->|BGP EVPN :179| RRB
+  OVTEP -->|BGP EVPN :179| RRA
+  OVTEP -->|BGP EVPN :179| RRB
+  RRA <-.->|reflect Type-5<br/>RT 65010:51001| RRB
+  HPFX --- HVTEP
+  OPFX --- OVTEP
+  VM --- OPFX
+  HPFX -.->|overlay FAIL<br/>no OVN dataplane| OPFX
 ```
-CENTRAL  RR-A 10.255.10.1 · RR-B 10.255.10.2
-         WG :51820 ──────────────────────────── HCP1 VTEP 10.255.11.11 (FRR)
-         SSH TUN 10.254.253.0/30 ────────────── OSO  VTEP 10.255.12.1  (GoBGP)
-Type-5 RT 65010:51001
-  10.110.0.0/26  NH 10.255.11.11
-  10.110.1.0/24  NH 10.255.12.1   · VM 10.110.1.63 ACTIVE
+
+---
+
+## CR graph
+
+```mermaid
+flowchart TB
+  HF["HybridFabric<br/>acme-fabric<br/>ASN 65010 · Ready"]
+  HN["HybridNetwork<br/>acme-core<br/>VNI 51001 · Ready"]
+
+  GW1["CloudGateway<br/>acme-hcp1-gw"]
+  GW2["CloudGateway<br/>acme-oso1-gw"]
+  TL1["TransportLink<br/>acme-hcp1-link<br/>wireguard · Ready"]
+  TL2["TransportLink<br/>acme-oso1-link<br/>sshtunnel GitOps · Ready"]
+  NP1["NetworkPlacement<br/>acme-core-hcp1<br/>validated"]
+  NP2["NetworkPlacement<br/>acme-core-oso1<br/>validated"]
+  PO["PlatformOpenshift<br/>hcp1"]
+  OSO["CloudOSO<br/>oso1"]
+
+  HF --> TL1
+  HF --> TL2
+  HF --> GW1
+  HF --> GW2
+  GW1 --> TL1
+  GW2 --> TL2
+  HN --> NP1
+  HN --> NP2
+  PO --> NP1
+  OSO --> NP2
+  TL1 -.->|underlay WG| NP1
+  TL2 -.->|underlay SSH TUN| NP2
 ```
 
 ---
