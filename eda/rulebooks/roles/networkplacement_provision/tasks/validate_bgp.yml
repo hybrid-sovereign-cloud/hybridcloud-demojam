@@ -1,0 +1,115 @@
+---
+# §8.5.5 live BGP readiness — probe hub RR EVPN sessions / TCP 179.
+# Sets:
+#   np_validated (bool)
+#   np_validated_message (string)
+#
+# Prefer hub RR `show bgp l2vpn evpn summary` when hub RR pods are reachable
+# on the services API. Fall back to TCP/179 connect from the EE to each RR.
+
+- name: Collect fabric RR addresses for BGP probe
+  ansible.builtin.set_fact:
+    np_probe_rrs: >-
+      {{
+        (
+          (hn_fabric_cr | default({})).spec.routeReflectors
+          | default((hn_all_fabrics_detail | default({})).spec.routeReflectors | default([]), true)
+        )
+        | map(attribute='address') | select('string') | list
+      }}
+    np_probe_vtep: "{{ np_backend_vtep | default('') }}"
+
+- name: Default validated=false before probe
+  ansible.builtin.set_fact:
+    np_validated: false
+    np_validated_message: "BGP probe not run."
+
+- name: Skip BGP probe when backend was not applied
+  when: not (np_backend_applied | default(false) | bool)
+  ansible.builtin.set_fact:
+    np_validated: false
+    np_validated_message: "Not validated: backend was not applied."
+
+- name: Probe hub RR EVPN neighbor state when RRs known
+  when:
+    - np_backend_applied | default(false) | bool
+    - np_probe_rrs | length > 0
+  block:
+    - name: List hub RR pods
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Pod
+        namespace: sovereign-cloud
+        label_selector: hybridsovereign.redhat/hub-rr=true
+      register: np_hub_rr_pods
+      failed_when: false
+
+    - name: Run vtysh summary on first Ready hub RR pod
+      when: >-
+        (np_hub_rr_pods.resources | default([])
+         | selectattr('status.phase', 'defined')
+         | selectattr('status.phase', 'equalto', 'Running')
+         | list | length) > 0
+      kubernetes.core.k8s_exec:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        namespace: sovereign-cloud
+        pod: >-
+          {{
+            (np_hub_rr_pods.resources
+             | selectattr('status.phase', 'equalto', 'Running')
+             | list | first).metadata.name
+          }}
+        command: vtysh -c 'show bgp l2vpn evpn summary'
+      register: np_bgp_summary
+      failed_when: false
+
+    - name: Mark validated when hub RR has live EVPN neighbors
+      when:
+        - np_bgp_summary is defined
+        - not (np_bgp_summary.failed | default(false) | bool)
+        - >-
+            ('Total number of neighbors' in (np_bgp_summary.stdout | default('')))
+            and ('No BGP neighbors' not in (np_bgp_summary.stdout | default('')))
+            and ((np_bgp_summary.stdout | default('')) is search('[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+'))
+      ansible.builtin.set_fact:
+        np_validated: true
+        np_validated_message: >-
+          BGP probe PASS: hub RR EVPN neighbors present
+          (RRs={{ np_probe_rrs | join(',') }}).
+
+    - name: TCP/179 fallback probe to each RR from EE
+      when: not (np_validated | default(false) | bool)
+      block:
+        - name: Probe TCP 179 on fabric RRs
+          ansible.builtin.wait_for:
+            host: "{{ item }}"
+            port: 179
+            timeout: 5
+            msg: "RR {{ item }}:179 not accepting TCP"
+          loop: "{{ np_probe_rrs }}"
+          register: np_tcp179
+          failed_when: false
+
+        - name: Mark validated when all RR :179 probes succeeded
+          when: >-
+            (np_tcp179.results | default([]) | length > 0)
+            and (np_tcp179.results | selectattr('failed', 'equalto', true) | list | length == 0)
+          ansible.builtin.set_fact:
+            np_validated: true
+            np_validated_message: >-
+              BGP probe PASS (TCP/179): RRs={{ np_probe_rrs | join(',') }} reachable
+              from EE (session Established not confirmed on hub RR pods).
+
+        - name: Mark not validated when probes failed
+          when: not (np_validated | default(false) | bool)
+          ansible.builtin.set_fact:
+            np_validated: false
+            np_validated_message: >-
+              BGP probe FAIL: hub RR EVPN summary unavailable and TCP/179 to
+              {{ np_probe_rrs | join(',') }} did not all succeed.
+              Underlay/TransportLink may be down (see design/fabric-verify.md).

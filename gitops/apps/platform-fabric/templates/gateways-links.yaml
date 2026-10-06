@@ -1,4 +1,4 @@
-# EVPN zoning — HCP spokes only (acme = HCP1; chad = HCP2+HCP3). No OSO1 / CloudOSO.
+# EVPN zoning — Acme HCP1 + OSO1; Chad HCP2+HCP3.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
@@ -23,6 +23,28 @@ spec:
     type: wireguard
   platformOpenshiftRef: hcp1
   virtCloudVirtRef: local-virt
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: acme-oso1-gw
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  enabled: true
+  cloud: openstack
+  region: regionOne
+  domainAsn: 65012
+  fabricRef: acme-fabric
+  transport:
+    type: sshtunnel
+  openstackCloudOSORef: oso1
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
@@ -89,6 +111,25 @@ spec:
   cloudGatewayRef: acme-hcp1-gw
   tunnelType: wireguard
   vaultConfigRef: fabric/wireguard/hub
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: TransportLink
+metadata:
+  name: acme-oso1-link
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "55"
+  labels:
+    hybridsovereign.redhat/entity: acme-corp
+    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  enabled: true
+  fabricRef: acme-fabric
+  cloudGatewayRef: acme-oso1-gw
+  tunnelType: sshtunnel
+  vaultConfigRef: fabric/sshtunnel/oso1
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: TransportLink

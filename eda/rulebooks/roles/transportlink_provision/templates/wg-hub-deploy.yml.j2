@@ -103,6 +103,8 @@ spec:
               value: /etc/wireguard/wg0.conf
             - name: WG_ROUTES
               value: "{{ tl_wg_hub_routes }}"
+            - name: WG_ROUTE_INTERVAL
+              value: "{{ tl_wg_route_interval | default('15') }}"
           command: ["/bin/bash", "-lc"]
           args:
             - |

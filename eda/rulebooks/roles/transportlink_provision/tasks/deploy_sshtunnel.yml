@@ -1,0 +1,288 @@
+---
+# Deploy managed SSH TUN underlay for tunnelType=sshtunnel (remote OSO lab path).
+# Vault KV (vaultConfigRef) — never logged:
+#   hubEndpoint, hubNodeName, hubListenPort (2222), hubTunAddress, spokeTunAddress,
+#   spokeVtep, authorizedKeys, hostEd25519Key, spokeHost, spokeUser, spokePrivateKey, tunnelPrivateKey,
+#   hubRoutes, spokeRoutes, rrPeers, type5Prefix, type5Label, type5Rt, routerMac
+#
+# GoBGP on the spoke is lab control-plane only until RHOSO FR6 OVN gateway BGP
+# is Ready (design/fabric.md §10.3). systemd units survive reboot.
+
+- name: Set SSH TUN defaults from Vault
+  ansible.builtin.set_fact:
+    tl_ssh_namespace: "{{ vault_kv_data.namespace | default('sovereign-cloud') }}"
+    tl_ssh_image: "{{ vault_kv_data.image | default('quay.io/fedora/fedora:40') }}"
+    tl_ssh_listen_port: "{{ vault_kv_data.hubListenPort | default(2222) | int }}"
+    tl_ssh_hub_node: "{{ vault_kv_data.hubNodeName | default('') }}"
+    tl_ssh_hub_endpoint: "{{ vault_kv_data.hubEndpoint | default('') }}"
+    tl_ssh_hub_tun: "{{ vault_kv_data.hubTunAddress | default('10.254.253.1/30') }}"
+    tl_ssh_spoke_tun: "{{ vault_kv_data.spokeTunAddress | default('10.254.253.2/30') }}"
+    tl_ssh_spoke_vtep: "{{ vault_kv_data.spokeVtep | default('') }}"
+    tl_ssh_authorized_keys: "{{ vault_kv_data.authorizedKeys | default('') }}"
+    tl_ssh_host_key: "{{ vault_kv_data.hostEd25519Key | default('') }}"
+    tl_ssh_spoke_host: "{{ vault_kv_data.spokeHost | default('') }}"
+    tl_ssh_spoke_user: "{{ vault_kv_data.spokeUser | default('cloud-user') }}"
+    tl_ssh_spoke_key: "{{ vault_kv_data.spokePrivateKey | default('') }}"
+    tl_ssh_tunnel_key: "{{ vault_kv_data.tunnelPrivateKey | default(vault_kv_data.spokePrivateKey | default('')) }}"
+    tl_ssh_hub_routes: "{{ vault_kv_data.hubRoutes | default('') }}"
+    tl_ssh_spoke_routes: "{{ vault_kv_data.spokeRoutes | default('10.255.10.0/24') }}"
+    tl_ssh_rr_peers: "{{ vault_kv_data.rrPeers | default('') }}"
+    tl_ssh_fabric_asn: "{{ tl_fabric.spec.domainAsn | default(65010) | int }}"
+    tl_ssh_type5_prefix: "{{ vault_kv_data.type5Prefix | default('') }}"
+    tl_ssh_type5_label: "{{ vault_kv_data.type5Label | default('51001') }}"
+    tl_ssh_type5_rt: "{{ vault_kv_data.type5Rt | default('') }}"
+    tl_ssh_router_mac: "{{ vault_kv_data.routerMac | default('0a:ba:05:51:8b:e3') }}"
+    tl_ssh_deploy_name: "fabric-ssh-tunnel-{{ transportlink_cr_name }}"
+    tl_ssh_tun_script: "{{ lookup('file', role_path ~ '/files/fabric-ssh-tun-up.sh') }}"
+
+- name: Fail closed when SSH TUN Vault payload incomplete
+  ansible.builtin.fail:
+    msg: >-
+      TransportLink {{ transportlink_cr_name }} tunnelType=sshtunnel requires Vault
+      {{ transportlink_spec.vaultConfigRef }} keys: authorizedKeys, hostEd25519Key,
+      hubNodeName, hubEndpoint, spokeHost, spokePrivateKey, spokeVtep.
+  when: >-
+    (tl_ssh_authorized_keys | length == 0)
+    or (tl_ssh_host_key | length == 0)
+    or (tl_ssh_hub_node | length == 0)
+    or (tl_ssh_hub_endpoint | length == 0)
+    or (tl_ssh_spoke_host | length == 0)
+    or (tl_ssh_spoke_key | length == 0)
+    or (tl_ssh_spoke_vtep | length == 0)
+
+- name: Default RR peers from HybridFabric when Vault omits rrPeers
+  when: tl_ssh_rr_peers | length == 0
+  ansible.builtin.set_fact:
+    tl_ssh_rr_peers: >-
+      {{
+        tl_fabric.spec.routeReflectors | default([])
+        | map(attribute='address') | select('string') | list | join(',')
+      }}
+
+- name: Default hub routes to spoke VTEP (/32)
+  when: tl_ssh_hub_routes | length == 0
+  ansible.builtin.set_fact:
+    tl_ssh_hub_routes: "{{ tl_ssh_spoke_vtep }}/32"
+
+- name: Default Type-5 RT from fabric ASN + label
+  when: tl_ssh_type5_rt | length == 0
+  ansible.builtin.set_fact:
+    tl_ssh_type5_rt: "{{ tl_ssh_fabric_asn }}:{{ tl_ssh_type5_label }}"
+
+- name: Apply hub SSH TUN Secret
+  no_log: true
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ tl_ssh_deploy_name }}"
+        namespace: "{{ tl_ssh_namespace }}"
+        labels:
+          app: fabric-ssh-tunnel
+          hybridsovereign.redhat/transportlink: "{{ transportlink_cr_name }}"
+      type: Opaque
+      stringData:
+        authorized_keys: "{{ tl_ssh_authorized_keys }}"
+        ssh_host_ed25519_key: "{{ tl_ssh_host_key }}"
+
+- name: Apply hub sshd ConfigMap
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ tl_ssh_deploy_name }}-cfg"
+        namespace: "{{ tl_ssh_namespace }}"
+        labels:
+          app: fabric-ssh-tunnel
+          hybridsovereign.redhat/transportlink: "{{ transportlink_cr_name }}"
+      data:
+        sshd_config: |
+          Port {{ tl_ssh_listen_port }}
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          AuthorizedKeysFile /etc/ssh/authorized_keys
+          PermitTunnel yes
+          AllowTcpForwarding yes
+          GatewayPorts clientspecified
+          UsePAM no
+
+- name: Apply hub SSH TUN Deployment
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'ssh-hub-deploy.yml.j2') | from_yaml }}"
+
+- name: Stage spoke host SSH key and tunnel client key on EE
+  no_log: true
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.dest }}"
+    mode: "0600"
+  loop:
+    - content: "{{ tl_ssh_spoke_key }}"
+      dest: "/tmp/tl-{{ transportlink_cr_name }}-spoke.key"
+    - content: "{{ tl_ssh_tunnel_key }}"
+      dest: "/tmp/tl-{{ transportlink_cr_name }}-tunnel.key"
+
+- name: Push env, TUN script, GoBGP units to spoke and enable services
+  no_log: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    KEY="/tmp/tl-{{ transportlink_cr_name }}-spoke.key"
+    TUNKEY="/tmp/tl-{{ transportlink_cr_name }}-tunnel.key"
+    SPOKE="{{ tl_ssh_spoke_user }}@{{ tl_ssh_spoke_host }}"
+    SSH=(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$KEY")
+    SCP=(scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$KEY")
+
+    cat > /tmp/tl-{{ transportlink_cr_name }}.env <<EOF
+    HUB_ENDPOINT={{ tl_ssh_hub_endpoint }}
+    HUB_PORT={{ tl_ssh_listen_port }}
+    HUB_TUN={{ tl_ssh_hub_tun }}
+    SPOKE_TUN={{ tl_ssh_spoke_tun }}
+    SPOKE_VTEP={{ tl_ssh_spoke_vtep }}
+    SPOKE_ROUTES="{{ tl_ssh_spoke_routes }}"
+    RR_PEERS={{ tl_ssh_rr_peers }}
+    FABRIC_ASN={{ tl_ssh_fabric_asn }}
+    TYPE5_PREFIX={{ tl_ssh_type5_prefix }}
+    TYPE5_LABEL={{ tl_ssh_type5_label }}
+    TYPE5_RT={{ tl_ssh_type5_rt }}
+    ROUTER_MAC={{ tl_ssh_router_mac }}
+    EOF
+
+    cat > /tmp/tl-{{ transportlink_cr_name }}-tun-up.sh <<'SCRIPT'
+    {{ tl_ssh_tun_script }}
+    SCRIPT
+
+    "${SCP[@]}" /tmp/tl-{{ transportlink_cr_name }}.env "$SPOKE:/tmp/fabric-ssh-tun.env"
+    "${SCP[@]}" /tmp/tl-{{ transportlink_cr_name }}-tun-up.sh "$SPOKE:/tmp/fabric-ssh-tun-up.sh"
+    "${SCP[@]}" "$TUNKEY" "$SPOKE:/tmp/fabric-ssh-tun.key"
+
+    "${SSH[@]}" "$SPOKE" bash -s <<'REMOTE'
+    set -euo pipefail
+    sudo mkdir -p /etc/fabric-ssh-tun /usr/local/sbin
+    sudo mv /tmp/fabric-ssh-tun.env /etc/fabric-ssh-tun.env
+    sudo mv /tmp/fabric-ssh-tun-up.sh /usr/local/sbin/fabric-ssh-tun-up.sh
+    sudo mv /tmp/fabric-ssh-tun.key /etc/fabric-ssh-tun/id_ed25519
+    sudo chmod 600 /etc/fabric-ssh-tun/id_ed25519 /etc/fabric-ssh-tun.env
+    sudo chmod 755 /usr/local/sbin/fabric-ssh-tun-up.sh
+    # shellcheck disable=SC1091
+    source /etc/fabric-ssh-tun.env
+
+    if [ ! -x /usr/local/bin/gobgpd ]; then
+      curl -fsSL -o /tmp/gobgp.tgz \
+        https://github.com/osrg/gobgp/releases/download/v3.29.0/gobgp_3.29.0_linux_amd64.tar.gz
+      sudo tar xzf /tmp/gobgp.tgz -C /usr/local/bin gobgp gobgpd
+      sudo chmod +x /usr/local/bin/gobgp /usr/local/bin/gobgpd
+    fi
+
+    {
+      echo "global:"
+      echo "  config:"
+      echo "    as: ${FABRIC_ASN}"
+      echo "    router-id: ${SPOKE_VTEP}"
+      echo "neighbors:"
+      IFS=',' read -r -a RRS <<< "${RR_PEERS}"
+      for rr in "${RRS[@]}"; do
+        rr=$(echo "$rr" | tr -d ' ')
+        [ -z "$rr" ] && continue
+        cat <<N
+      - config:
+          neighbor-address: ${rr}
+          peer-as: ${FABRIC_ASN}
+        transport:
+          config:
+            local-address: ${SPOKE_VTEP}
+        ebgp-multihop:
+          config:
+            enabled: true
+            multihop-ttl: 32
+        afi-safis:
+          - config:
+              afi-safi-name: l2vpn-evpn
+    N
+      done
+    } | sudo tee /etc/gobgpd-fabric.yml >/dev/null
+
+    sudo tee /etc/systemd/system/fabric-ssh-tun.service >/dev/null <<EOF
+    [Unit]
+    Description=Hybrid Sovereign fabric SSH TUN underlay
+    After=network-online.target
+    Wants=network-online.target
+    [Service]
+    Type=simple
+    EnvironmentFile=/etc/fabric-ssh-tun.env
+    ExecStart=/bin/bash /usr/local/sbin/fabric-ssh-tun-up.sh
+    Restart=always
+    RestartSec=5
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    sudo tee /etc/systemd/system/fabric-gobgp.service >/dev/null <<EOF
+    [Unit]
+    Description=Hybrid Sovereign fabric GoBGP EVPN (lab CP until FR6 OVN)
+    After=fabric-ssh-tun.service
+    Wants=fabric-ssh-tun.service
+    [Service]
+    Type=simple
+    EnvironmentFile=/etc/fabric-ssh-tun.env
+    ExecStart=/usr/local/bin/gobgpd -f /etc/gobgpd-fabric.yml -t yaml
+    ExecStartPost=/bin/bash -c 'sleep 4; if [ -n "\$TYPE5_PREFIX" ]; then /usr/local/bin/gobgp global rib add -a evpn prefix \$TYPE5_PREFIX etag 0 label \$TYPE5_LABEL rd \$SPOKE_VTEP:\$TYPE5_LABEL rt \$TYPE5_RT router-mac \$ROUTER_MAC encap vxlan || true; fi'
+    Restart=always
+    RestartSec=5
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now fabric-ssh-tun.service
+    sudo systemctl enable --now fabric-gobgp.service
+    sleep 5
+    systemctl is-active fabric-ssh-tun.service
+    systemctl is-active fabric-gobgp.service || true
+    REMOTE
+  args:
+    executable: /bin/bash
+
+- name: Wait for hub SSH TUN Deployment Ready
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ tl_ssh_deploy_name }}"
+    namespace: "{{ tl_ssh_namespace }}"
+  register: tl_ssh_deploy
+  until: >-
+    (tl_ssh_deploy.resources | default([]) | length > 0)
+    and ((tl_ssh_deploy.resources[0].status.readyReplicas | default(0) | int) >= 1)
+  retries: 30
+  delay: 5
+
+- name: Set SSH TUN Ready facts
+  ansible.builtin.set_fact:
+    tl_tunnel_up: true
+    tl_ready: true
+    tl_border_endpoint: "{{ tl_ssh_hub_endpoint }}:{{ tl_ssh_listen_port }}"
+    tl_cloud_endpoint: "{{ tl_ssh_spoke_vtep }}"
+    tl_message: >-
+      tunnelType=sshtunnel: hub sshd :{{ tl_ssh_listen_port }} on {{ tl_ssh_hub_node }};
+      spoke {{ tl_ssh_spoke_host }} VTEP {{ tl_ssh_spoke_vtep }};
+      GoBGP ASN {{ tl_ssh_fabric_asn }} peers={{ tl_ssh_rr_peers }}
+      (lab CP underlay — retire when FR6 OVN gateway BGP Ready).

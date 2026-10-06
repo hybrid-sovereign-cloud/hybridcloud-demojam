@@ -194,8 +194,12 @@
           when: (transportlink_spec.tunnelType | default('')) == 'wireguard'
           ansible.builtin.include_tasks: deploy_wireguard.yml
 
-        - name: Set tunnel-up facts from Vault-backed config (non-wireguard tunnels)
-          when: (transportlink_spec.tunnelType | default('')) != 'wireguard'
+        - name: Deploy managed SSH TUN underlay (remote OSO lab path)
+          when: (transportlink_spec.tunnelType | default('')) == 'sshtunnel'
+          ansible.builtin.include_tasks: deploy_sshtunnel.yml
+
+        - name: Set tunnel-up facts from Vault-backed config (ipsec/macsec)
+          when: (transportlink_spec.tunnelType | default('')) in ['ipsec', 'macsec']
           ansible.builtin.set_fact:
             tl_tunnel_up: true
             tl_ready: true

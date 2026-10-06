@@ -1,12 +1,17 @@
 #!/bin/bash
 # Bring up hostNetwork WireGuard for fabric VTEP underlay (hub or spoke).
 # Expects: wg in PATH (or /binaries/wg), ip from iproute2, privileged + hostNetwork.
+#
+# Routes are re-applied on an interval so CNV / OVN default routes cannot
+# permanently steal RR / peer VTEP CIDRs off wg0 (see design/fabric-verify.md).
 set -euo pipefail
 export PATH="/binaries:/usr/lib/frr:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 IFACE="${WG_IFACE:-wg0}"
 CONF="${WG_CONF:-/etc/wireguard/wg0.conf}"
 ADDR="${WG_ADDRESS:?WG_ADDRESS required}"
 ROUTES="${WG_ROUTES:-}"
+ROUTE_SRC="${WG_ROUTE_SRC:-}"
+ROUTE_INTERVAL="${WG_ROUTE_INTERVAL:-15}"
 
 WG_BIN="$(command -v wg || true)"
 IP_BIN="$(command -v ip || true)"
@@ -28,10 +33,22 @@ sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1 || true
 sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1 || true
 sysctl -w "net.ipv4.conf.${IFACE}.rp_filter=0" >/dev/null 2>&1 || true
 
-for cidr in $ROUTES; do
-  $IP_BIN route replace "$cidr" dev "$IFACE" || true
-done
+apply_routes() {
+  local cidr src_args=()
+  if [ -n "$ROUTE_SRC" ]; then
+    src_args=(src "$ROUTE_SRC")
+  fi
+  for cidr in $ROUTES; do
+    $IP_BIN route replace "$cidr" dev "$IFACE" "${src_args[@]}" || true
+  done
+}
 
-echo "WireGuard $IFACE up addr=$ADDR"
+apply_routes
+echo "WireGuard $IFACE up addr=$ADDR routes='$ROUTES' src='${ROUTE_SRC:-}' interval=${ROUTE_INTERVAL}s"
 $WG_BIN show "$IFACE"
-exec sleep infinity
+
+# Keep preferred routes on wg0 for the life of the pod (CNV/OVN may overwrite).
+while true; do
+  sleep "$ROUTE_INTERVAL"
+  apply_routes
+done

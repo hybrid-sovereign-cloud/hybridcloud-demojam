@@ -17,8 +17,10 @@
     tl_wg_hub_node: "{{ vault_kv_data.hubNodeName | default('') }}"
     # Hub must NOT route its own RR loopbacks (10.255.10.0/24) into wg0.
     # Only spoke VTEP underlays belong on the hub WG routes.
-    tl_wg_hub_routes: "{{ vault_kv_data.hubRoutes | default('10.255.11.0/24') }}"
-    tl_wg_spoke_routes: "{{ vault_kv_data.spokeRoutes | default('10.255.10.0/24') }}"
+    tl_wg_hub_routes: "{{ vault_kv_data.hubRoutes | default('10.255.11.0/24 10.255.12.0/24') }}"
+    # Spoke must keep RR + peer VTEP CIDRs on wg0 (CNV default GW will steal them otherwise).
+    tl_wg_spoke_routes: "{{ vault_kv_data.spokeRoutes | default('10.255.10.0/24 10.255.11.0/24 10.255.12.0/24') }}"
+    tl_wg_route_interval: "{{ vault_kv_data.routeInterval | default('15') }}"
     tl_wg_hub_secret: fabric-wg-hub
     tl_wg_peers: "{{ vault_kv_data.peers | default([]) }}"
     tl_wg_start_script: "{{ lookup('file', role_path ~ '/files/wg-start.sh') }}"

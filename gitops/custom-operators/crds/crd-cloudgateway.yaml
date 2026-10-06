@@ -53,7 +53,7 @@ spec:
                   properties:
                     type:
                       type: string
-                      enum: [wireguard, ipsec, macsec, none]
+                      enum: [wireguard, ipsec, macsec, sshtunnel, none]
                     vaultPeerConfigRef:
                       type: string
                 awsAccountId:

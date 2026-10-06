@@ -369,17 +369,10 @@
         networkplacement_fail_reason: "{{ np_backend_fail_reason | default('') }}"
 
     # ---------------------------------------------------------------
-    # §8.5.5 validate — probes skipped in lab; say so clearly
+    # §8.5.5 validate — live BGP / TCP-179 probe (design/fabric-verify.md)
     # ---------------------------------------------------------------
-    - name: Set validated fact (probes skipped in this lab environment)
-      ansible.builtin.set_fact:
-        np_validated: "{{ np_backend_applied | default(false) | bool }}"
-        np_validated_message: >-
-          {{
-            'Positive/negative connectivity probes skipped in this lab environment; validated reflects backendApplied only.'
-            if (np_backend_applied | default(false))
-            else 'Not validated: backend was not applied.'
-          }}
+    - name: Live-validate EVPN BGP readiness
+      ansible.builtin.include_tasks: validate_bgp.yml
 
     - name: Mark NetworkPlacement status
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
