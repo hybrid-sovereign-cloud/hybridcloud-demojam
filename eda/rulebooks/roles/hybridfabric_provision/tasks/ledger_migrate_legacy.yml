@@ -126,9 +126,9 @@
     kind: ConfigMap
     name: "fabric-numbering-{{ hybridfabric_cr_name }}"
     namespace: "{{ hybridfabric_cr_namespace }}"
-    definition:
-      data:
-        allocated: "{{ _hfm.allocated }}"
+    # ConfigMap data must be strings; build the body in one expression so the
+    # JSON text is not converted back into a mapping by Ansible.
+    definition: "{{ {'data': {'allocated': (_hfm.allocated | to_json if _hfm.allocated is mapping else _hfm.allocated)}} }}"
 
 - name: Remove migrated keys from legacy ledgers
   when: _hfm.needs_write | bool
@@ -141,9 +141,7 @@
     kind: ConfigMap
     name: "{{ item.key }}"
     namespace: "{{ hybridfabric_cr_namespace }}"
-    definition:
-      data:
-        allocated: "{{ item.value }}"
+    definition: "{{ {'data': {'allocated': (item.value | to_json if item.value is mapping else item.value)}} }}"
   loop: "{{ _hfm.legacy | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
