@@ -244,7 +244,7 @@
           borderBgwReady: "{{ hf_border_bgw_ready }}"
           bgwEndpoint: "{{ hf_bgw_endpoint | default('') }}"
           bgwAddress: "{{ hf_bgw_address | default('') }}"
-          bgwPeerCount: "{{ hf_bgw_peer_count | default(0) | int | int }}"
+          bgwPeerCount: "{{ hf_bgw_peer_count | default(0) | int }}"
           hubRrReady: "{{ hf_hub_rr_ready | default(false) }}"
           allocatedVniCount: "{{ hf_allocated_count | int }}"
           availableVniCount: "{{ (hf_pool_size | int) - (hf_allocated_count | int) }}"
