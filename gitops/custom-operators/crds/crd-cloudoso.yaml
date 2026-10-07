@@ -63,10 +63,10 @@ spec:
                       description: Name of the Secret in the CloudOSO namespace
                 baseDomain:
                   type: string
-                  description: Base DNS domain (e.g. )
+                  description: Base DNS domain
                 projectDomain:
                   type: string
-                  description: "Keystone domain name (default: shc_domain)"
+                  description: "Keystone domain name"
                   default: shc_domain
                 externalNetwork:
                   type: string
@@ -81,7 +81,7 @@ spec:
                   default: default
                 designateZoneId:
                   type: string
-                  description: Designate zone UUID for shc. environments
+                  description: Designate zone UUID
                   default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"
                 designateProjectId:
                   type: string
@@ -97,18 +97,16 @@ spec:
                 managementClusterKubeconfigRef:
                   type: string
                   description: >-
-                    Vault KV path (key kubeconfig) for the RHOSO management OpenShift cluster
-                    (the cluster running the openstack-operator, NetConfig and
-                    OpenStackDataPlaneNodeSet). Used by EDA for fabric site-gateway landing
-                    and EDPM EVPN configuration (e.g. oso/oso1/mgmt-kubeconfig).
-                dataplaneNodeSetRef:
-                  type: string
-                  description: >-
-                    OpenStackDataPlaneNodeSet (namespace openstack) whose computes join the
-                    EVPN fabric (e.g. openstack-compute01).
+                    Vault KV path (key kubeconfig) for the OpenStack management cluster. Defaults to
+                    oso/<name>/mgmt-kubeconfig.
+                dataplaneNodeSetRefs:
+                  type: array
+                  description: OpenStackDataPlaneNodeSets that receive the fabric EVPN configuration, rolled out one at a time in this order
+                  items:
+                    type: string
                 netConfigRef:
                   type: string
-                  description: NetConfig (namespace openstack) that receives the `fabric` network (e.g. openstacknetconfig)
+                  description: NetConfig that receives the fabric network. Defaults to openstacknetconfig.
             status:
               description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
               type: object

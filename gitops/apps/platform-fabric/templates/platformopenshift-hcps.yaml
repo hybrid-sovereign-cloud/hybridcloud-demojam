@@ -1,6 +1,5 @@
-# Hosted Control Planes — design/fabric.md §3 (all three HCPs in ZTP).
-# No type=openstack / CloudOSO. Shared CNV underlay via per-entity CloudVirt/local-virt.
-# nodePoolReplicas=1 keeps workshop footprint workable on compact hubs.
+# Hosted clusters joining the platform fabric (design/fabric.md §3, §15).
+# nodePoolReplicas=1 keeps the footprint small on compact hubs.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift

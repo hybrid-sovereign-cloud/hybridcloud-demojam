@@ -1,6 +1,6 @@
 ---
 # RHOSO site gateway (cloud=openstack, transport.type=wireguard) —
-# design/fabric-bgw-plan.md §6. Defaults reproduce the lab build of 2026-10-07.
+# design/fabric.md §21.4 Defaults reproduce the lab build of 2026-10-07.
 cgw_oso_namespace: openstack
 cgw_su_bridge: br-fabric
 cgw_su_nad: fabric
@@ -28,5 +28,12 @@ cgw_edpm_services_override:
   - frr
   - ovn
   - neutron-ovn
-cgw_edpm_wait_retries: 120
 cgw_edpm_wait_delay: 30
+# Per-NodeSet deployment timeout (seconds); NodeSets roll out one at a time.
+cgw_edpm_nodeset_timeout: 3600
+# NodeSet failures tolerated before the rollout stops (0 = stop on the first).
+cgw_edpm_max_failures: 0
+# Fabric fixed-IP allocation range inside siteUnderlay.cidr (network + offset).
+# Size siteUnderlay.cidr and these offsets for the total number of computes.
+cgw_fabric_alloc_start_offset: 100
+cgw_fabric_alloc_end_offset: 150

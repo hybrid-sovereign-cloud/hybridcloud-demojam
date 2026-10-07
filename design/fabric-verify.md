@@ -1,6 +1,6 @@
 # Hybrid Fabric EVPN — Live State
 
-**Captured:** 2026-10-07 (border gateway model, `fabric-bgw-plan.md` Phases 0-3)  
+**Captured:** 2026-10-07. Lab capture of the reference implementation in `fabric.md` §21 (cutover: §22, lab shims: Appendix A).  
 **CENTRAL (hub):** `api.cluster-ngjtm.dyn.redhatworkshops.io`  
 **RHOSO management cluster:** `api.cluster-j7ljz.dyn.redhatworkshops.io` · EDPM `compute01` (ctlplane `172.22.0.100`)  
 **Previous capture** (hub RR pods + WireGuard spoke pods + SSH TUN/GoBGP) is superseded and no longer describes the lab.
@@ -30,12 +30,9 @@ hcp1 worker eth1 192.168.72.60 (DHCP)          compute01 eth5 192.168.80.100 (Ne
 - Data plane: VXLAN 4789 between VTEPs, routed by the BGW (eth1 <-> wg0) and the site gateway (eth1 <-> wg0). MTU: hub underlay 1400, site underlay 1442, wg0 1380, CUDN and Neutron network 1300.
 - HCP routes to the BGW loopback and the RHOSO site underlay arrive by DHCP option 121; compute01's come from the NetConfig `fabric` subnet routes.
 
-## Lab-only shims (not needed on physical sites)
+## Lab-only shims
 
-| Shim | Why | Where |
-|---|---|---|
-| `mutatevirtualmachines.kubemacpool.io=ignore` on `sovereign-cloud` and `clusters-<hcp>-<hcp>` | Hub kubemacpool webhook unavailable, blocked VM create/update | `hybridfabric_provision`, `platformopenshift_provision` |
-| MAC-NAT DaemonSet `openstack/fabric-gw-macnat` (every node) | RHDP hypervisor drops frames whose source MAC is not the node NIC's; nft bridge table swaps the gateway VM MAC and the local enp7s0 MAC | `CloudGateway.spec.siteUnderlay.macNatShim` |
+kubemacpool ignore label and the MAC-translation DaemonSet (`siteUnderlay.macNatShim`) are in use; see `fabric.md` Appendix A.
 
 ## Objects
 
@@ -46,9 +43,9 @@ hcp1 worker eth1 192.168.72.60 (DHCP)          compute01 eth5 192.168.80.100 (Ne
 | `CloudGateway/acme-oso1-gw`, `TransportLink/acme-oso1-link` | `wireguard`, `siteUnderlay` enp7s0/eth5 192.168.80.0/24, MAC-NAT on |
 | HCP1 | NodePool `additionalNetworks: [clusters-hcp1-hcp1/fabric-underlay]`; VTEP `cidrs: [192.168.64.0/18]`; FRRConfiguration neighbor 10.255.10.10 |
 | RHOSO EDPM | NodeSet `openstack-compute01`: network `fabric`, `edpm_enable_chassis_gw: true`, FRR peer 10.255.10.10, `ovn-evpn` on eth5; services `frr`, `neutron-ovn` |
-| Neutron | `acme-core-oso1` (MTU 1300 per plan §7; 1272-byte ping passes), EVPN router VNI 51001 recreated after the chassis became gateway-enabled so `evpn-hcg-<router>` is populated |
+| Neutron | `acme-core-oso1` (MTU 1300, `fabric.md` §21.5; 1272-byte ping passes), EVPN router VNI 51001 recreated after the chassis became gateway-enabled so `evpn-hcg-<router>` is populated |
 
-GitOps now targets a single `platform-fabric` (BGW VM `fabric-bgw`, same loopback; acme and chad as VRFs) — not applied yet; see fabric-bgw-plan §12.1 for the cut-over.
+GitOps now targets a single `platform-fabric` (BGW VM `fabric-bgw`, same loopback; acme and chad as VRFs) — not applied yet; see `fabric.md` §22 for the cutover.
 
 The objects above were applied by hand and then codified in the orchestrator (EDA roles + GitOps, same date). The automation has not yet been run end to end from GitOps on a fresh environment.
 

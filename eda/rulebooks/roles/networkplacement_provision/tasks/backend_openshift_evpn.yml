@@ -148,7 +148,7 @@
             np_backend_fail_reason: EvpnPrepPending
             np_backend_message: "{{ spoke_evpn_prep_message | default('EvpnPrepPending') }}"
 
-        # design/fabric-bgw-plan.md §5 — one iBGP neighbor: the fabric border
+        # design/fabric.md §21.3 — one iBGP neighbor: the fabric border
         # gateway loopback (route reflector, next-hop unchanged). No bgp router-id,
         # update-source or allowas-in: those are node-specific / not needed, FRR
         # sources the session from eth1 (hub underlay, DHCP from the BGW).
@@ -323,19 +323,16 @@
               }}
           loop: "{{ np_spec.prefixes | default([]) }}"
 
-        - name: Resolve Unmanaged VTEP CIDR (hub underlay = fabric machine network)
+        - name: Resolve Unmanaged VTEP CIDR (fabric underlay segment)
           when: spoke_evpn_prep_ready | default(false) | bool
           # HCP workers get eth1 on the fabric underlay by DHCP from the BGW, so the
-          # VTEP CIDR is the underlay (machineNetworkPool / borderGateway.underlay.cidr).
+          # VTEP CIDR is the hub underlay segment (HybridFabric.spec.underlay.cidr).
           # Legacy (no BGW): dummy evpn-vtep0 addresses in spec.vtepCidr / 10.255.11.0/24.
           ansible.builtin.set_fact:
             np_vtep_name: "{{ np_spec.network }}-evpn-vtep"
             np_vtep_cidr: >-
               {{
-                (
-                  ((hn_fabric_cr.spec.borderGateway | default({})).underlay | default({})).cidr
-                  | default(((hn_fabric_cr.spec.ipam | default({})).machineNetworkPool | default({})).cidr | default(''), true)
-                )
+                ((hn_fabric_cr.spec.underlay | default({})).cidr | default(''))
                 if (np_bgw_loopback | default('')) | length > 0
                 else (hn_fabric_cr.spec.vtepCidr | default('10.255.11.0/24', true))
               }}

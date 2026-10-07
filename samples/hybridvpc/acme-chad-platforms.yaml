@@ -14,13 +14,13 @@ spec:
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - acme-fabric
-    preferredFabricRef: acme-fabric
+      - platform-fabric
+    preferredFabricRef: platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   networking:
     allocateFromFabric: true
-    fabricRef: acme-fabric
+    fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
@@ -35,13 +35,13 @@ spec:
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - chad-fabric
-    preferredFabricRef: chad-fabric
+      - platform-fabric
+    preferredFabricRef: platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   networking:
     allocateFromFabric: true
-    fabricRef: chad-fabric
+    fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
@@ -56,13 +56,13 @@ spec:
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - chad-fabric
-    preferredFabricRef: chad-fabric
+      - platform-fabric
+    preferredFabricRef: platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   networking:
     allocateFromFabric: true
-    fabricRef: chad-fabric
+    fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
@@ -79,10 +79,10 @@ spec:
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - acme-fabric
-    preferredFabricRef: acme-fabric
+      - platform-fabric
+    preferredFabricRef: platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   networking:
     allocateFromFabric: true
-    fabricRef: acme-fabric
+    fabricRef: platform-fabric

@@ -58,6 +58,32 @@ spec:
                 networkAttachment:
                   type: string
                   description: Optional NAD name for secondary networking
+                hostedClusterCidrDefaults:
+                  type: object
+                  description: >-
+                    Default pod/service CIDR ranges for hosted clusters on this environment when
+                    PlatformOpenshift.spec.networking does not set them.
+                  properties:
+                    clusterNetworkPool:
+                      type: object
+                      description: Pod CIDR range, carved per cluster.
+                      properties:
+                        cidr:
+                          type: string
+                          default: 100.64.0.0/11
+                        blockPrefixLength:
+                          type: integer
+                          default: 14
+                    serviceNetworkPool:
+                      type: object
+                      description: Service CIDR range, carved per cluster.
+                      properties:
+                        cidr:
+                          type: string
+                          default: 100.96.0.0/11
+                        blockPrefixLength:
+                          type: integer
+                          default: 16
                 enableVRF:
                   type: boolean
                   description: Enable VRF / EVPN-ready networking (design-time flag)

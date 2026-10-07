@@ -362,14 +362,17 @@
         prefixes = json.loads(os.environ["PREFIXES"])
         net = json.loads(os.environ["NET_STATUS"])
         cluster_cidrs = []
-        # OVN-K: a CUDN subnet must not overlap the own pod/service CIDRs of the cluster;
-        # machineNetwork is the node underlay (eth1 connected route), also excluded.
+        # OVN-K: a CUDN subnet must not overlap the own pod/service CIDRs of the cluster.
+        # The node underlay (connected route on the node NIC) is excluded too:
+        # underlay.cidr, or machineNetwork on clusters that predate the fabric underlay.
         for key in ("clusterNetwork", "serviceNetwork", "machineNetwork"):
             val = net.get(key) or []
             if isinstance(val, str):
                 cluster_cidrs.append(val)
             elif isinstance(val, list):
                 cluster_cidrs.extend([v for v in val if v])
+        if (net.get("underlay") or {}).get("cidr"):
+            cluster_cidrs.append(net["underlay"]["cidr"])
         hits = []
         for p in prefixes:
             for c in cluster_cidrs:

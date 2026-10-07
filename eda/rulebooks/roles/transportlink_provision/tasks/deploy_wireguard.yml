@@ -1,5 +1,5 @@
 ---
-# tunnelType=wireguard (design/fabric-bgw-plan.md §6, §8):
+# tunnelType=wireguard (design/fabric.md §21.4, §8):
 #   BGW side    : this gateway becomes a [Peer] on the border gateway — rendered by
 #                 hybridfabric_provision/tasks/bgw_config.yml from Vault
 #                 (gateway wgPublicKey via CloudGateway.spec.transport.vaultPeerConfigRef).

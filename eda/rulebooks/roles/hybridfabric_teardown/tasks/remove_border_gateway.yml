@@ -25,7 +25,8 @@
       ansible.builtin.set_fact:
         hf_teardown_bgw_name: >-
           {{ hf_teardown_bgw.name | default('fabric-bgw-' ~ (hybridfabric_cr_name | regex_replace('-fabric$', '')), true) }}
-        hf_teardown_bgw_nad: "{{ (hf_teardown_bgw.underlay | default({})).nadName | default('fabric-underlay', true) }}"
+        hf_teardown_bgw_nad: >-
+          {{ ((hf_teardown_bgw_self.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true) }}
 
     - name: List HybridFabrics that name the same BGW
       kubernetes.core.k8s_info:
@@ -88,7 +89,7 @@
           {%   if f.metadata.name != hybridfabric_cr_name
                  and f.metadata.deletionTimestamp is not defined
                  and (f.spec.borderGateway | default({})).loopback | default('') | length > 0
-                 and ((f.spec.borderGateway.underlay | default({})).nadName | default('fabric-underlay', true)) == hf_teardown_bgw_nad %}
+                 and ((f.spec.underlay | default({})).nadName | default('fabric-underlay', true)) == hf_teardown_bgw_nad %}
           {%     set _ = users.append(f.metadata.name) %}
           {%   endif %}
           {% endfor %}

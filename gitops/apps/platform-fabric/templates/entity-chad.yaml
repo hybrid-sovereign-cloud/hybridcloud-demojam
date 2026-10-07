@@ -1,5 +1,5 @@
-# Chad tenant — VRF chad-app on the shared platform-fabric (HCP2 + HCP3), isolated
-# from acme by RT (design/fabric.md §6). Always-on ZTP.
+# Tenant entity with one VRF across two hosted clusters on the platform fabric
+# (design/fabric.md §6).
 ---
 apiVersion: v1
 kind: Namespace

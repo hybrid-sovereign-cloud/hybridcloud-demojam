@@ -23,7 +23,7 @@ spec:
         openAPIV3Schema:
           description: >-
             OpenStackMigration requests migration of a VM from VMware (via MTV catalog
-            or explicit plan) to a CloudOSO OpenStack project. EDA runs os-migrate
+            or explicit plan) to a CloudOSO OpenStack project. The platform automation runs os-migrate
             playbooks after resolving credentials from Vault.
           type: object
           required:
@@ -127,7 +127,7 @@ spec:
                       enum: [auto, existing, specify]
                       default: auto
             status:
-              description: Observed migration state populated by operator and EDA
+              description: Observed migration state populated by the platform
               type: object
               properties:
                 name:

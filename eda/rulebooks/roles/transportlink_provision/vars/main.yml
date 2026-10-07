@@ -1,5 +1,5 @@
 ---
-# TransportLink tunnelType=wireguard (design/fabric-bgw-plan.md §6): the tunnel
+# TransportLink tunnelType=wireguard (design/fabric.md §21.4): the tunnel
 # runs between the fabric border gateway VM (hub) and the RHOSO site gateway VM,
 # WireGuard inside wstunnel over the hub ingress (TLS 443).
 tl_oso_namespace: openstack

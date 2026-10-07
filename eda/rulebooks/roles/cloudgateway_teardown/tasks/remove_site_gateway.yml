@@ -2,7 +2,7 @@
 # Remove the RHOSO site gateway objects created by
 # cloudgateway_provision/tasks/openstack_site_gateway.yml.
 # EDPM (NetConfig `fabric`, NodeSet vars/services) is NOT reverted automatically:
-# rolling computes back is an operator decision (design/fabric-bgw-plan.md §6.2).
+# rolling computes back is an operator decision (design/fabric.md §21.4).
 
 - name: Read CloudOSO for the management cluster kubeconfig ref
   kubernetes.core.k8s_info:

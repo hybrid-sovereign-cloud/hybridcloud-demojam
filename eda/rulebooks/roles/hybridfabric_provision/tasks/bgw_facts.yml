@@ -1,7 +1,7 @@
 ---
 # Compute every fact the border gateway (BGW) needs from a HybridFabric CR.
 # Shared by deploy_border_gateway.yml and transportlink_provision (include_role
-# tasks_from: bgw_config.yml). design/fabric-bgw-plan.md §4.
+# tasks_from: bgw_config.yml). design/fabric.md §21.2
 #
 # Required vars: bgw_fabric_cr (HybridFabric object), services_api_host,
 #                services_bearer_token
@@ -10,6 +10,8 @@
 - name: Set BGW base facts from HybridFabric.spec.borderGateway
   ansible.builtin.set_fact:
     bgw_spec: "{{ bgw_fabric_cr.spec.borderGateway | default({}) }}"
+    # The hub underlay segment is a fabric-level object (HybridFabric.spec.underlay).
+    bgw_ul: "{{ bgw_fabric_cr.spec.underlay | default({}) }}"
     bgw_fabric_name: "{{ bgw_fabric_cr.metadata.name }}"
     bgw_namespace: "{{ bgw_fabric_cr.metadata.namespace | default('sovereign-cloud') }}"
     bgw_asn: "{{ bgw_fabric_cr.spec.domainAsn | int }}"
@@ -19,15 +21,10 @@
     bgw_name: >-
       {{ bgw_spec.name | default('fabric-bgw-' ~ (bgw_fabric_name | regex_replace('-fabric$', '')), true) }}
     bgw_loopback: "{{ bgw_spec.loopback | default('') }}"
-    bgw_underlay_nad: "{{ (bgw_spec.underlay | default({})).nadName | default(bgw_default_underlay_nad, true) }}"
-    bgw_underlay_cidr: >-
-      {{
-        (bgw_spec.underlay | default({})).cidr
-        | default(((bgw_fabric_cr.spec.ipam | default({})).machineNetworkPool | default({})).cidr | default(''), true)
-      }}
-    bgw_underlay_mtu: "{{ (bgw_spec.underlay | default({})).mtu | default(bgw_default_underlay_mtu, true) | int }}"
-    bgw_dhcp_lease: >-
-      {{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).leaseTime | default(bgw_default_dhcp_lease, true) }}
+    bgw_underlay_nad: "{{ bgw_ul.nadName | default(bgw_default_underlay_nad, true) }}"
+    bgw_underlay_cidr: "{{ bgw_ul.cidr | default('') }}"
+    bgw_underlay_mtu: "{{ bgw_ul.mtu | default(bgw_default_underlay_mtu, true) | int }}"
+    bgw_dhcp_lease: "{{ (bgw_ul.dhcpRange | default({})).leaseTime | default(bgw_default_dhcp_lease, true) }}"
     bgw_wg_address: "{{ (bgw_spec.wireguard | default({})).address | default(bgw_default_wg_address, true) }}"
     bgw_wg_listen_port: "{{ (bgw_spec.wireguard | default({})).listenPort | default(bgw_default_wg_listen_port, true) | int }}"
     bgw_wg_mtu: "{{ (bgw_spec.wireguard | default({})).mtu | default(bgw_default_wg_mtu, true) | int }}"
@@ -38,14 +35,14 @@
     bgw_vault_path: "{{ bgw_spec.vaultCredentialRef | default('fabric/' ~ bgw_fabric_name ~ '/bgw', true) }}"
     bgw_storage_class: "{{ bgw_spec.storageClass | default(bgw_default_storage_class, true) }}"
 
-- name: Require borderGateway.loopback and an underlay CIDR
+- name: Require borderGateway.loopback and spec.underlay.cidr
   ansible.builtin.assert:
     that:
       - bgw_loopback | length > 0
       - bgw_underlay_cidr | length > 0
     fail_msg: >-
       HybridFabric {{ bgw_fabric_name }}: spec.borderGateway.loopback and
-      spec.borderGateway.underlay.cidr (or spec.ipam.machineNetworkPool.cidr) are required.
+      spec.underlay.cidr are required.
 
 - name: Compute underlay / WireGuard addressing (python ipaddress)
   ansible.builtin.shell: |
@@ -76,9 +73,9 @@
     executable: /bin/bash
   environment:
     CIDR: "{{ bgw_underlay_cidr }}"
-    ADDR: "{{ (bgw_spec.underlay | default({})).address | default('') }}"
-    DHCP_START: "{{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).start | default('') }}"
-    DHCP_END: "{{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).end | default('') }}"
+    ADDR: "{{ bgw_ul.gatewayAddress | default('') }}"
+    DHCP_START: "{{ (bgw_ul.dhcpRange | default({})).start | default('') }}"
+    DHCP_END: "{{ (bgw_ul.dhcpRange | default({})).end | default('') }}"
     WG: "{{ bgw_wg_address }}"
     LOOPBACK: "{{ bgw_loopback }}"
   register: _bgw_net_calc

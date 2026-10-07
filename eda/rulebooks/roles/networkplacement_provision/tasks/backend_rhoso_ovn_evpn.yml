@@ -202,7 +202,7 @@
                     net = conn.network.create_network(**kw)
                     created_net = True
                 elif mtu and int(net.mtu or 0) != mtu:
-                    # Fabric MTU budget (design/fabric-bgw-plan.md §7): VXLAN over
+                    # Fabric MTU budget (design/fabric.md §21.5): VXLAN over
                     # WireGuard over wstunnel leaves 1330 for the inner frame.
                     net = conn.network.update_network(net, mtu=mtu)
                     updated_mtu = True

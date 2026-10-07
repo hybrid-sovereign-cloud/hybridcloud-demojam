@@ -162,11 +162,9 @@ spec:
                 networking:
                   type: object
                   description: >-
-                    OpenShift cluster address plan. When allocateFromFabric is true (default),
-                    Ansible carves unique CIDRs from HybridFabric.spec.ipam so multiple
-                    PlatformOpenshift CRs on the same fabric never reuse the Hypershift
-                    defaults (10.132.0.0/14 + 172.31.0.0/16). Explicit CIDRs are validated
-                    for conflicts against other fabric members and reserved hybrid overlays.
+                    Cluster address plan. Explicit clusterNetwork/serviceNetwork are used as given; otherwise
+                    pod and service CIDRs are allocated from the platform defaults (100.64.0.0/10 space).
+                    Either way they are checked against the hub and the other member clusters.
                   properties:
                     allocateFromFabric:
                       type: boolean
@@ -174,8 +172,7 @@ spec:
                     fabricRef:
                       type: string
                       description: >-
-                        Fabric whose ipam pools to use. If empty, discovered from Entity
-                        visibility (HybridFabric.entityRefs / preferred fabric).
+                        Fabric this cluster joins. If empty, discovered from the Entity's fabrics.
                     clusterNetwork:
                       type: array
                       items:
@@ -190,14 +187,14 @@ spec:
                       type: array
                       items:
                         type: string
-                      description: Explicit machine/node CIDR(s); omit to allocate when pool exists
+                      description: Deprecated; the node underlay comes from the fabric (HybridFabric.spec.underlay).
                     allowConflict:
                       type: boolean
                       default: false
-                      description: Escape hatch — must stay false for fabric-attached clusters
+                      description: Accept conflicting CIDRs. Must stay false for fabric members.
                 fabric:
                   type: object
-                  description: Fabric join policy (see design/fabric.md §15)
+                  description: Fabric join policy
                   properties:
                     joinPolicy:
                       type: string
@@ -290,10 +287,19 @@ spec:
                       type: array
                       items:
                         type: string
+                    underlay:
+                      type: object
+                      description: Fabric underlay the cluster nodes attach to (informational).
+                      properties:
+                        nadName:
+                          type: string
+                        cidr:
+                          type: string
                     machineNetwork:
                       type: array
                       items:
                         type: string
+                      description: Deprecated (pre-underlay clusters only).
                     fabricRef:
                       type: string
                     allocationSource:
@@ -307,17 +313,16 @@ spec:
                     legacyClusterCidrs:
                       type: boolean
                       description: >-
-                        True when cluster/service CIDRs lie outside the fabric's default pools
-                        (pre-CG-NAT clusters). They are kept and only checked against the hub
-                        and other clusters (design/fabric.md §16).
+                        True when the cluster's pod/service CIDRs lie outside the platform default ranges. Such
+                        clusters are kept and checked against the hub and other clusters only.
                     ipamCondition:
                       type: string
-                      enum: [FabricPool, LegacyClusterCidrs]
+                      enum: [DefaultRange, LegacyClusterCidrs]
                     ipamMessage:
                       type: string
                 fabricMembership:
                   type: array
-                  description: Fabrics this cluster has joined (design §15)
+                  description: Fabrics this cluster has joined
                   items:
                     type: object
                     properties:

@@ -1,6 +1,6 @@
 ---
 # RHOSO site gateway on the management OpenShift cluster
-# (design/fabric-bgw-plan.md §6.1). Objects in namespace openstack unless noted:
+# (design/fabric.md §21.4). Objects in namespace openstack unless noted:
 #   NNCP fabric-underlay-<node> (cluster)  linux-bridge br-fabric on siteUnderlay.interface
 #   NAD fabric                              bridge CNI on br-fabric, no IPAM
 #   fabric-gw-macnat SA/CRB/CM/DaemonSet    LAB ONLY MAC-NAT shim (macNatShim.enabled)

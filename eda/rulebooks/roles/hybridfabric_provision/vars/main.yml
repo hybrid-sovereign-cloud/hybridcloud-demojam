@@ -7,7 +7,7 @@ hf_hub_rr_namespace: "{{ hybridfabric_cr_namespace }}"
 hf_hub_rr_required: true
 
 # ---------------------------------------------------------------------------
-# Border gateway (BGW) VM — design/fabric-bgw-plan.md §4.
+# Border gateway (BGW) VM — design/fabric.md §21.2
 # Defaults reproduce the lab build verified on 2026-10-07.
 # ---------------------------------------------------------------------------
 bgw_default_image: "docker://quay.io/containerdisks/centos-stream:9"

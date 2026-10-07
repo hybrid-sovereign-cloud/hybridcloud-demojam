@@ -539,7 +539,7 @@ spec:
                       description: Name of the Secret in the CloudAWS namespace
                 baseDomain:
                   type: string
-                  description: "Parent DNS domain (e.g. sandbox5530.opentlc.com)"
+                  description: "Parent DNS domain, e.g. example.com"
                 landingzone:
                   type: string
                   description: Landing Zone template name
@@ -706,7 +706,7 @@ spec:
                       description: Name of the Secret in the CloudOSO namespace
                 baseDomain:
                   type: string
-                  description: Base DNS domain (e.g. )
+                  description: Base DNS domain
                 projectDomain:
                   type: string
                   description: "Keystone domain name (default: shc_domain)"
@@ -724,7 +724,7 @@ spec:
                   default: default
                 designateZoneId:
                   type: string
-                  description: Designate zone UUID for shc. environments
+                  description: Designate zone UUID
                   default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"
                 designateProjectId:
                   type: string
@@ -1217,7 +1217,7 @@ spec:
         openAPIV3Schema:
           description: >-
             OpenStackMigration requests migration of a VM from VMware (via MTV catalog
-            or explicit plan) to a CloudOSO OpenStack project. EDA runs os-migrate
+            or explicit plan) to a CloudOSO OpenStack project. The platform automation runs os-migrate
             playbooks after resolving credentials from Vault.
           type: object
           required:
@@ -1321,7 +1321,7 @@ spec:
                       enum: [auto, existing, specify]
                       default: auto
             status:
-              description: Observed migration state populated by operator and EDA
+              description: Observed migration state populated by the platform
               type: object
               properties:
                 name:
@@ -3148,7 +3148,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        description: Entity metadata.name (e.g. acme-corp, chad)
+                        description: Entity name
             status:
               type: object
               properties:

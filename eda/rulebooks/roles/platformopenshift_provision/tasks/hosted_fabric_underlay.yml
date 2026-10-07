@@ -1,6 +1,6 @@
 ---
 # Attach HostedCluster KubeVirt workers to the fabric hub underlay L2
-# (design/fabric-bgw-plan.md §5). Never fails cluster provisioning: any gap
+# (design/fabric.md §21.3). Never fails cluster provisioning: any gap
 # leaves hc_additional_networks empty and the next reconcile adds it (the
 # NodePool then rolls its workers, upgradeType Replace).
 #
@@ -49,10 +49,10 @@
       ansible.builtin.set_fact:
         _hcfu_bgw: "{{ (_hcfu_fabric.resources | default([{}]))[0].spec.borderGateway | default({}) }}"
 
-    - name: Set underlay NAD facts
+    - name: Set underlay NAD facts (HybridFabric.spec.underlay)
       ansible.builtin.set_fact:
-        hc_underlay_nad: "{{ (_hcfu_bgw.underlay | default({})).nadName | default('fabric-underlay', true) }}"
-        hc_underlay_mtu: "{{ (_hcfu_bgw.underlay | default({})).mtu | default(1400, true) | int }}"
+        hc_underlay_nad: "{{ ((_hcfu_fabric.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true) }}"
+        hc_underlay_mtu: "{{ ((_hcfu_fabric.resources | default([]) + [{}])[0].spec.underlay | default({})).mtu | default(1400, true) | int }}"
 
     - name: Skip when the fabric has no border gateway
       when: (_hcfu_bgw.loopback | default('')) | length == 0

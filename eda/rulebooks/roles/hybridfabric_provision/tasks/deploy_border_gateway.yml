@@ -1,9 +1,9 @@
 ---
 # Hub border gateway (BGW) VM for HybridFabric.spec.borderGateway
-# (design/fabric-bgw-plan.md §4; replaces the hub RR pods of deploy_hub_rr.yml).
+# (design/fabric.md §21.2; replaces the hub RR pods of deploy_hub_rr.yml).
 #
 # Objects (namespace = HybridFabric namespace, normally sovereign-cloud):
-#   NAD <underlay.nadName>        OVN-K layer2, no IPAM, mtu underlay.mtu
+#   NAD <spec.underlay.nadName>   OVN-K layer2, no IPAM, mtu spec.underlay.mtu
 #   Secret <bgw>-config           wg0.conf / frr.conf / dnsmasq / nft (bgw_config.yml)
 #   Secret <bgw>-cloudinit        cloud-init userdata (first boot)
 #   VirtualMachine <bgw>          CentOS Stream 9, default (masquerade) + underlay (bridge)

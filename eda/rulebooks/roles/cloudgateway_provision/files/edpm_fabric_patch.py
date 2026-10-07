@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """Compute NetConfig / OpenStackDataPlaneNodeSet merge patches that put EDPM
-computes on the fabric site underlay with FRR + ovn-evpn (design/fabric-bgw-plan.md §6.2).
+computes on the fabric site underlay with FRR + ovn-evpn (design/fabric.md
+§10.3.5, "EDPM landing").
 
-Inputs (environment, JSON): NETCONFIG, NODESET, PARAMS. Output dir: argv[1].
-Writes <out>/netconfig-patch.json and <out>/nodeset-patch.json (only when a
-change is needed) and prints a JSON summary on stdout.
+Usage: edpm_fabric_patch.py <out_dir> netconfig|nodeset
+
+Inputs (environment, JSON):
+  PARAMS        fabric parameters (see below)
+  NETCONFIG     the NetConfig (both modes; nodeset mode reads the allocation range)
+  NODESET       nodeset mode: the OpenStackDataPlaneNodeSet to patch
+  ALL_NODESETS  nodeset mode: every NodeSet in the namespace, so fabric fixed IPs
+                already held by other NodeSets are never handed out twice
+
+netconfig mode writes <out>/netconfig-patch.json when the `fabric` network must
+change. nodeset mode writes <out>/nodeset-patch.json when that NodeSet must
+change. Both print a JSON summary; nodeset mode includes a fingerprint of the
+desired fabric state of that NodeSet.
 
 Kept in Python on purpose: edpm_network_config_template is itself a Jinja
 template ({{ fabric_ip }} ...); building it here and handing the file to the
@@ -18,17 +29,15 @@ import os
 import re
 import sys
 
-netconfig = json.loads(os.environ["NETCONFIG"])
-nodeset = json.loads(os.environ["NODESET"])
+out_dir, mode = sys.argv[1], sys.argv[2]
 p = json.loads(os.environ["PARAMS"])
-out_dir = sys.argv[1]
+netconfig = json.loads(os.environ.get("NETCONFIG") or "{}")
 
 net_name = p["network"]                      # NetConfig network name, e.g. fabric
 subnet_name = p.get("subnetName", "subnet1")
 cidr = ipaddress.ip_network(p["cidr"], strict=False)
 mtu = int(p["mtu"])
 gw = p["gatewayAddress"]
-iface = p["computeInterface"]
 asn = int(p["asn"])
 bgw_lb = p["bgwLoopback"]
 route_dests = p["routeDestinations"]          # [bgw loopback/32, hub underlay, wg net]
@@ -36,51 +45,81 @@ nft_sources = p["nftSources"]
 alloc_start = cidr.network_address + int(p.get("allocStartOffset", 100))
 alloc_end = min(cidr.network_address + int(p.get("allocEndOffset", 150)), cidr.broadcast_address - 1)
 
-# ---------------------------------------------------------------- NetConfig
-networks = copy.deepcopy(netconfig.get("spec", {}).get("networks", []))
-base_domain = ""
-for n in networks:
-    dd = n.get("dnsDomain") or ""
-    if "." in dd:
-        base_domain = dd.split(".", 1)[1]
-        break
-desired_net = {
-    "name": net_name,
-    "dnsDomain": "%s.%s" % (net_name, base_domain) if base_domain else net_name,
-    "mtu": mtu,
-    "serviceNetwork": net_name,
-    "subnets": [{
-        "name": subnet_name,
-        "cidr": str(cidr),
-        "allocationRanges": [{"start": str(alloc_start), "end": str(alloc_end)}],
-        # Routes MUST live here: the dataplane operator derives
-        # <net>_host_routes from NetConfig and overwrites ansibleVars copies.
-        "routes": [{"destination": d, "nexthop": gw} for d in route_dests],
-    }],
-}
-existing = [n for n in networks if n.get("name", "").lower() == net_name.lower()]
-netconfig_changed = True
-if existing:
-    cur = existing[0]
-    cmp_keys = ("dnsDomain", "mtu", "subnets")
-    netconfig_changed = any(cur.get(k) != desired_net[k] for k in cmp_keys)
-    networks = [desired_net if n is cur else n for n in networks]
-else:
-    networks.append(desired_net)
 
-# ---------------------------------------------------------------- NodeSet
+def meta(obj):
+    return {"name": obj["metadata"]["name"], "namespace": obj["metadata"]["namespace"]}
+
+
+def desired_network():
+    base_domain = ""
+    for n in netconfig.get("spec", {}).get("networks", []):
+        dd = n.get("dnsDomain") or ""
+        if "." in dd and n.get("name", "").lower() != net_name.lower():
+            base_domain = dd.split(".", 1)[1]
+            break
+    return {
+        "name": net_name,
+        "dnsDomain": "%s.%s" % (net_name, base_domain) if base_domain else net_name,
+        "mtu": mtu,
+        "serviceNetwork": net_name,
+        "subnets": [{
+            "name": subnet_name,
+            "cidr": str(cidr),
+            "allocationRanges": [{"start": str(alloc_start), "end": str(alloc_end)}],
+            # Routes MUST live here: the dataplane operator derives
+            # <net>_host_routes from NetConfig and overwrites ansibleVars copies.
+            "routes": [{"destination": d, "nexthop": gw} for d in route_dests],
+        }],
+    }
+
+
+desired_net = desired_network()
+
+# ------------------------------------------------------------- netconfig mode
+if mode == "netconfig":
+    networks = copy.deepcopy(netconfig.get("spec", {}).get("networks", []))
+    existing = [n for n in networks if n.get("name", "").lower() == net_name.lower()]
+    changed = True
+    if existing:
+        cur = existing[0]
+        changed = any(cur.get(k) != desired_net[k] for k in ("dnsDomain", "mtu", "subnets"))
+        networks = [desired_net if n is cur else n for n in networks]
+    else:
+        networks.append(desired_net)
+    if changed:
+        with open(os.path.join(out_dir, "netconfig-patch.json"), "w") as f:
+            json.dump({"apiVersion": netconfig["apiVersion"], "kind": netconfig["kind"],
+                       "metadata": meta(netconfig), "spec": {"networks": networks}}, f)
+    print(json.dumps({"netconfig_changed": changed}))
+    sys.exit(0)
+
+# --------------------------------------------------------------- nodeset mode
+nodeset = json.loads(os.environ["NODESET"])
+all_nodesets = json.loads(os.environ.get("ALL_NODESETS") or "[]")
+iface = p["computeInterface"]                 # already resolved for this NodeSet
+my_name = nodeset["metadata"]["name"]
+
+
+def fabric_ips(ns):
+    ips = set()
+    for n in ((ns.get("spec") or {}).get("nodes") or {}).values():
+        for net in n.get("networks", []) or []:
+            if net.get("name", "").lower() == net_name.lower() and net.get("fixedIP"):
+                ips.add(net["fixedIP"])
+    return ips
+
+
+used = set()
+for other in all_nodesets:
+    if other.get("metadata", {}).get("name") != my_name:
+        used |= fabric_ips(other)
+used |= fabric_ips(nodeset)
+
 spec = nodeset.get("spec", {})
 nodes = spec.get("nodes", {}) or {}
 tmpl_vars = (((spec.get("nodeTemplate") or {}).get("ansible") or {}).get("ansibleVars") or {})
 
-used = set()
-for n in nodes.values():
-    for net in n.get("networks", []) or []:
-        if net.get("name", "").lower() == net_name.lower() and net.get("fixedIP"):
-            used.add(net["fixedIP"])
-
-node_patch = {}
-node_ips = {}
+node_patch, node_ips = {}, {}
 nodes_changed = False
 cursor = int(alloc_start)
 for name in sorted(nodes):
@@ -93,7 +132,8 @@ for name in sorted(nodes):
         while str(ipaddress.ip_address(cursor)) in used:
             cursor += 1
         if cursor > int(alloc_end):
-            raise SystemExit("fabric allocation range exhausted")
+            raise SystemExit("fabric allocation range %s-%s exhausted at NodeSet %s"
+                             % (alloc_start, alloc_end, my_name))
         ip = str(ipaddress.ip_address(cursor))
         used.add(ip)
         cursor += 1
@@ -104,7 +144,7 @@ for name in sorted(nodes):
     entry = {}
     if not (mine and mine[0].get("fixedIP")):
         entry["networks"] = nets
-    # A single-node NodeSet may carry the VTEP IP at nodeTemplate level (lab).
+    # A single-node NodeSet may carry the VTEP IP at nodeTemplate level.
     if (node_vars.get("edpm_neutron_ovn_evpn_local_ip")
             or tmpl_vars.get("edpm_neutron_ovn_evpn_local_ip")) != ip:
         entry.setdefault("ansible", {})["ansibleVars"] = {"edpm_neutron_ovn_evpn_local_ip": ip}
@@ -156,7 +196,7 @@ block = (
     "  routes: {{ %s_host_routes }}\n"
 ) % (iface, net_name, net_name, net_name, net_name)
 if not template:
-    raise SystemExit("NodeSet has no edpm_network_config_template to extend")
+    raise SystemExit("NodeSet %s has no edpm_network_config_template to extend" % my_name)
 if not re.search(r"name:\s*%s\s*$" % re.escape(iface), template, re.M):
     m = re.search(r"^- type: ovs_bridge", template, re.M)
     if m:
@@ -168,14 +208,17 @@ if not re.search(r"name:\s*%s\s*$" % re.escape(iface), template, re.M):
 vars_patch = {k: v for k, v in desired_vars.items() if tmpl_vars.get(k) != v}
 
 services = list(spec.get("services") or [])
-svc_changed = False
+
+
 def insert_after(svcs, new, after):
     if new in svcs:
         return False
     idx = svcs.index(after) + 1 if after in svcs else len(svcs)
     svcs.insert(idx, new)
     return True
-svc_changed |= insert_after(services, "frr", "install-certs")
+
+
+svc_changed = insert_after(services, "frr", "install-certs")
 svc_changed |= insert_after(services, "neutron-ovn", "ovn")
 
 nodeset_changed = bool(vars_patch) or nodes_changed or svc_changed
@@ -183,14 +226,9 @@ nodeset_changed = bool(vars_patch) or nodes_changed or svc_changed
 # Stable across runs (independent of whether the template block already exists).
 fp_vars = {k: v for k, v in desired_vars.items() if k != "edpm_network_config_template"}
 fingerprint = hashlib.sha256(json.dumps({
-    "net": desired_net, "vars": fp_vars, "ips": node_ips, "iface": iface,
+    "nodeset": my_name, "net": desired_net, "vars": fp_vars, "ips": node_ips, "iface": iface,
 }, sort_keys=True).encode()).hexdigest()[:8]
 
-meta = lambda obj: {"name": obj["metadata"]["name"], "namespace": obj["metadata"]["namespace"]}
-if netconfig_changed:
-    with open(os.path.join(out_dir, "netconfig-patch.json"), "w") as f:
-        json.dump({"apiVersion": netconfig["apiVersion"], "kind": netconfig["kind"],
-                   "metadata": meta(netconfig), "spec": {"networks": networks}}, f)
 if nodeset_changed:
     patch_spec = {}
     if vars_patch:
@@ -204,7 +242,7 @@ if nodeset_changed:
                    "metadata": meta(nodeset), "spec": patch_spec}, f)
 
 print(json.dumps({
-    "netconfig_changed": netconfig_changed,
+    "nodeset": my_name,
     "nodeset_changed": nodeset_changed,
     "changed_vars": sorted(vars_patch),
     "services_changed": svc_changed,

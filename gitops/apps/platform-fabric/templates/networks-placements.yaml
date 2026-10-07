@@ -1,5 +1,4 @@
-# Tenant VRFs on the single platform fabric — acme-core on HCP1; chad-app on HCP2+HCP3.
-# No CloudOSO / OSO1 placements.
+# Tenant VRFs (HybridNetwork) and their placements on the platform fabric.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridNetwork

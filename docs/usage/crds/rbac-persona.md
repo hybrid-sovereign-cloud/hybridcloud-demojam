@@ -8,8 +8,8 @@ Defines a **group** of users (Keycloak / IdP group name) used by Entity, Cloud\*
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Rbac
 metadata:
-  name: acme-platform-admins
-  namespace: entity-acme-corp
+  name: example-platform-admins
+  namespace: entity-example-corp
 spec:
   # group / members per your Rbac CR schema
 ```

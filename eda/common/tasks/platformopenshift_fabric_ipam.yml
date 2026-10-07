@@ -1,34 +1,26 @@
 ---
-# PlatformOpenshift cluster CIDRs vs the fabric (design/fabric.md §16).
+# PlatformOpenshift pod/service CIDRs (design/fabric.md §16). Cluster CIDR
+# selection is not a fabric concern: these CIDRs are never advertised into the
+# fabric. Candidates, in order: recorded status.networking (kept as-is), explicit
+# spec.networking, else a new block from the default ranges
+# (CloudVirt.spec.hostedClusterCidrDefaults, else role vars
+# po_default_cluster_network_pool / po_default_service_network_pool: CG-NAT
+# 100.64.0.0/11 /14 and 100.96.0.0/11 /16), else HyperShift defaults when
+# allocateFromFabric is false.
 #
-# Only HybridNetwork / NetworkPlacement (CUDN, Neutron) prefixes are advertised
-# into the fabric, so only the overlay needs fabric-wide uniqueness. Cluster pod
-# and service CIDRs are never advertised; their constraints are:
-#   (a) HyperShift on KubeVirt: a hosted cluster's pod/service CIDRs must not
-#       overlap the hub's own pod/service CIDRs;
-#   (b) OVN-K: a CUDN subnet must not overlap the cluster's own pod/service CIDR
-#       (enforced per placement in networkplacement_provision).
-# HybridFabric.spec.ipam.clusterNetworkPool / serviceNetworkPool are only DEFAULTS
-# for new clusters (greenfield: CG-NAT 100.64.0.0/10), not uniqueness pools.
-# Overlay (HybridNetwork) prefixes are unique per HybridNetwork only and are
-# checked by NetworkPlacement, never here.
-#
-# Overlap rules (implemented in common/files/fabric_cluster_ipam.py), applied to
-# recorded, explicit and newly allocated CIDRs alike:
-#   - cluster/service CIDRs must not overlap the hub's own cluster/service CIDRs
-#   - cluster/service CIDRs must not overlap other PlatformOpenshift
-#     cluster/service CIDRs when ipam.denyOverlappingClusterCidrs (default true)
-#   - machine networks (fabric underlay) must not overlap other clusters' machine networks
-#   - recorded status.networking is kept as-is (legacy); new clusters with
-#     allocateFromFabric get blocks from the pools
-#   - cluster/service CIDRs outside the pools: status.networking.ipamCondition
-#     LegacyClusterCidrs (the cluster still joins)
+# Overlap rules (common/files/fabric_cluster_ipam.py):
+#   - pod/service CIDRs must not overlap the hub's own pod/service CIDRs
+#   - pod/service CIDRs must not overlap other PlatformOpenshift pod/service CIDRs
+#     (role var po_deny_peer_cidr_overlap, default true)
+#   - no check against overlay (HybridNetwork) prefixes; NetworkPlacement does that
+#   - CIDRs outside the default ranges: ipamCondition LegacyClusterCidrs (still joins)
+# No node/machine blocks are allocated; status.networking.underlay reports the
+# fabric underlay segment (HybridFabric.spec.underlay) for visibility.
 #
 # Sets facts: po_cluster_networks, po_service_networks, po_machine_networks,
 #   po_networking_fabric_ref, po_networking_allocation_source,
 #   po_networking_conflict_check (passed|failed), po_networking_legacy
-# Patches PlatformOpenshift.status.networking. Fails the play on conflict
-# unless spec.networking.allowConflict.
+# Fails the play on conflict unless spec.networking.allowConflict.
 
 - name: Read PlatformOpenshift networking + fabric intent
   ansible.builtin.set_fact:
@@ -69,9 +61,9 @@
           )
       }}
 
-- name: Load selected HybridFabric IPAM
+- name: Load selected HybridFabric underlay
   ansible.builtin.set_fact:
-    _po_ipam: >-
+    _po_underlay: >-
       {{
         (
           (_all_fabrics.resources | default([]))
@@ -79,7 +71,31 @@
           | list
           | first
           | default({}, true)
-        ).spec.ipam | default({})
+        ).spec.underlay | default({})
+      }}
+
+- name: Read CloudVirt for hosted-cluster CIDR defaults (hosted clusters)
+  when: (platform_spec.type | default('')) == 'hosted'
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudVirt
+    name: "{{ (platform_spec.hosted | default({})).environment | default(platform_spec.cloudRef | default(''), true) }}"
+    namespace: "{{ platformopenshift_cr_namespace }}"
+  register: _po_cloudvirt
+  failed_when: false
+
+- name: Resolve default pod/service ranges
+  ansible.builtin.set_fact:
+    _po_pools: >-
+      {{
+        {
+          'clusterNetworkPool': po_default_cluster_network_pool | default({'cidr': '100.64.0.0/11', 'blockPrefixLength': 14}),
+          'serviceNetworkPool': po_default_service_network_pool | default({'cidr': '100.96.0.0/11', 'blockPrefixLength': 16})
+        }
+        | combine(((_po_cloudvirt.resources | default([]) + [{}])[0].spec | default({})).hostedClusterCidrDefaults | default({}), recursive=True)
       }}
 
 # (a) HyperShift on KubeVirt: hosted cluster CIDRs must not overlap the hub's.
@@ -128,7 +144,8 @@
     SOURCE: "{{ _po_candidate_source }}"
     RECORDED: "{{ _po_existing_net_status | to_json }}"
     EXPLICIT: "{{ _po_net | to_json }}"
-    IPAM: "{{ _po_ipam | to_json }}"
+    POOLS: "{{ _po_pools | to_json }}"
+    DENY_PEER_OVERLAP: "{{ po_deny_peer_cidr_overlap | default(true) | string }}"
     HUB_NETWORK: "{{ ((_po_hub_net.resources | default([]) + [{}])[0]) | to_json }}"
     PEERS: "{{ _all_po.resources | default([]) | to_json }}"
   register: _po_ipam_plan
@@ -160,12 +177,15 @@
         clusterNetwork: "{{ po_cluster_networks }}"
         serviceNetwork: "{{ po_service_networks }}"
         machineNetwork: "{{ po_machine_networks | default([]) }}"
+        underlay:
+          nadName: "{{ _po_underlay.nadName | default('') }}"
+          cidr: "{{ _po_underlay.cidr | default('') }}"
         fabricRef: "{{ po_networking_fabric_ref | default('') }}"
         allocationSource: "{{ po_networking_allocation_source }}"
         conflictCheck: "{{ po_networking_conflict_check }}"
         conflictMessage: "{{ _po_plan.conflicts | join('; ') }}"
         legacyClusterCidrs: "{{ po_networking_legacy }}"
-        ipamCondition: "{{ 'LegacyClusterCidrs' if (po_networking_legacy | bool) else 'FabricPool' }}"
+        ipamCondition: "{{ 'LegacyClusterCidrs' if (po_networking_legacy | bool) else 'DefaultRange' }}"
         ipamMessage: "{{ _po_plan.message }}"
 
 - name: Fail on CIDR conflicts (unless spec.networking.allowConflict)

@@ -29,12 +29,11 @@ import { CloudGatewaySelect } from './CloudGatewaySelect';
 import { BackendSelect, buildBackendOptions, type BackendSelectValue } from './BackendSelect';
 import {
   DEFAULT_FABRIC_DOMAIN_ASN,
-  DEFAULT_FABRIC_IPAM,
+  DEFAULT_FABRIC_UNDERLAY,
   DEFAULT_FABRIC_ROUTE_REFLECTORS,
   DEFAULT_FABRIC_TRANSPORT,
   DEFAULT_FABRIC_VNI,
   formatRouteReflectors,
-  parseCidrList,
   parseRouteReflectors,
   type FabricTunnelType,
 } from '../forms/hybridFabricDefaults';
@@ -255,24 +254,10 @@ export function CreateResourceForm({
   const [fabricMtu, setFabricMtu] = useState(String(DEFAULT_FABRIC_TRANSPORT.mtu));
   const [fabricMssClamp, setFabricMssClamp] = useState(String(DEFAULT_FABRIC_TRANSPORT.innerMssClamp));
   const [fabricRrText, setFabricRrText] = useState(formatRouteReflectors(DEFAULT_FABRIC_ROUTE_REFLECTORS));
-  const [fabricClusterCidr, setFabricClusterCidr] = useState(DEFAULT_FABRIC_IPAM.clusterNetworkPool.cidr);
-  const [fabricClusterBlock, setFabricClusterBlock] = useState(
-    String(DEFAULT_FABRIC_IPAM.clusterNetworkPool.blockPrefixLength),
-  );
-  const [fabricServiceCidr, setFabricServiceCidr] = useState(DEFAULT_FABRIC_IPAM.serviceNetworkPool.cidr);
-  const [fabricServiceBlock, setFabricServiceBlock] = useState(
-    String(DEFAULT_FABRIC_IPAM.serviceNetworkPool.blockPrefixLength),
-  );
-  const [fabricMachineCidr, setFabricMachineCidr] = useState(DEFAULT_FABRIC_IPAM.machineNetworkPool.cidr);
-  const [fabricMachineBlock, setFabricMachineBlock] = useState(
-    String(DEFAULT_FABRIC_IPAM.machineNetworkPool.blockPrefixLength),
-  );
-  const [fabricOverlayReserved, setFabricOverlayReserved] = useState(
-    DEFAULT_FABRIC_IPAM.hybridOverlayReserved.join(', '),
-  );
-  const [fabricDenyOverlap, setFabricDenyOverlap] = useState(
-    DEFAULT_FABRIC_IPAM.denyOverlappingClusterCidrs,
-  );
+  const [fabricUnderlayNad, setFabricUnderlayNad] = useState(DEFAULT_FABRIC_UNDERLAY.nadName);
+  const [fabricUnderlayCidr, setFabricUnderlayCidr] = useState(DEFAULT_FABRIC_UNDERLAY.cidr);
+  const [fabricUnderlayGateway, setFabricUnderlayGateway] = useState(DEFAULT_FABRIC_UNDERLAY.gatewayAddress);
+  const [fabricUnderlayMtu, setFabricUnderlayMtu] = useState(String(DEFAULT_FABRIC_UNDERLAY.mtu));
   const [fabricBgwName, setFabricBgwName] = useState('');
   const [fabricBgwLoopback, setFabricBgwLoopback] = useState('');
   const [fabricBgwVaultRef, setFabricBgwVaultRef] = useState('');
@@ -695,7 +680,6 @@ export function CreateResourceForm({
         };
       case 'hybridfabric': {
         const rrs = parseRouteReflectors(fabricRrText);
-        const overlay = parseCidrList(fabricOverlayReserved);
         return {
           enabled: fabricEnabled,
           domainAsn: Number(domainAsn) || DEFAULT_FABRIC_DOMAIN_ASN,
@@ -710,25 +694,11 @@ export function CreateResourceForm({
             innerMssClamp: Number(fabricMssClamp) || DEFAULT_FABRIC_TRANSPORT.innerMssClamp,
             defaultTunnelType: fabricTunnelType,
           },
-          ipam: {
-            clusterNetworkPool: {
-              cidr: fabricClusterCidr || DEFAULT_FABRIC_IPAM.clusterNetworkPool.cidr,
-              blockPrefixLength:
-                Number(fabricClusterBlock) || DEFAULT_FABRIC_IPAM.clusterNetworkPool.blockPrefixLength,
-            },
-            serviceNetworkPool: {
-              cidr: fabricServiceCidr || DEFAULT_FABRIC_IPAM.serviceNetworkPool.cidr,
-              blockPrefixLength:
-                Number(fabricServiceBlock) || DEFAULT_FABRIC_IPAM.serviceNetworkPool.blockPrefixLength,
-            },
-            machineNetworkPool: {
-              cidr: fabricMachineCidr || DEFAULT_FABRIC_IPAM.machineNetworkPool.cidr,
-              blockPrefixLength:
-                Number(fabricMachineBlock) || DEFAULT_FABRIC_IPAM.machineNetworkPool.blockPrefixLength,
-            },
-            hybridOverlayReserved:
-              overlay.length > 0 ? overlay : DEFAULT_FABRIC_IPAM.hybridOverlayReserved,
-            denyOverlappingClusterCidrs: fabricDenyOverlap,
+          underlay: {
+            nadName: fabricUnderlayNad || DEFAULT_FABRIC_UNDERLAY.nadName,
+            cidr: fabricUnderlayCidr || DEFAULT_FABRIC_UNDERLAY.cidr,
+            ...(fabricUnderlayGateway ? { gatewayAddress: fabricUnderlayGateway } : {}),
+            mtu: Number(fabricUnderlayMtu) || DEFAULT_FABRIC_UNDERLAY.mtu,
           },
           ...(fabricBgwName || fabricBgwLoopback || fabricBgwVaultRef
             ? {
@@ -1568,62 +1538,35 @@ export function CreateResourceForm({
                         pods on these IPs.
                       </p>
                     </FormGroup>
-                    <FormGroup label="Cluster network pool CIDR" fieldId="hf-cluster-cidr">
+                    <FormGroup label="Underlay network name" fieldId="hf-ul-nad">
                       <TextInput
-                        id="hf-cluster-cidr"
-                        value={fabricClusterCidr}
-                        onChange={(_e, v) => setFabricClusterCidr(v)}
+                        id="hf-ul-nad"
+                        value={fabricUnderlayNad}
+                        onChange={(_e, v) => setFabricUnderlayNad(v)}
                       />
                     </FormGroup>
-                    <FormGroup label="Cluster block prefix length" fieldId="hf-cluster-block">
+                    <FormGroup label="Underlay CIDR" fieldId="hf-ul-cidr">
                       <TextInput
-                        id="hf-cluster-block"
-                        value={fabricClusterBlock}
-                        onChange={(_e, v) => setFabricClusterBlock(v)}
+                        id="hf-ul-cidr"
+                        value={fabricUnderlayCidr}
+                        onChange={(_e, v) => setFabricUnderlayCidr(v)}
                       />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        Hub underlay segment shared by the border gateway and member cluster nodes.
+                      </p>
                     </FormGroup>
-                    <FormGroup label="Service network pool CIDR" fieldId="hf-svc-cidr">
+                    <FormGroup label="Underlay gateway address" fieldId="hf-ul-gw">
                       <TextInput
-                        id="hf-svc-cidr"
-                        value={fabricServiceCidr}
-                        onChange={(_e, v) => setFabricServiceCidr(v)}
+                        id="hf-ul-gw"
+                        value={fabricUnderlayGateway}
+                        onChange={(_e, v) => setFabricUnderlayGateway(v)}
                       />
                     </FormGroup>
-                    <FormGroup label="Service block prefix length" fieldId="hf-svc-block">
+                    <FormGroup label="Underlay MTU" fieldId="hf-ul-mtu">
                       <TextInput
-                        id="hf-svc-block"
-                        value={fabricServiceBlock}
-                        onChange={(_e, v) => setFabricServiceBlock(v)}
-                      />
-                    </FormGroup>
-                    <FormGroup label="Machine network pool CIDR" fieldId="hf-mach-cidr">
-                      <TextInput
-                        id="hf-mach-cidr"
-                        value={fabricMachineCidr}
-                        onChange={(_e, v) => setFabricMachineCidr(v)}
-                      />
-                    </FormGroup>
-                    <FormGroup label="Machine block prefix length" fieldId="hf-mach-block">
-                      <TextInput
-                        id="hf-mach-block"
-                        value={fabricMachineBlock}
-                        onChange={(_e, v) => setFabricMachineBlock(v)}
-                      />
-                    </FormGroup>
-                    <FormGroup label="Hybrid overlay reserved CIDRs" fieldId="hf-overlay">
-                      <TextArea
-                        id="hf-overlay"
-                        value={fabricOverlayReserved}
-                        onChange={(_e, v) => setFabricOverlayReserved(v)}
-                        rows={2}
-                      />
-                    </FormGroup>
-                    <FormGroup label="Deny overlapping cluster CIDRs" fieldId="hf-deny-overlap">
-                      <Switch
-                        id="hf-deny-overlap"
-                        isChecked={fabricDenyOverlap}
-                        onChange={(_e, v) => setFabricDenyOverlap(v)}
-                        label={fabricDenyOverlap ? 'Enabled' : 'Disabled'}
+                        id="hf-ul-mtu"
+                        value={fabricUnderlayMtu}
+                        onChange={(_e, v) => setFabricUnderlayMtu(v)}
                       />
                     </FormGroup>
                     <FormGroup label="Border gateway name (optional)" fieldId="hf-bgw-name">
@@ -1631,7 +1574,7 @@ export function CreateResourceForm({
                         id="hf-bgw-name"
                         value={fabricBgwName}
                         onChange={(_e, v) => setFabricBgwName(v)}
-                        placeholder="central-bgw-acme"
+                        placeholder="fabric-bgw"
                       />
                     </FormGroup>
                     <FormGroup label="Border gateway loopback (optional)" fieldId="hf-bgw-lo">
@@ -1647,7 +1590,7 @@ export function CreateResourceForm({
                         id="hf-bgw-vault"
                         value={fabricBgwVaultRef}
                         onChange={(_e, v) => setFabricBgwVaultRef(v)}
-                        placeholder="fabric/acme/bgw"
+                        placeholder="fabric/<fabric>/bgw"
                       />
                       <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
                         Leave blank unless an external border gateway is configured. Never paste

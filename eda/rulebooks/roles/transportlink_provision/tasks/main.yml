@@ -154,7 +154,7 @@
             tl_message: >-
               tunnelType=none: cloud={{ tl_gateway.spec.cloud | default('unknown') }} peers natively
               (iBGP AS{{ tl_fabric_asn }}, l2vpn evpn) with {{ tl_fabric_peers | join(',') }}
-              over the hub underlay (design/fabric-bgw-plan.md §5).
+              over the hub underlay (design/fabric.md §21.3).
 
     - name: Handle tunnelType wireguard (BGW <-> site gateway VM over wstunnel)
       when: (transportlink_spec.tunnelType | default('none')) == 'wireguard'

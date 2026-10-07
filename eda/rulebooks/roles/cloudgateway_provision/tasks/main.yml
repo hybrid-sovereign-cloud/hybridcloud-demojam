@@ -250,7 +250,7 @@
               {{ cloudgateway_spec.fabricRef }} has no spec.borderGateway.loopback (and no
               legacy routeReflectors[]); EDPM FRR has nothing to peer with.
 
-        # design/fabric-bgw-plan.md §6 — site gateway VM + EDPM EVPN landing on
+        # design/fabric.md §21.4 — site gateway VM + EDPM EVPN landing on
         # the RHOSO management cluster. Must complete before NetworkPlacement
         # creates the EVPN router (HA chassis group needs the gateway chassis).
         - name: Land the site gateway and EDPM EVPN (transport wireguard)

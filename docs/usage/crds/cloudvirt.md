@@ -18,7 +18,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
 metadata:
   name: workshop-virt
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   vaultPath: virt/accounts/workshop-virt   # kubeconfig / tooling creds in Vault
   baseDomain: virt.example.com
@@ -26,11 +26,11 @@ spec:
   enableVRF: false
   toolRbac:
     environmentAdminRbac:
-      - acme-platform-admins
+      - example-platform-admins
     environmentPoweruserRbac:
-      - acme-infra-team
+      - example-infra-team
     environmentViewerRbac:
-      - acme-viewers
+      - example-viewers
 ```
 
 ## Local CNV (hub cluster)
@@ -55,7 +55,7 @@ See `gitops/apps/platform-smoke/templates/cloudvirt-local.yaml`.
 - `status.domain` / `status.slug` when provisioned
 
 ```bash
-oc get cloudvirt workshop-virt -n entity-acme-corp -o yaml
+oc get cloudvirt workshop-virt -n entity-example-corp -o yaml
 ```
 
 ## Next

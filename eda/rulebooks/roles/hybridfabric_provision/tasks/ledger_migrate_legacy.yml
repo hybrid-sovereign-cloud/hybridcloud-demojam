@@ -1,6 +1,6 @@
 ---
 # One-off ledger migration for the single-platform-fabric consolidation
-# (design/fabric-bgw-plan.md §12). Idempotent; a no-op once nothing is left.
+# (design/fabric.md §22). Idempotent; a no-op once nothing is left.
 #
 # For every OTHER fabric-numbering-* ConfigMap in this namespace, each ledger key
 # "<namespace>/<HybridNetwork>" whose HybridNetwork now has

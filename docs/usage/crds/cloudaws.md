@@ -20,7 +20,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: aws-account-new
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 type: Opaque
 stringData:
   AWS_ACCESS_KEY_ID: "AKIA..."
@@ -32,7 +32,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudAWS
 metadata:
   name: workshop-aws
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   account: "123456789012"
   baseDomain: sandbox1022.opentlc.com   # parent Route53 zone you control
@@ -57,7 +57,7 @@ spec:
 - `status.route53ZoneId` set
 
 ```bash
-oc get cloudaws workshop-aws -n entity-acme-corp -o yaml
+oc get cloudaws workshop-aws -n entity-example-corp -o yaml
 ```
 
 ## Next

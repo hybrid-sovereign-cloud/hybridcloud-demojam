@@ -1,5 +1,5 @@
 ---
-# Neutron MTU for fabric-placed networks (design/fabric-bgw-plan.md §7:
+# Neutron MTU for fabric-placed networks (design/fabric.md §21.5:
 # 1442 RHDP segment - WireGuard/wstunnel - VXLAN leaves 1330; 1300 keeps margin
 # and matches the HCP CUDN MTU).
 np_oso_network_mtu: 1300
