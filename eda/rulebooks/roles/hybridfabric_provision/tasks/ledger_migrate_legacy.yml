@@ -107,10 +107,6 @@
     POOL_END: "{{ hf_pool_end }}"
     CMS_FILE: "/tmp/hfm-{{ hybridfabric_cr_name }}-cms.json"
     HNS_FILE: "/tmp/hfm-{{ hybridfabric_cr_name }}-hns.json"
-    HNS: >-
-      {{ _hfm_hns.resources | default([])
-         | map('json_query', '{metadata: {namespace: metadata.namespace, name: metadata.name}, spec: {fabricRef: spec.fabricRef}, status: {vni: status.vni}}')
-         | list | to_json }}
   register: _hfm_plan
   changed_when: false
 
