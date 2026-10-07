@@ -11,6 +11,7 @@ systemctl enable --now fabric-lo.service
 nmcli -t -f NAME,DEVICE con show | awk -F: '$2=="eth1" && $1!="underlay"{print $1}' | while read -r c; do nmcli con delete "$c"; done
 nmcli con reload
 nmcli con up underlay
+nmcli con up management || true
 install -m 0640 -o frr -g frr /root/frr.conf.fabric /etc/frr/frr.conf
 sed -i 's/^bgpd=no/bgpd=yes/' /etc/frr/daemons
 # A config disk (if attached) wins over the cloud-init copy of frr.conf.

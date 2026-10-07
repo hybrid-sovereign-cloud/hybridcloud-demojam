@@ -57,6 +57,22 @@ write_files:
 
     [ipv6]
     method=disabled
+- path: /etc/NetworkManager/system-connections/management.nmconnection
+  permissions: '0600'
+  content: |
+    # Management NIC (pod network, masquerade). Bound by interface name, not MAC:
+    # the launcher pod MAC changes on VM restart or migration and the image's
+    # legacy "System eth0" profile (MAC-pinned) would stop matching.
+    [connection]
+    id=management
+    type=ethernet
+    interface-name=eth0
+    autoconnect=true
+    autoconnect-priority=50
+    [ipv4]
+    method=auto
+    [ipv6]
+    method=disabled
 - path: /etc/NetworkManager/conf.d/90-no-auto-default.conf
   permissions: '0644'
   content: |
