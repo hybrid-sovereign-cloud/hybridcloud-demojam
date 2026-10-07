@@ -1,0 +1,135 @@
+---
+# EVPN router HA chassis group check on the RHOSO management cluster.
+# Neutron creates HA_Chassis_Group "evpn-hcg-<router id>" for an --evpn-vni router
+# and fills it with the gateway-enabled chassis that exist AT CREATE TIME. A
+# router created before EDPM ran with edpm_enable_chassis_gw=true keeps an empty
+# group and its EVPN port never binds. Remedy: delete and recreate the router.
+#
+# Expected: np_cloudoso, np_os_cloud_name, np_os_env, np_spec, np_backend_name,
+#           np_vni, np_neutron_router_id. Optional: np_gateway (CloudGateway).
+# Sets: np_evpn_ha_chassis_ok, np_evpn_ha_chassis_message, np_neutron_router_id
+
+- name: Default HA chassis check facts
+  ansible.builtin.set_fact:
+    np_evpn_ha_chassis_ok: false
+    np_evpn_ha_chassis_message: ""
+    np_mgmt_kubeconfig_ref: >-
+      {{
+        np_cloudoso.spec.managementClusterKubeconfigRef
+        | default(((np_gateway | default({})).spec | default({})).managementClusterKubeconfigRef | default(''), true)
+        | default('oso/' ~ np_backend_name ~ '/mgmt-kubeconfig', true)
+      }}
+    np_mgmt_kubeconfig_file: "/tmp/np-{{ networkplacement_cr_name }}-mgmt-kubeconfig"
+    np_evpn_router_name: "{{ np_spec.network }}-{{ np_backend_name }}-evpn-rtr"
+
+- name: Skip HA chassis check without a management cluster kubeconfig
+  when: np_mgmt_kubeconfig_ref | length == 0
+  ansible.builtin.set_fact:
+    np_evpn_ha_chassis_message: >-
+      CloudOSO {{ np_backend_name }} has no spec.managementClusterKubeconfigRef;
+      HA chassis group not verified.
+
+- name: Check and repair HA chassis group
+  when: np_mgmt_kubeconfig_ref | length > 0
+  block:
+    - name: Read management cluster kubeconfig from Vault
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+      vars:
+        vault_kv_path: "{{ np_mgmt_kubeconfig_ref }}"
+
+    - name: Write management cluster kubeconfig
+      ansible.builtin.copy:
+        content: "{{ vault_kv_data.kubeconfig }}"
+        dest: "{{ np_mgmt_kubeconfig_file }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Read HA chassis of evpn-hcg-<router id>
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ np_mgmt_kubeconfig_file }}"
+        validate_certs: false
+        namespace: "{{ np_oso_namespace }}"
+        pod: "{{ np_oso_nb_pod }}"
+        container: "{{ np_oso_nb_container }}"
+        command: >-
+          ovn-nbctl --bare --columns=ha_chassis find HA_Chassis_Group
+          name=evpn-hcg-{{ np_neutron_router_id }}
+      register: np_hcg_before
+      until: (np_hcg_before.stdout | default('') | trim | length) > 0
+      retries: 6
+      delay: 10
+      failed_when: false
+
+    - name: Recreate EVPN router when its HA chassis group is empty
+      when: (np_hcg_before.stdout | default('') | trim | length) == 0
+      block:
+        - name: Remove subnets, delete and recreate the EVPN router
+          ansible.builtin.shell: |
+            set -euo pipefail
+            RTR="{{ np_evpn_router_name }}"
+            for i in $(seq 0 $(( {{ np_spec.prefixes | default([]) | length }} - 1 ))); do
+              SUB="{{ np_spec.network }}-{{ np_backend_name }}-subnet-$i"
+              openstack --os-cloud {{ np_os_cloud_name }} router remove subnet "$RTR" "$SUB" || true
+            done
+            openstack --os-cloud {{ np_os_cloud_name }} router delete "$RTR"
+            openstack --os-cloud {{ np_os_cloud_name }} router create --evpn-vni {{ np_vni }} "$RTR" -f value -c id
+            for i in $(seq 0 $(( {{ np_spec.prefixes | default([]) | length }} - 1 ))); do
+              SUB="{{ np_spec.network }}-{{ np_backend_name }}-subnet-$i"
+              openstack --os-cloud {{ np_os_cloud_name }} router add subnet --advertise-host "$RTR" "$SUB" >&2
+            done
+          args:
+            executable: /bin/bash
+          environment: "{{ np_os_env }}"
+          register: np_router_recreate
+          changed_when: true
+
+        - name: Record recreated router id
+          ansible.builtin.set_fact:
+            np_neutron_router_id: "{{ np_router_recreate.stdout | trim }}"
+
+        - name: Re-read HA chassis of the recreated router
+          kubernetes.core.k8s_exec:
+            kubeconfig: "{{ np_mgmt_kubeconfig_file }}"
+            validate_certs: false
+            namespace: "{{ np_oso_namespace }}"
+            pod: "{{ np_oso_nb_pod }}"
+            container: "{{ np_oso_nb_container }}"
+            command: >-
+              ovn-nbctl --bare --columns=ha_chassis find HA_Chassis_Group
+              name=evpn-hcg-{{ np_neutron_router_id }}
+          register: np_hcg_after
+          until: (np_hcg_after.stdout | default('') | trim | length) > 0
+          retries: 12
+          delay: 10
+          failed_when: false
+
+    - name: Pick the latest HA chassis read
+      ansible.builtin.set_fact:
+        _np_hcg_out: >-
+          {{
+            (np_hcg_after.stdout | default(''))
+            if (np_hcg_after is defined and np_hcg_after is not skipped)
+            else (np_hcg_before.stdout | default(''))
+          }}
+
+    - name: Set HA chassis check result
+      ansible.builtin.set_fact:
+        np_evpn_ha_chassis_ok: "{{ (_np_hcg_out | trim | length) > 0 }}"
+        np_evpn_ha_chassis_message: >-
+          {{
+            ('evpn-hcg-' ~ np_neutron_router_id ~ ' has gateway chassis'
+             ~ (' (router recreated)' if (np_router_recreate is defined and np_router_recreate is changed) else ''))
+            if ((_np_hcg_out | trim | length) > 0)
+            else ('evpn-hcg-' ~ np_neutron_router_id
+                  ~ ' still empty: is edpm_enable_chassis_gw applied (CloudGateway EDPM landing)?')
+          }}
+  rescue:
+    - name: Record HA chassis check failure (non-fatal)
+      ansible.builtin.set_fact:
+        np_evpn_ha_chassis_ok: false
+        np_evpn_ha_chassis_message: "HA chassis check failed: {{ ansible_failed_result.msg | default('error') }}"
+  always:
+    - name: Remove management cluster kubeconfig
+      ansible.builtin.file:
+        path: "{{ np_mgmt_kubeconfig_file }}"
+        state: absent

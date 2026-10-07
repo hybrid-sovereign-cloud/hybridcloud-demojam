@@ -1,80 +1,34 @@
-# Acme + Chad Hybrid Fabric lab manifests (design/fabric.md §11).
+# Platform fabric with two tenant entities (design/fabric.md §11).
 # Canonical ZTP path: gitops/apps/platform-fabric (Argo hs-platform-fabric).
 # ZTP omits RHOSO/OSO1 — this sample file also has no CloudOSO gateway/link.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
 metadata:
-  name: acme-fabric
+  name: platform-fabric
   namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
 spec:
   enabled: true
   domainAsn: 65010
   entityRefs:
     - name: acme-corp
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
+    - name: chad
+  underlay:
+    nadName: fabric-underlay
+    cidr: 192.168.64.0/18
+    gatewayAddress: 192.168.64.1
+    mtu: 1400
+  borderGateway:
+    name: fabric-bgw
+    loopback: 10.255.10.10
+    wireguard:
+      address: 10.254.254.1/24
   vniPool:
     start: 51000
-    end: 51127
-  ipam:
-    clusterNetworkPool:
-      cidr: 10.128.0.0/12
-      blockPrefixLength: 14
-    serviceNetworkPool:
-      cidr: 172.30.0.0/15
-      blockPrefixLength: 16
-    machineNetworkPool:
-      cidr: 192.168.64.0/18
-      blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.110.0.0/16
-    denyOverlappingClusterCidrs: true
-  transportDefaults:
-    mtu: 9000
-    innerMssClamp: 1360
-    defaultTunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: HybridFabric
-metadata:
-  name: chad-fabric
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: chad
-spec:
-  enabled: true
-  domainAsn: 65020
-  entityRefs:
-    - name: chad
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
-  vniPool:
-    start: 52000
     end: 52127
-  ipam:
-    clusterNetworkPool:
-      cidr: 10.144.0.0/12
-      blockPrefixLength: 14
-    serviceNetworkPool:
-      cidr: 172.32.0.0/15
-      blockPrefixLength: 16
-    machineNetworkPool:
-      cidr: 192.168.128.0/18
-      blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.120.0.0/16
-    denyOverlappingClusterCidrs: true
   transportDefaults:
-    mtu: 9000
+    mtu: 1442
+    innerMssClamp: 1360
     defaultTunnelType: none
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
@@ -104,14 +58,14 @@ metadata:
   namespace: sovereign-cloud
   labels:
     hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp1
 spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65011
-  fabricRef: acme-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
     type: none
   platformOpenshiftRef: hcp1
@@ -123,14 +77,14 @@ metadata:
   namespace: sovereign-cloud
   labels:
     hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp2
 spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65021
-  fabricRef: chad-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
     type: none
   platformOpenshiftRef: hcp2
@@ -142,14 +96,14 @@ metadata:
   namespace: sovereign-cloud
   labels:
     hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp3
 spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65022
-  fabricRef: chad-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
     type: none
   platformOpenshiftRef: hcp3
@@ -163,7 +117,7 @@ metadata:
     hybridsovereign.redhat/platformopenshift: hcp1
 spec:
   enabled: true
-  fabricRef: acme-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: acme-hcp1-gw
   tunnelType: none
 ---
@@ -176,7 +130,7 @@ metadata:
     hybridsovereign.redhat/platformopenshift: hcp2
 spec:
   enabled: true
-  fabricRef: chad-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: chad-hcp2-gw
   tunnelType: none
 ---
@@ -189,6 +143,6 @@ metadata:
     hybridsovereign.redhat/platformopenshift: hcp3
 spec:
   enabled: true
-  fabricRef: chad-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: chad-hcp3-gw
   tunnelType: none

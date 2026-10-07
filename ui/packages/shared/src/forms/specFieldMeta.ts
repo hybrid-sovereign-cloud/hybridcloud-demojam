@@ -249,46 +249,14 @@ export const KIND_SPEC_META: Partial<Record<HybridSovereignKind, KindSpecMeta>> 
         helpKey: 'fields.routeReflectorsHelp',
       },
       {
-        path: 'ipam.clusterNetworkPool.cidr',
-        labelKey: 'fields.clusterNetworkCidr',
+        path: 'underlay.nadName',
+        labelKey: 'fields.underlayNadName',
         widget: 'text',
-        helpKey: 'fields.ipamHelp',
+        helpKey: 'fields.underlayHelp',
       },
-      {
-        path: 'ipam.clusterNetworkPool.blockPrefixLength',
-        labelKey: 'fields.clusterNetworkBlockPrefix',
-        widget: 'number',
-      },
-      {
-        path: 'ipam.serviceNetworkPool.cidr',
-        labelKey: 'fields.serviceNetworkCidr',
-        widget: 'text',
-      },
-      {
-        path: 'ipam.serviceNetworkPool.blockPrefixLength',
-        labelKey: 'fields.serviceNetworkBlockPrefix',
-        widget: 'number',
-      },
-      {
-        path: 'ipam.machineNetworkPool.cidr',
-        labelKey: 'fields.machineNetworkCidr',
-        widget: 'text',
-      },
-      {
-        path: 'ipam.machineNetworkPool.blockPrefixLength',
-        labelKey: 'fields.machineNetworkBlockPrefix',
-        widget: 'number',
-      },
-      {
-        path: 'ipam.hybridOverlayReserved',
-        labelKey: 'fields.hybridOverlayReserved',
-        widget: 'cidrList',
-      },
-      {
-        path: 'ipam.denyOverlappingClusterCidrs',
-        labelKey: 'fields.denyOverlappingClusterCidrs',
-        widget: 'boolean',
-      },
+      { path: 'underlay.cidr', labelKey: 'fields.underlayCidr', widget: 'text' },
+      { path: 'underlay.gatewayAddress', labelKey: 'fields.underlayGatewayAddress', widget: 'text' },
+      { path: 'underlay.mtu', labelKey: 'fields.underlayMtu', widget: 'number' },
       {
         path: 'borderGateway.name',
         labelKey: 'fields.borderGatewayName',

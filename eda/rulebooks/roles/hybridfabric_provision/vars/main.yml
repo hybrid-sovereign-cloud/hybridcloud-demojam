@@ -1,7 +1,42 @@
 ---
-# Lab hub RR pods (design/fabric.md §8.1) — hostNetwork FRR reflecting
-# l2vpn evpn for every domainAsn that lists the same routeReflector address.
+# DEPRECATED lab hub RR pods (design/fabric.md §8.1, pre-BGW). Only used when a
+# HybridFabric still sets spec.routeReflectors[]; new fabrics use spec.borderGateway.
 hf_hub_rr_image: "quay.io/frrouting/frr:10.3.1"
 hf_hub_rr_namespace: "{{ hybridfabric_cr_namespace }}"
 # Fail HybridFabric Ready when routeReflectors are set but pods are not Available.
 hf_hub_rr_required: true
+
+# ---------------------------------------------------------------------------
+# Border gateway (BGW) VM — design/fabric.md §21.2
+# Defaults reproduce the lab build verified on 2026-10-07.
+# ---------------------------------------------------------------------------
+bgw_default_image: "docker://quay.io/containerdisks/centos-stream:9"
+bgw_default_storage_class: ocs-external-storagecluster-ceph-rbd
+bgw_root_disk_size: 30Gi
+bgw_default_cpu: 2
+bgw_default_memory: 4Gi
+# Fixed MAC on the underlay NIC; cloud-init NM keyfile matches on it.
+bgw_underlay_mac: "02:fa:b0:64:00:01"
+bgw_default_underlay_nad: fabric-underlay
+bgw_default_underlay_mtu: 1400
+bgw_default_dhcp_lease: 10m
+bgw_default_wg_address: 10.254.254.1/24
+bgw_default_wg_listen_port: 51820
+bgw_default_wg_mtu: 1380
+# wstunnel server port inside the VM (Service 443 -> this port; Route passthrough).
+bgw_wss_port: 8443
+# Lab: the hub kubemacpool mutating webhook was unavailable and blocked VM
+# create/update. Explicit MACs are used anyway, so opt the namespace out.
+bgw_kubemacpool_ignore: true
+# HybridFabric fails (and the operator relaunches) when the BGW VM is not Ready.
+bgw_required: true
+bgw_wait_retries: 60
+bgw_wait_delay: 10
+# Restart the BGW VMI when its rendered config (peers, listen ranges, DHCP
+# routes) changes; the guest re-reads the config Secret disk at boot.
+bgw_restart_on_change: true
+# RT allow-list on the BGW (design/fabric.md §8.5.4):
+#   allocated - reflect only EVPN routes with an RT from this fabric's ledger
+#               (a new VNI re-renders the config and restarts the BGW VMI)
+#   off       - reflect everything (pre-consolidation behaviour)
+bgw_rt_filter: allocated

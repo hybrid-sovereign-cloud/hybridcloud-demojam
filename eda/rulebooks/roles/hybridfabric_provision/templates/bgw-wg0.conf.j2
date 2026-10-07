@@ -1,0 +1,13 @@
+[Interface]
+Address = {{ bgw_wg_address }}
+ListenPort = {{ bgw_wg_listen_port }}
+MTU = {{ bgw_wg_mtu }}
+PrivateKey = {{ bgw_wg_private_key }}
+{% for p in bgw_peers %}
+
+[Peer]
+# {{ p.name }}
+PublicKey = {{ p.publicKey }}
+AllowedIPs = {{ p.wgIp }}/32, {{ p.siteCidr }}
+PersistentKeepalive = 25
+{% endfor %}

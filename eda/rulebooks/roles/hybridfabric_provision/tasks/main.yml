@@ -178,6 +178,9 @@
             poolStart: "{{ hf_pool_start | string }}"
             poolEnd: "{{ hf_pool_end | string }}"
 
+    - name: Carry legacy fabric VNIs into this ledger (single-fabric consolidation)
+      ansible.builtin.include_tasks: ledger_migrate_legacy.yml
+
     - name: Re-read numbering ConfigMap for live counts
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
@@ -198,62 +201,27 @@
         hf_allocated_count: "{{ hf_allocated_map | length }}"
         hf_pool_size: "{{ (hf_pool_end | int) - (hf_pool_start | int) + 1 }}"
 
-    - name: Deploy managed hub FRR route reflector pods (hostNetwork)
+    # DEPRECATED: legacy hostNetwork hub RR pods, only when routeReflectors[] is set.
+    - name: Deploy legacy hub FRR route reflector pods (deprecated; routeReflectors set)
+      when: (hybridfabric_spec.routeReflectors | default([])) | length > 0
       ansible.builtin.include_tasks: deploy_hub_rr.yml
 
-    - name: Best-effort border gateway credential check (never blocks Ready)
-      when: (hybridfabric_spec.borderGateway.vaultCredentialRef | default('')) | length > 0
-      block:
-        - ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
-          vars:
-            vault_kv_path: "{{ hybridfabric_spec.borderGateway.vaultCredentialRef }}"
-      rescue:
-        - ansible.builtin.set_fact:
-            hf_border_vault_unreadable: true
-      ignore_errors: true
+    - name: Record hub RR not in use
+      when: (hybridfabric_spec.routeReflectors | default([])) | length == 0
+      ansible.builtin.set_fact:
+        hf_hub_rr_ready: true
+        hf_hub_rr_message: ""
 
-    - name: Set border BGW readiness (true whether unset or fully configured — §8.1)
+    # design/fabric.md §21.2 — the BGW VM is the fabric route reflector.
+    - name: Deploy border gateway VM (borderGateway.loopback set)
+      when: (hybridfabric_spec.borderGateway.loopback | default('')) | length > 0
+      ansible.builtin.include_tasks: deploy_border_gateway.yml
+
+    - name: Record no border gateway configured
+      when: (hybridfabric_spec.borderGateway.loopback | default('')) | length == 0
       ansible.builtin.set_fact:
         hf_border_bgw_ready: true
-        hf_border_message: >-
-          {{
-            'No borderGateway configured for this fabric.'
-            if (hybridfabric_spec.borderGateway | default({}) | length == 0)
-            else (
-              'borderGateway ' ~ (hybridfabric_spec.borderGateway.name | default('unnamed')) ~
-              ' configured; Vault credential check ' ~
-              ('failed (see job log, non-blocking)' if (hf_border_vault_unreadable | default(false)) else 'ok') ~ '.'
-            )
-          }}
-
-    - name: Validate ipam pool CIDRs when present
-      when: (hybridfabric_spec.ipam | default({})) | length > 0
-      ansible.builtin.shell: |
-        set -euo pipefail
-        python3 <<'PY'
-        import ipaddress, json, os
-        pools = json.loads(os.environ["IPAM"])
-        for key in ("clusterNetworkPool", "serviceNetworkPool", "machineNetworkPool"):
-            pool = pools.get(key) or {}
-            cidr = pool.get("cidr")
-            if not cidr:
-                continue
-            ipaddress.ip_network(cidr, strict=False)
-        print("ok")
-        PY
-      environment:
-        IPAM: "{{ hybridfabric_spec.ipam | to_json }}"
-      register: hf_ipam_check
-      changed_when: false
-      failed_when: false
-
-    - name: Set ipamReady fact
-      ansible.builtin.set_fact:
-        hf_ipam_ready: >-
-          {{
-            ((hybridfabric_spec.ipam | default({})) | length > 0)
-            and (hf_ipam_check.rc | default(1) == 0)
-          }}
+        hf_border_message: "No borderGateway configured for this fabric."
 
     - name: Mark HybridFabric ready
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -268,16 +236,18 @@
           message: >-
             fabric-numbering-{{ hybridfabric_cr_name }} ledger ok
             (pool {{ hf_pool_start }}-{{ hf_pool_end }}, allocated={{ hf_allocated_count }},
-            available={{ hf_pool_size | int - hf_allocated_count | int }}). {{ hf_border_message }}
+            available={{ hf_pool_size | int - hf_allocated_count | int }}). {{ hf_ledger_migration_message | default('') }}{{ hf_border_message }}
             {{ hf_hub_rr_message | default('') }}
           lastReconciledAt: "{{ hybridfabric_status_transition_time }}"
           observedGeneration: "{{ hybridfabric_generation }}"
           fabricBaseReady: true
           borderBgwReady: "{{ hf_border_bgw_ready }}"
+          bgwEndpoint: "{{ hf_bgw_endpoint | default('') }}"
+          bgwAddress: "{{ hf_bgw_address | default('') }}"
+          bgwPeerCount: "{{ hf_bgw_peer_count | default(0) | int }}"
           hubRrReady: "{{ hf_hub_rr_ready | default(false) }}"
           allocatedVniCount: "{{ hf_allocated_count | int }}"
           availableVniCount: "{{ (hf_pool_size | int) - (hf_allocated_count | int) }}"
-          ipamReady: "{{ hf_ipam_ready }}"
           conditions:
             - type: Ready
               status: "True"
@@ -285,7 +255,7 @@
               reason: EDASucceeded
               message: >-
                 HybridFabric base + numbering ledger provisioned;
-                hubRrReady={{ hf_hub_rr_ready | default(false) }}
+                borderBgwReady={{ hf_border_bgw_ready }} hubRrReady={{ hf_hub_rr_ready | default(false) }}
 
   rescue:
     - name: Mark HybridFabric failed

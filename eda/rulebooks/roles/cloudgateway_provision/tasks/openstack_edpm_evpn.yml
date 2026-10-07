@@ -1,0 +1,133 @@
+---
+# EDPM computes join the fabric (design/fabric.md §10.3.5), via CRs on the
+# OpenStack management cluster:
+#   1. NetConfig: network `fabric` (siteUnderlay.cidr, mtu, allocation range,
+#      subnet routes to the BGW loopback / hub underlay / tunnel net via the site
+#      gateway). Patched once, before any NodeSet. Routes MUST be in NetConfig:
+#      the dataplane operator overwrites <net>_host_routes.
+#   2. NodeSets from CloudOSO.spec.dataplaneNodeSetRefs, strictly one at a time
+#      in CR order (openstack_edpm_nodeset.yml): patch, one
+#      OpenStackDataPlaneDeployment scoped to that NodeSet, wait for Ready/failure,
+#      record the fingerprint, then the next. NodeSets whose fingerprint already
+#      matches are skipped. The loop stops once more than cgw_edpm_max_failures
+#      NodeSets failed (default 0 = stop on the first failure); the rest are
+#      reported NotAttempted.
+#
+# Expected: cgw_mgmt_kubeconfig, cgw_cloudoso, facts from openstack_site_gateway.yml.
+# Sets: cgw_edpm_ready, cgw_edpm_message; patches CloudGateway.status.edpmNodeSets.
+
+- name: Resolve dataplane refs from CloudOSO
+  ansible.builtin.set_fact:
+    cgw_nodeset_names: "{{ (cgw_cloudoso.spec | default({})).dataplaneNodeSetRefs | default([], true) }}"
+    cgw_netconfig_name: "{{ (cgw_cloudoso.spec | default({})).netConfigRef | default('openstacknetconfig', true) }}"
+    cgw_edpm_workdir: "/tmp/cgw-{{ cloudgateway_cr_name }}-edpm"
+    cgw_edpm_params:
+      network: "{{ cgw_su_netconfig_network }}"
+      cidr: "{{ cgw_su_cidr }}"
+      mtu: "{{ cgw_su_mtu | int }}"
+      gatewayAddress: "{{ cgw_su_gateway_address }}"
+      asn: "{{ bgw_asn | int }}"
+      bgwLoopback: "{{ bgw_loopback }}"
+      routeDestinations: ["{{ bgw_loopback }}/32", "{{ bgw_underlay_cidr }}", "{{ bgw_wg_network }}"]
+      nftSources: ["{{ cgw_su_cidr }}", "{{ bgw_underlay_cidr }}", "{{ bgw_loopback }}/32", "{{ bgw_wg_network }}"]
+      allocStartOffset: "{{ cgw_fabric_alloc_start_offset | int }}"
+      allocEndOffset: "{{ cgw_fabric_alloc_end_offset | int }}"
+
+- name: Set nodeset-refs-missing failure reason before failing
+  when: cgw_nodeset_names | length == 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: DataplaneNodeSetRefsMissing
+
+- name: Require CloudOSO.spec.dataplaneNodeSetRefs
+  ansible.builtin.fail:
+    msg: "CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }} needs spec.dataplaneNodeSetRefs for fabric EDPM landing"
+  when: cgw_nodeset_names | length == 0
+
+- name: Prepare EDPM work directory
+  ansible.builtin.file:
+    path: "{{ cgw_edpm_workdir }}"
+    state: directory
+    mode: "0700"
+
+# ------------------------------------------------------------------ NetConfig
+- name: Read NetConfig
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: network.openstack.org/v1beta1
+    kind: NetConfig
+    name: "{{ cgw_netconfig_name }}"
+    namespace: "{{ cgw_oso_namespace }}"
+  register: _cgw_netconfig
+  failed_when: _cgw_netconfig.resources | default([]) | length == 0
+
+- name: Remove stale NetConfig patch
+  ansible.builtin.file:
+    path: "{{ cgw_edpm_workdir }}/netconfig-patch.json"
+    state: absent
+
+- name: Compute NetConfig fabric patch
+  ansible.builtin.command:
+    argv: [python3, "{{ role_path }}/files/edpm_fabric_patch.py", "{{ cgw_edpm_workdir }}", netconfig]
+  environment:
+    NETCONFIG: "{{ _cgw_netconfig.resources[0] | to_json }}"
+    PARAMS: "{{ cgw_edpm_params | combine({'computeInterface': cgw_su_compute_interface}) | to_json }}"
+  register: _cgw_nc_calc
+  changed_when: false
+
+- name: Patch NetConfig (network fabric)
+  when: (_cgw_nc_calc.stdout | from_json).netconfig_changed | bool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    merge_type: merge
+    src: "{{ cgw_edpm_workdir }}/netconfig-patch.json"
+
+# ------------------------------------------------------------------ NodeSets
+- name: Reset NodeSet rollout state
+  ansible.builtin.set_fact:
+    cgw_edpm_results: []
+    cgw_edpm_failures: 0
+    cgw_edpm_stop: false
+
+- name: Roll out NodeSets one at a time, in CR order
+  ansible.builtin.include_tasks: openstack_edpm_nodeset.yml
+  loop: "{{ cgw_nodeset_names }}"
+  loop_control:
+    loop_var: cgw_ns_name
+    index_var: cgw_ns_index
+
+- name: Summarise NodeSet rollout
+  ansible.builtin.set_fact:
+    cgw_edpm_ready: "{{ cgw_edpm_failures | int == 0 }}"
+    cgw_edpm_failed_names: "{{ cgw_edpm_results | selectattr('state', 'equalto', 'Failed') | map(attribute='name') | list }}"
+    cgw_edpm_skipped_names: "{{ cgw_edpm_results | selectattr('state', 'equalto', 'NotAttempted') | map(attribute='name') | list }}"
+
+- name: Set EDPM result message
+  ansible.builtin.set_fact:
+    cgw_edpm_message: >-
+      EDPM fabric rollout over {{ cgw_nodeset_names | length }} NodeSet(s):
+      {{ cgw_edpm_results | map(attribute='name') | zip(cgw_edpm_results | map(attribute='state')) | map('join', '=') | join(', ') }}.
+      {{ ('Failed: ' ~ (cgw_edpm_failed_names | join(', ')) ~ '; not attempted: '
+          ~ (cgw_edpm_skipped_names | join(', ') | default('none', true)) ~ '.') if not (cgw_edpm_ready | bool) else '' }}
+
+- name: Record per-NodeSet rollout state on CloudGateway status
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+  vars:
+    cr_api_version: hybridsovereign.redhat/v1alpha1
+    cr_plural: cloudgateways
+    cr_name: "{{ cloudgateway_cr_name }}"
+    cr_namespace: "{{ cloudgateway_cr_namespace }}"
+    cr_status_body:
+      edpmNodeSets: "{{ cgw_edpm_results }}"
+
+- name: Set EDPM failure reason before failing
+  when: not (cgw_edpm_ready | bool)
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: EdpmDeploymentFailed
+
+- name: Fail when a NodeSet rollout failed
+  when: not (cgw_edpm_ready | bool)
+  ansible.builtin.fail:
+    msg: "{{ cgw_edpm_message }}"

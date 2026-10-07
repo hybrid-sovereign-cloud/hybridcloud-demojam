@@ -121,57 +121,47 @@
         msg: "TransportLink {{ transportlink_cr_name }}: CloudGateway {{ transportlink_spec.cloudGatewayRef }} is not Ready"
       when: not (tl_gateway.status.ready | default(false) | bool)
 
-    - name: Handle tunnelType none (EVPN/VXLAN adjacency only, no WG/IPsec)
+    - name: Handle tunnelType none (native underlay peering, no tunnel)
       when: (transportlink_spec.tunnelType | default('none')) == 'none'
       block:
-        - name: Collect fabric route-reflector addresses (design §10.3.2 / §10.3.5)
+        - name: Collect fabric peers (border gateway loopback, else legacy RRs)
           ansible.builtin.set_fact:
+            tl_bgw_loopback: "{{ (tl_fabric.spec.borderGateway | default({})).loopback | default('') }}"
             tl_rr_addrs: >-
               {{
                 tl_fabric.spec.routeReflectors | default([])
                 | map(attribute='address') | select('string') | list
               }}
-            tl_spoke_asn: "{{ tl_gateway.spec.domainAsn | default(0) | int }}"
             tl_fabric_asn: "{{ tl_fabric.spec.domainAsn | default(0) | int }}"
 
-        - name: Fail closed when openstack TransportLink has no fabric RRs
-          when:
-            - (tl_gateway.spec.cloud | default('')) == 'openstack'
-            - (tl_rr_addrs | default([]) | length) == 0
+        - name: Set fabric peer list
+          ansible.builtin.set_fact:
+            tl_fabric_peers: "{{ [tl_bgw_loopback] if (tl_bgw_loopback | length > 0) else tl_rr_addrs }}"
+
+        - name: Fail closed when the fabric has no BGP peer for spokes
+          when: (tl_fabric_peers | length) == 0
           ansible.builtin.fail:
             msg: >-
-              TransportLink {{ transportlink_cr_name }} cloud=openstack requires
-              HybridFabric {{ transportlink_spec.fabricRef }} spec.routeReflectors[]
-              for FRR l2vpn evpn peering (design/fabric.md §10.3.2).
+              TransportLink {{ transportlink_cr_name }}: HybridFabric {{ transportlink_spec.fabricRef }}
+              has neither spec.borderGateway.loopback nor legacy spec.routeReflectors[].
 
-        - name: Fail closed when openstack TransportLink missing spoke ASN
-          when:
-            - (tl_gateway.spec.cloud | default('')) == 'openstack'
-            - (tl_spoke_asn | int) == 0
-          ansible.builtin.fail:
-            msg: >-
-              TransportLink {{ transportlink_cr_name }}: CloudGateway
-              {{ transportlink_spec.cloudGatewayRef }} requires spec.domainAsn
-              for FR6 EVPN spoke ASN (design/fabric.md §10.3.2).
-
-        - name: Set tunnelType=none Ready facts (RR peer intent recorded)
+        - name: Set tunnelType=none Ready facts
           ansible.builtin.set_fact:
             tl_tunnel_up: true
             tl_ready: true
-            tl_border_endpoint: >-
-              {{
-                tl_fabric.spec.borderGateway.loopback
-                | default(tl_rr_addrs | default([]) | first | default('', true), true)
-              }}
+            tl_border_endpoint: "{{ tl_fabric_peers | first }}"
             tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
             tl_message: >-
-              tunnelType=none: underlay EVPN adjacency for cloud={{ tl_gateway.spec.cloud | default('unknown') }};
-              spokeASN={{ tl_spoke_asn }} fabricASN={{ tl_fabric_asn }}
-              RR peers={{ tl_rr_addrs | default([]) | join(',') }}
-              (FRR l2vpn evpn toward HybridFabric routeReflectors — design §10.3.5).
+              tunnelType=none: cloud={{ tl_gateway.spec.cloud | default('unknown') }} peers natively
+              (iBGP AS{{ tl_fabric_asn }}, l2vpn evpn) with {{ tl_fabric_peers | join(',') }}
+              over the hub underlay (design/fabric.md §21.3).
 
-    - name: Handle tunneled transport (wireguard/ipsec/macsec)
-      when: (transportlink_spec.tunnelType | default('none')) != 'none'
+    - name: Handle tunnelType wireguard (BGW <-> site gateway VM over wstunnel)
+      when: (transportlink_spec.tunnelType | default('none')) == 'wireguard'
+      ansible.builtin.include_tasks: deploy_wireguard.yml
+
+    - name: Handle tunneled transport (ipsec/macsec)
+      when: (transportlink_spec.tunnelType | default('none')) in ['ipsec', 'macsec']
       block:
         - name: Set tunnel-config-unavailable failure reason before validating
           ansible.builtin.set_fact:
@@ -185,21 +175,12 @@
               requires spec.vaultConfigRef (peer keys/PSK); none provided.
           when: (transportlink_spec.vaultConfigRef | default('')) | length == 0
 
-        - name: Read tunnel config from Vault (best-effort; never logs secret values)
+        - name: Read tunnel config from Vault (never logs secret values)
           ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
           vars:
             vault_kv_path: "{{ transportlink_spec.vaultConfigRef }}"
 
-        - name: Deploy WireGuard VTEP underlay on hub
-          when: (transportlink_spec.tunnelType | default('')) == 'wireguard'
-          ansible.builtin.include_tasks: deploy_wireguard.yml
-
-        - name: Deploy managed SSH TUN underlay (remote OSO lab path)
-          when: (transportlink_spec.tunnelType | default('')) == 'sshtunnel'
-          ansible.builtin.include_tasks: deploy_sshtunnel.yml
-
         - name: Set tunnel-up facts from Vault-backed config (ipsec/macsec)
-          when: (transportlink_spec.tunnelType | default('')) in ['ipsec', 'macsec']
           ansible.builtin.set_fact:
             tl_tunnel_up: true
             tl_ready: true

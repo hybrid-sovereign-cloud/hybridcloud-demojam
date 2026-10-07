@@ -1,0 +1,134 @@
+---
+# Attach HostedCluster KubeVirt workers to the fabric hub underlay L2
+# (design/fabric.md §21.3). Never fails cluster provisioning: any gap
+# leaves hc_additional_networks empty and the next reconcile adds it (the
+# NodePool then rolls its workers, upgradeType Replace).
+#
+# The underlay is an OVN-K layer2 NAD without IPAM. Multus namespace isolation
+# is on, so the virt-launcher pods (namespace <hc_namespace>-<hc_name>) need
+# their own NAD with the SAME network name; netAttachDefName must point at the
+# namespace that holds it. The BGW's dnsmasq hands eth1 an address, MTU and
+# option-121 routes (BGW loopback + remote site underlays via the BGW).
+#
+# Sets: hc_additional_networks (list for NodePool spec.platform.kubevirt.additionalNetworks)
+
+- name: Default no additional networks
+  ansible.builtin.set_fact:
+    hc_additional_networks: []
+    hc_vm_namespace: "{{ hc_namespace }}-{{ hc_name }}"
+    _hcfu_fabric_spec: "{{ platform_spec.fabric | default({}) }}"
+
+- name: Resolve the fabric this HostedCluster joins
+  ansible.builtin.set_fact:
+    hc_fabric_name: >-
+      {{
+        ''
+        if (_hcfu_fabric_spec.joinPolicy | default('AutoWhenFabricReady')) == 'None'
+        else (
+          _hcfu_fabric_spec.preferredFabricRef
+          | default((_hcfu_fabric_spec.fabricRefs | default([]) | first) | default('', true), true)
+          | default((platform_spec.networking | default({})).fabricRef | default(''), true)
+        )
+      }}
+
+- name: Attach to fabric underlay
+  when: hc_fabric_name | length > 0
+  block:
+    - name: Read HybridFabric for underlay settings
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        name: "{{ hc_fabric_name }}"
+        namespace: sovereign-cloud
+      register: _hcfu_fabric
+
+    - name: Set underlay facts from HybridFabric.spec.borderGateway
+      ansible.builtin.set_fact:
+        _hcfu_bgw: "{{ (_hcfu_fabric.resources | default([{}]))[0].spec.borderGateway | default({}) }}"
+
+    - name: Set underlay NAD facts (HybridFabric.spec.underlay)
+      ansible.builtin.set_fact:
+        hc_underlay_nad: "{{ ((_hcfu_fabric.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true) }}"
+        hc_underlay_mtu: "{{ ((_hcfu_fabric.resources | default([]) + [{}])[0].spec.underlay | default({})).mtu | default(1400, true) | int }}"
+
+    - name: Skip when the fabric has no border gateway
+      when: (_hcfu_bgw.loopback | default('')) | length == 0
+      ansible.builtin.debug:
+        msg: "HybridFabric {{ hc_fabric_name }} has no borderGateway; NodePool keeps the pod network only."
+
+    - name: Render underlay NAD into the HostedCluster VM namespace
+      when: (_hcfu_bgw.loopback | default('')) | length > 0
+      block:
+        # Hypershift creates <hc_namespace>-<hc_name> shortly after the HostedCluster.
+        - name: Wait for HostedCluster control-plane namespace
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: v1
+            kind: Namespace
+            name: "{{ hc_vm_namespace }}"
+          register: _hcfu_ns
+          until: _hcfu_ns.resources | default([]) | length > 0
+          retries: 40
+          delay: 15
+
+        # Lab: kubemacpool webhook unavailable on the hub; the fabric NIC MAC
+        # comes from the BGW's DHCP (no MAC pool needed on this network).
+        - name: Opt the HostedCluster VM namespace out of kubemacpool
+          kubernetes.core.k8s:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            state: patched
+            api_version: v1
+            kind: Namespace
+            name: "{{ hc_vm_namespace }}"
+            definition:
+              metadata:
+                labels:
+                  mutatevirtualmachines.kubemacpool.io: ignore
+
+        - name: Apply fabric underlay NAD in the HostedCluster VM namespace
+          kubernetes.core.k8s:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: k8s.cni.cncf.io/v1
+              kind: NetworkAttachmentDefinition
+              metadata:
+                name: "{{ hc_underlay_nad }}"
+                namespace: "{{ hc_vm_namespace }}"
+                labels:
+                  hybridsovereign.redhat/fabric: "{{ hc_fabric_name }}"
+                  hybridsovereign.redhat/fabric-underlay: "true"
+                  hybridsovereign.redhat/platformopenshift: "{{ platformopenshift_cr_name }}"
+              spec:
+                config: >-
+                  {{
+                    {
+                      'cniVersion': '0.3.1',
+                      'name': hc_underlay_nad,
+                      'type': 'ovn-k8s-cni-overlay',
+                      'topology': 'layer2',
+                      'mtu': hc_underlay_mtu | int,
+                      'netAttachDefName': hc_vm_namespace ~ '/' ~ hc_underlay_nad
+                    } | to_json
+                  }}
+
+        - name: Add the underlay to the NodePool
+          ansible.builtin.set_fact:
+            hc_additional_networks:
+              - name: "{{ hc_vm_namespace }}/{{ hc_underlay_nad }}"
+  rescue:
+    - name: Continue without the fabric underlay (next reconcile retries)
+      ansible.builtin.set_fact:
+        hc_additional_networks: []
+        hc_fabric_underlay_message: >-
+          Fabric underlay not attached for {{ hc_name }}:
+          {{ ansible_failed_result.msg | default('error') }}

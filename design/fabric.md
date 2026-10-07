@@ -24,7 +24,7 @@
 13. [Bill of materials & success criteria](#13-bill-of-materials--success-criteria)
 14. [CRD deltas & non-goals](#14-crd-deltas--non-goals)
 15. [PlatformOpenshift fabric awareness](#15-platformopenshift-fabric-awareness) (incl. [§15.0 AWS has no fabric attach](#150-fabric-attachment-scope-by-platformopenshift-type-locked))
-16. [PlatformOpenshift IP conflict prevention (fabric IPAM)](#16-platformopenshift-ip-conflict-prevention-fabric-ipam)
+16. [Address ownership](#16-address-ownership)
 17. [PlatformOpenshift install with or without fabric / EVPN / CUDN](#17-platformopenshift-install-with-or-without-fabric--evpn--cudn)
 18. [UI dropdowns — entity tagging & OCP fabric attach (console + standalone)](#18-ui-dropdowns--entity-tagging--ocp-fabric-attach-console--standalone)
 19. [Creation, entity tagging & tenant visibility](#19-creation-entity-tagging--tenant-visibility)
@@ -35,14 +35,26 @@
 
 ## 1. Executive intent
 
-Deliver **entity-isolated EVPN fabrics** on Sovereign Hybrid Cloud such that:
+Deliver **entity-isolated EVPN VRFs on one platform fabric** on Sovereign Hybrid Cloud such that:
 
 1. The **central OpenShift cluster** is the **hub** — route reflection, border gateway, VNI/RT numbering authority, and Ansible control plane.
 2. **Hosted Control Planes (HCP)** and an **external RHOSO** attach as **spokes**.
 3. Tenants express only *network intent* (`HybridNetwork` + `NetworkPlacement`); the platform owns **VNI / VRF / route-target (RT)** numbering.
 4. **Acme** never joins **Chad** VRFs (and the reverse), even on a shared `CloudVirt/local-virt` underlay.
 
-As a principal network and security engineer, treat this as a **VPN isolation product**: overlapping tenant CIDRs are allowed; safety is **cryptographic/control-plane separation** (distinct ASN spaces, VNI pools, RT import filters), not “hope the CIDRs differ.”
+As a principal network and security engineer, treat this as a **VPN isolation product**: overlapping tenant CIDRs are allowed; safety is **control-plane separation** (one VNI + RT per tenant VRF, RT import on every spoke, RT allow-list on the hub reflector), not “hope the CIDRs differ.”
+
+### 1.1 Tenancy model (decided 2026-10-07)
+
+| Layer | Object | Count | Owner | Holds |
+|-------|--------|-------|-------|-------|
+| Fabric | `HybridFabric` | **one per hub** (`platform-fabric`) | Platform | ASN (65010, iBGP everywhere), hub underlay segment (`spec.underlay`), border gateway VM (route reflector, underlay router, tunnel endpoint), VNI pool, `entityRefs` (which tenants may use it) |
+| Site | `CloudGateway` + `TransportLink` | one per site (HCP cluster, RHOSO cloud) | Platform | how the site reaches the BGW (`none` = hub underlay, `wireguard` = site gateway VM over wstunnel) |
+| Tenant | `HybridNetwork` + `NetworkPlacement` | one VRF per network | Tenant (intent) / platform (numbering) | VRF = VNI + RT `65010:<vni>` allocated from the fabric ledger; placements per backend |
+
+**Fabric-wide unique, and only these:** VNI / RT (ledger), underlay segments (`spec.underlay`, site underlays), gateway addresses. Overlay prefixes are unique per `HybridNetwork` only, so any tenant may use any RFC1918 prefix in its own VRF; hub and cluster pod/service ranges come from CG-NAT 100.64.0.0/10 (greenfield assumption, §16) so that is always safe.
+
+Tenants **share** the BGW and the site tunnels; isolation is by **RT**: spokes import only their VRF's RT, and the BGW reflects only RTs allocated in the fabric's numbering ledger (§8.5.4). The earlier model (one `HybridFabric` per Entity with its own ASN / RR / BGW) is retired; see §11 history note and §22 for the cutover.
 
 ---
 
@@ -50,18 +62,18 @@ As a principal network and security engineer, treat this as a **VPN isolation pr
 
 | Threat | Attack / failure mode | Control |
 |--------|----------------------|---------|
-| Cross-entity route leak | Chad imports Acme RT | Disjoint ASN + VNI pools; RT import filters per fabric; admission on `fabricRef` |
+| Cross-entity route leak | Chad imports Acme RT | One VNI + RT per tenant VRF (platform-allocated); spokes import only their VRF RT; BGW RT allow-list from the ledger; placement admission on Entity ∈ `entityRefs` |
 | Tenant numbering abuse | Tenant picks VNI/RT | Forbidden in `HybridNetwork.spec`; UI never exposes editors |
 | Shared underlay confusion | Same CNV hosts multiple HCPs | Per-fabric CUDN labels + IP-VRF; no shared CUDN selectors across entities |
 | Secret sprawl | BGP/tunnel keys in Git | Vault only; `vaultConfigRef` / `vaultCredentialRef` |
 | Privilege escalation via placement | Tenant places onto foreign CloudOSO | Backend must match entity NS; fabric membership check in Ansible preflight |
-| Hub RR compromise | Single RR | Dual RR addresses; GR-aware FIB hold; least-privilege spoke kubeconfigs |
+| Hub RR compromise | Single BGW VM | KubeVirt runStrategy Always + live-migratable underlay; GR-aware FIB hold (follow-up); least-privilege spoke kubeconfigs |
 | Double encapsulation MTU blackhole | WG+VXLAN without clamp | Prefer `tunnelType: none` on adjacent underlay; MSS clamp in fabric defaults |
 
 **Security invariants (non-negotiable)**
 
-- One `HybridFabric` per isolation domain (typically per Entity).
-- Spokes peer **only** their fabric’s RR set on CENTRAL.
+- One platform `HybridFabric` per hub; the isolation domain is the tenant **VRF** (VNI + RT).
+- Spokes peer **only** the fabric border gateway loopback; the BGW reflects only ledger RTs.
 - `NetworkPlacement` cannot apply until a Ready `TransportLink` exists for that gateway.
 - Negative probes (Acme→Chad / Chad→Acme) are first-class acceptance tests.
 
@@ -77,122 +89,147 @@ As a principal network and security engineer, treat this as a **VPN isolation pr
 | **HCP2** | `PlatformOpenshift` `type: hosted` | **chad** | `CloudVirt/local-virt` | Chad spoke |
 | **HCP3** | `PlatformOpenshift` `type: hosted` | **chad** | `CloudVirt/local-virt` | Chad spoke |
 
-| Fabric CR | Allowed spokes | Forbidden |
-|-----------|----------------|-----------|
-| `HybridFabric/acme-fabric` | HCP1, OSO1 | HCP2, HCP3, any Chad CR |
-| `HybridFabric/chad-fabric` | HCP2, HCP3 | HCP1, OSO1, any Acme CR |
+| Fabric CR | Entities (`entityRefs`) | Sites |
+|-----------|-------------------------|-------|
+| `HybridFabric/platform-fabric` | acme-corp, chad | HCP1, HCP2, HCP3 (`none`), OSO1 (`wireguard`) |
 
-**Example numbering plan**
+**Numbering plan (one ledger, one ASN)**
 
-| Fabric | ASN | VNI pool | Example network | Canonical RT |
-|--------|-----|----------|-----------------|--------------|
-| acme-fabric | 65010 | 51000–51127 | acme-core → 51001 | `65010:51001` |
-| chad-fabric | 65020 | 52000–52127 | chad-app → 52001 | `65020:52001` |
+| Tenant VRF (`HybridNetwork`) | Entity | VNI | Canonical RT | Placements |
+|------------------------------|--------|-----|--------------|------------|
+| acme-core | acme-corp | 51001 | `65010:51001` | HCP1, OSO1 |
+| payments-vpc | acme-corp | 51000 | `65010:51000` | — |
+| chad-app | chad | 52000 | `65010:52000` | HCP2, HCP3 |
 
-Pools **must never overlap**.
+VNI pool 51000–52127 (covers the two legacy per-entity pools so existing VNIs are kept). chad-app's RT changes from the legacy `65020:52000` to `65010:52000` when it moves to the platform fabric (both HCPs are re-rendered together).
 
 ---
 
 ## 4. Hub-spoke topology
 
-![Hub-spoke EVPN overview — CENTRAL hub with acme-fabric and chad-fabric isolation domains](images/fabric-hub-spoke-overview.png)
+One platform fabric per hub. The hub runs the **border gateway (BGW)** VM: route reflector, underlay router and tunnel endpoint. Hosted clusters on the hub join the underlay L2 directly; remote OpenStack sites join through a **site gateway** VM that tunnels to the BGW. Every spoke keeps its own VTEP as BGP next hop, so VXLAN runs spoke-to-spoke and the BGW only routes the outer packets.
 
 ```mermaid
-flowchart TB
-  subgraph hub["CENTRAL hub"]
-    RR["Route Reflectors"]
-    BGW["Border Gateway"]
-    NA["VNI / RT Numbering"]
-    AAP["AAP + Ansible roles"]
+flowchart LR
+  subgraph hub["Hub cluster"]
+    direction TB
+    ING["Ingress router\nRoute passthrough :443"]
+    subgraph bgw["BGW VM"]
+      LO["lo 10.255.10.10/32\nFRR route reflector"]
+      E1["eth1 192.168.64.1/18\ndnsmasq DHCP"]
+      WG["wg0 10.254.254.1/24\nwstunnel server :8443"]
+    end
+    UL(["NAD fabric-underlay\nOVN-K layer2, no IPAM"])
+    subgraph hcpA["Hosted cluster A (KubeVirt workers)"]
+      WA["worker eth1 = VTEP\n192.168.64.x (DHCP)\nFRR-k8s + CUDN"]
+    end
+    subgraph hcpB["Hosted cluster B"]
+      WB["worker eth1 = VTEP\n192.168.64.y (DHCP)"]
+    end
   end
-  subgraph acme["acme-fabric ASN 65010"]
-    HCP1["HCP1 CUDN IP-VRF"]
-    OSO1["OSO1 RHOSO FR6\nnative OVN EVPN Type-5"]
+  subgraph siteA["Site A: OpenStack"]
+    direction TB
+    subgraph mgmt["Management cluster"]
+      SG["Site gateway VM\neth1 192.168.80.1 on br-fabric\nwg0 10.254.254.12\nwstunnel client"]
+    end
+    BR(["br-fabric on node NIC\n(site underlay L2)"])
+    subgraph edpm["EDPM compute"]
+      CN["fabric NIC = VTEP 192.168.80.x\nFRR + ovn-evpn\nOVN gateway chassis"]
+    end
   end
-  subgraph chad["chad-fabric ASN 65020"]
-    HCP2["HCP2 CUDN"]
-    HCP3["HCP3 CUDN"]
-  end
-  RR --- HCP1
-  RR --- OSO1
-  RR --- HCP2
-  RR --- HCP3
-  NA -.-> AAP
-  AAP -.-> HCP1
-  AAP -.-> OSO1
-  AAP -.-> HCP2
-  AAP -.-> HCP3
-  acme -.-x|no RT import| chad
+  WA --- UL
+  WB --- UL
+  UL --- E1
+  WA -. "iBGP l2vpn evpn" .-> LO
+  WB -. "iBGP" .-> LO
+  SG == "WireGuard in wstunnel\nTLS 443 over hub ingress" ==> ING
+  ING ==> WG
+  SG --- BR --- CN
+  CN -. "iBGP via site gateway" .-> LO
 ```
 
 ```text
-                    +-------------------------------+
-                    |   CENTRAL (hub)               |
-                    |  RR / BGW / Numbering / AAP   |
-                    +-------------+-----------------+
-           EVPN/BGP |             | EVPN/BGP
-     +--------------+--+       +--+--------------+
-     |                 |       |                 |
-+----+----+       +----+----+ +----+----+   +----+----+
-|  HCP1   |       |  OSO1   | |  HCP2   |   |  HCP3   |
-|  acme   |       |  acme   | |  chad   |   |  chad   |
-| CUDN VRF|       | Neutron | | CUDN    |   | CUDN    |
-+---------+       +---------+ +---------+   +---------+
-     \_______________/             \_____________/
-        acme-fabric                   chad-fabric
+ Hub cluster                                                 Site A (OpenStack)
+ +--------------------------------------------------+        +-------------------------------------------+
+ |  Hosted cluster A worker      BGW VM              |        |  Management cluster      EDPM compute     |
+ |  eth1 VTEP 192.168.64.x  ---  eth1 192.168.64.1   |        |  Site gateway VM         fabric NIC VTEP  |
+ |  (DHCP from BGW)          |   lo   10.255.10.10   |  TLS   |  eth1 192.168.80.1 ----  192.168.80.x     |
+ |  Hosted cluster B worker  |   wg0  10.254.254.1 <=|=443===>|  wg0  10.254.254.12      FRR + ovn-evpn   |
+ |  eth1 VTEP 192.168.64.y --+   (route reflector)   | wss    |  (br-fabric on node NIC) OVN gw chassis   |
+ |  underlay NAD: OVN-K layer2, no IPAM              |        |  site underlay L2 192.168.80.0/24         |
+ +--------------------------------------------------+        +-------------------------------------------+
+   control plane: every VTEP peers iBGP (l2vpn evpn) with 10.255.10.10; next hop unchanged
+   data plane:    VXLAN VTEP <-> VTEP; the BGW routes eth1 <-> wg0, the site gateway routes wg0 <-> eth1
 ```
 
 **Why hub-spoke (not full mesh)**
 
-- Control-plane scale: O(N) BGP sessions to RR, not O(N²).
-- Policy enforcement point: CENTRAL is the only place that reflects routes; import filters are fabric-scoped.
-- Operational blast radius: RR maintenance is centralized; spoke VTEPs remain locally autonomous for data plane once programmed.
+- Control-plane scale: O(N) BGP sessions to the BGW, not O(N²).
+- Policy enforcement point: the BGW is the only reflector; it reflects only route targets allocated on the fabric.
+- Operational blast radius: the BGW is one VM per hub; spoke VTEPs keep forwarding for established routes while it restarts.
 
 ---
 
-## 5. Acme dedicated EVPN VRF (HCP1 ↔ OSO1)
+## 5. Tenant VRFs sharing the fabric
 
-![Acme IP-VRF data plane — HCP1 CUDN EVPN to OSO1 native OVN EVPN Type-5 via CENTRAL](images/fabric-acme-evpn-vrf.png)
+Each `HybridNetwork` is an IP-VRF with its own VNI *n* and RT `ASN:n`. OpenShift spokes realize it as a primary ClusterUserDefinedNetwork with `transport: EVPN`; OpenStack spokes as a Neutron router created with `--evpn-vni n`. Several VRFs share the same BGW, underlay and tunnels.
 
-Acme uses OpenShift **4.22 primary ClusterUserDefinedNetwork** with:
-
-- `transport: EVPN`
-- dedicated **IP-VRF** (L3 VRF) for routed HCP1 ↔ OSO1
-- optional **MAC-VRF** only if L2 stretch is required (typically **not** between OCP and RHOSO)
+**Type-5 route flow (control plane)**
 
 ```mermaid
 flowchart LR
-  subgraph hcp1["HCP1 acme"]
-    CUDN["CUDN primary\nEVPN ipVRF VNI=51001"]
-    W[Workloads]
+  subgraph hA["Hosted cluster A"]
+    C1["CUDN, tenant VRF 1\nVNI 1, prefix P1"]
+    C2["CUDN, tenant VRF 2\nVNI 2, prefix P2"]
+    FA["FRR-k8s\nVTEP A"]
   end
-  subgraph fabric["Acme EVPN via CENTRAL"]
-    VX["VXLAN :4789\nRT 65010:51001"]
+  subgraph hub["Hub"]
+    RR["BGW route reflector\nRT allow-list from ledger\nnext-hop unchanged"]
   end
-  subgraph oso["OSO1 RHOSO 18.0 FR6"]
-    NEU["Neutron EVPN router\n--evpn-vni + OVN Gateway"]
-    VM[VMs]
+  subgraph sA["Site A"]
+    FS["EDPM FRR\nVTEP S"]
+    N1["Neutron EVPN router\nVNI 1, prefix P3"]
   end
-  W --> CUDN --> VX --> NEU --> VM
+  C1 --> FA
+  C2 --> FA
+  FA -- "Type-5 P1 RT ASN:1 nh A\nType-5 P2 RT ASN:2 nh A" --> RR
+  N1 --> FS
+  FS -- "Type-5 P3 RT ASN:1 nh S" --> RR
+  RR -- "P1 (RT ASN:1) to S" --> FS
+  RR -- "P3 (RT ASN:1) to A" --> FA
+  FS -. "imports RT ASN:1 only;\nP2 never installed" .- N1
 ```
 
-**Security reading:** HCP1 and OSO1 share one VPN (same VNI/RT). Chad’s VNIs are absent from Acme’s import policy. Shared physical underlay does not imply shared VRF.
+**Packet path for VRF 1 (data plane)**
+
+```text
+ pod in VRF 1 (P1)                                                          VM in VRF 1 (P3)
+   | CUDN, VRF 1                                                              ^ Neutron EVPN router
+ [VTEP A: VXLAN VNI 1, outer 192.168.64.x -> 192.168.80.x]                   | OVN gateway chassis
+   |  hub underlay L2                                                       [VTEP S: decap VNI 1]
+ BGW eth1 --route--> wg0 ==WireGuard==> wstunnel ==TLS 443 hub ingress==> site gateway wg0 --route--> eth1
+                                                                              site underlay L2
+ Inner MTU budget: 1300 (overlay) inside 1330 VXLAN payload over wg0 1380 (section 21.5)
+```
+
+Shared underlay, BGW and tunnels do not imply a shared VRF: a spoke installs only routes whose RT it imports, and the BGW drops routes whose RT is not allocated on the fabric.
 
 ---
 
-## 6. Chad fabric (HCP2 ↔ HCP3 only)
+## 6. Tenant VRF across two hosted clusters
 
 ```mermaid
 flowchart LR
-  H2["HCP2\nCUDN VNI=52001"] -->|EVPN| RR["CENTRAL\nchad-fabric RR"]
-  H3["HCP3\nCUDN VNI=52001"] -->|EVPN| RR
+  B1["Hosted cluster B\nCUDN tenant VRF 2, VNI 2\nprefix P4"] -- "iBGP Type-5 RT ASN:2" --> RR["BGW route reflector\n(shared)"]
+  B2["Hosted cluster C\nCUDN tenant VRF 2, VNI 2\nprefix P5"] -- "iBGP Type-5 RT ASN:2" --> RR
+  B1 <== "VXLAN VNI 2 over hub underlay" ==> B2
 ```
 
 | Constraint | Enforcement |
 |------------|-------------|
-| No OSO1 in Chad | No Chad `CloudGateway`/`TransportLink` for OSO1; UI backend picker omits foreign backends |
-| Same VNI both HCPs | `allocate` once on `HybridNetwork`; both placements reuse status VNI/RT |
-| L2 mobility optional | Layer2 + macVRF only if live-migration across HCPs is a requirement |
+| VRF not placed at an OpenStack site | No CloudOSO placement for that network; the site gateway is shared infrastructure but its computes only import RTs of VRFs placed there |
+| Same VNI on both clusters | `allocate` once on `HybridNetwork`; both placements reuse status VNI/RT |
+| L2 mobility optional | Layer2 + MAC-VRF only if live migration across clusters is a requirement |
 
 ---
 
@@ -217,10 +254,10 @@ flowchart TB
 
 | Kind | NS | Owner | Spec (intent) | Status (observed) |
 |------|----|-------|---------------|-------------------|
-| `HybridFabric` | `sovereign-cloud` | Platform | ASN, RRs, VNI pool, BGW, transport defaults | `fabricBaseReady`, `allocatedVniCount` |
-| `CloudGateway` | `sovereign-cloud` | Platform | cloud, region, `fabricRef`, transport, OSO/Virt refs | `landingZoneReady`, `gatewayAddress` |
-| `TransportLink` | `sovereign-cloud` | Platform | `fabricRef`, `cloudGatewayRef`, `tunnelType`, vault ref | `tunnelUp`, endpoints |
-| `HybridNetwork` | `entity-*` | Tenant | description only (**no** VNI/RT) | `vni`, `vrfName`, `canonicalRt`, `fabric` |
+| `HybridFabric` | `sovereign-cloud` | Platform — **one per hub** | ASN, `entityRefs`, VNI pool, underlay segment (`spec.underlay`), border gateway VM (route reflector, underlay router, tunnel endpoint), transport defaults | `fabricBaseReady`, `borderBgwReady`, `bgwEndpoint`, `allocatedVniCount` |
+| `CloudGateway` | `sovereign-cloud` | Platform — one per site | cloud, `fabricRef`, transport, `siteUnderlay` (RHOSO), OSO/Virt refs; `domainAsn` = fabric ASN (per-spoke ASNs retired) | `landingZoneReady`, `gatewayAddress` |
+| `TransportLink` | `sovereign-cloud` | Platform — one per site | `fabricRef`, `cloudGatewayRef`, `tunnelType` | `tunnelUp`, endpoints |
+| `HybridNetwork` | `entity-*` | Tenant — one per VRF | description, optional `fabricRef` (**no** VNI/RT) | `vni`, `vrfName`, `canonicalRt`, `fabric` |
 | `NetworkPlacement` | `entity-*` | Tenant | `network`, `backend`, `prefixes`, `state` | `backendReady`, `validated`, gateway/link refs |
 
 `NetworkPlacement.spec.backend.kind` ∈ `CloudAWS` | `CloudOSO` | `CloudVirt` | `PlatformOpenshift`.
@@ -282,12 +319,26 @@ flowchart TB
 | Validate pool | `vniPool.end >= start`; no overlap with other Ready fabrics’ pools (query API) |
 | Validate ASN uniqueness | `domainAsn` not reused by another fabric |
 | Create numbering store | ConfigMap (or CR status ledger) `fabric-numbering-<name>` with bitmap/next-VNI |
-| Program hub RR | For each `spec.routeReflectors[]` address, apply a **shared** `hostNetwork` FRR Deployment + ConfigMap (`hub-rr-<addr>`) in the fabric namespace (SA `hub-rr` + SCC `hub-rr-hostnetwork`). One BGP instance per RR IP (TCP/179): local ASN = **min** of all `domainAsn` values from HybridFabrics listing that address (lab: `65010` when Acme+Chad share RRs). Speaks must peer that local ASN. `l2vpn evpn` + listen-range + attribute-unchanged for Type-5 reflection. Gate `status.hubRrReady` (and Ready) on Deployment Available — fail closed. Lab underlay still must route VTEPs → RR IPs. |
-| Border gateway | If `borderGateway` set: fetch Vault creds; configure BGW loopback + EVPN toward RR; never write keys to Git |
-| Status | `fabricBaseReady`, `borderBgwReady`, `hubRrReady`, `availableVniCount`, `ready` |
-| Teardown | Only if `allocatedVniCount==0` and no TransportLinks reference fabric; else block. Delete hub RR pods only when **no other** HybridFabric still references that RR address. |
+| Border gateway (BGW) VM | `deploy_border_gateway.yml` (§21.2). In the fabric namespace: OVN-K layer2 NAD `spec.underlay.nadName` (no IPAM → MAC-only port security, MTU 1400); KubeVirt VM `fabric-bgw-<fabric>` (CentOS Stream 9 containerdisk, `default` masquerade + `underlay` bridge); Secret `<bgw>-cloudinit` (first boot) and Secret `<bgw>-config` (wg0.conf / frr.conf / dnsmasq / nftables, attached as a disk and re-read at every boot; EDA restarts the VMI when it changes); Service `<bgw>-wss` + passthrough Route for wstunnel. Guest: loopback = `borderGateway.loopback` (BGP router-id / cluster-id), eth1 = underlay gateway + dnsmasq (option 121 routes to the loopback and every remote site underlay), wg0 with one peer per `cloud: openstack` / `transport: wireguard` CloudGateway, FRR iBGP route reflector (`bgp listen range` hub underlay + site underlays + WireGuard net; `l2vpn evpn` + `ipv4 unicast`, `attribute-unchanged next-hop`). WireGuard keys come from Vault `borderGateway.vaultCredentialRef` (generated when absent), never Git. `borderBgwReady` = VMI Ready + guest agent connected (set up last by the first-boot script). |
+| Tenant RT allow-list | The BGW FRR config carries `bgp extcommunity-list standard FABRIC-RT permit rt <asn>:<vni>` for every VNI in `fabric-numbering-<fabric>` and `route-map SPOKES-EVPN-IN` (permit on match, deny otherwise) applied `in` on the `SPOKES` peer-group in `address-family l2vpn evpn`. A new VNI re-renders the config (hybridnetwork_provision) and restarts the BGW VMI. `bgw_rt_filter: off` disables it. |
+| Legacy ledger migration | `ledger_migrate_legacy.yml`: moves `<ns>/<network>` keys from other `fabric-numbering-*` ConfigMaps into this ledger (same VNI) when that HybridNetwork's `spec.fabricRef` is this fabric; the allocator also prefers a network's previous `status.vni`. |
+| Lab-only shims | kubemacpool ignore label on VM namespaces; see Appendix A. |
+| Legacy hub RR (deprecated) | `deploy_hub_rr.yml` (hostNetwork FRR pods per `spec.routeReflectors[]`) runs only when that list is non-empty. New fabrics leave it empty. |
+| Status | `fabricBaseReady`, `borderBgwReady`, `bgwEndpoint`, `bgwPeerCount`, `hubRrReady` (legacy), `availableVniCount`, `ready` |
+| Teardown | Only if `allocatedVniCount==0` and no TransportLinks reference fabric; else block. Remove the BGW VM, Route, Service, Secrets and fabric-namespace NAD (`remove_border_gateway.yml`). Legacy hub RR pods only when **no other** HybridFabric still references that RR address. |
 
 **Idempotency:** re-run must not reallocate VNIs or reset the ledger.
+
+**Vault layout** (KV mount `hybridsovereign/`; EDA generates WireGuard pairs when absent, never writes Git)
+
+| Path | Keys | Read by |
+|------|------|---------|
+| `fabric/<fabric>/bgw` (lab: `fabric/platform-fabric/bgw`) | `wgPrivateKey`, `wgPublicKey`, optional `sshPublicKey` | hybridfabric_provision (BGW), cloudgateway_provision (public key for the site gateway) |
+| `fabric/wireguard/<cloudgateway>` (lab: `fabric/wireguard/acme-oso1-gw`) | `wgPrivateKey`, `wgPublicKey`, optional `sshPublicKey` | cloudgateway_provision (site gateway VM), hybridfabric/transportlink (BGW peer) |
+| `oso/<cloudoso>/mgmt-kubeconfig` (lab: `oso/oso1/mgmt-kubeconfig`) | `kubeconfig` | cloudgateway_provision, transportlink_provision, networkplacement (HA chassis check) |
+| `oso/projects/<cloudoso>/clouds-config` | `clouds.yaml` | networkplacement (Neutron) |
+
+Explicit `borderGateway.vaultCredentialRef`, `CloudGateway.spec.transport.vaultPeerConfigRef` and `managementClusterKubeconfigRef` override the derived paths.
 
 ---
 
@@ -301,7 +352,7 @@ flowchart TB
 | Entity match | Gateway labels/entity must match fabric entity |
 | Branch on `spec.cloud` | `openshift` → HCP/Virt (**hosted** PlatformOpenshift on CloudVirt) landing; `openstack` → CloudOSO / PlatformOpenshift type=openstack; **`aws` — no EVPN fabric landing** (do not create fabric CloudGateway for AWS PlatformOpenshift) |
 | OSO path | Using `openstackCloudOSORef`, obtain admin/appcred from Vault; assert RHOSO ≥ 18.0.21; enable **native OVN BGP-EVPN** (FRR + EVPN Service Plugin / OVN Gateway) — **not** deprecated `ovn-bgp-agent` |
-| OCP path | Using spoke kubeconfig: ensure FRR-k8s + VTEP prerequisites; reserve spoke ASN `domainAsn` |
+| OCP path | Using spoke kubeconfig: ensure FRR-k8s + VTEP prerequisites; peer with the BGW loopback in the fabric ASN (iBGP; per-spoke ASNs retired) |
 | Landing zone | Create/ensure provider resources (security groups, external nets hooks) **without** tenant VNIs yet |
 | Status | `landingZoneReady`, `gatewayAddress` (VTEP or BGP peer IP), `peerCount` |
 
@@ -317,10 +368,30 @@ flowchart TB
 |--------------|--------|
 | Bind fabric + gateway | Both Ready; same fabricRef |
 | Reject cross-fabric bind | e.g. Chad gateway → acme-fabric → **fail** |
-| `tunnelType: none` | Verify L3 adjacency hub↔spoke; program EVPN BGP neighbors only (no WG/IPsec) |
-| `wireguard` / `ipsec` / `macsec` | Pull `vaultConfigRef`; bring up tunnel; place EVPN session **inside** or beside per design; set MSS clamp from fabric defaults |
+| `tunnelType: none` | HCP spokes. Workers are on the hub underlay L2 (NodePool `additionalNetworks`, eth1 by DHCP from the BGW) and peer natively with the BGW loopback; nothing to tunnel. |
+| `wireguard` | RHOSO site gateways. WireGuard between the BGW VM and the site gateway VM `fabric-gw-<oso>` (built by the CloudGateway on the RHOSO management cluster), carried inside **wstunnel over the hub ingress** (passthrough Route, TLS 443) because neither lab exposes UDP. The link renders the gateway as a peer on the BGW (`bgw_config.yml`, restarts the BGW VMI on change) and reports `wg0` presence on both guests; the authoritative check is the EDPM FRR session to the BGW loopback. Keys: BGW `borderGateway.vaultCredentialRef`, gateway `transport.vaultPeerConfigRef`. No `vaultConfigRef`. |
+| `ipsec` / `macsec` | Pull `vaultConfigRef`; record endpoints (not implemented beyond Vault load). `sshtunnel` was removed. |
 | Exchange endpoints | Write `borderEndpoint`, `cloudEndpoint`, `lastHandshakeAt` |
 | Status | `tunnelUp`, `ready` |
+
+**`wireguard` transport (site gateway to BGW)**
+
+```mermaid
+flowchart LR
+  subgraph site["Site A management cluster"]
+    SGW["Site gateway VM\nwg0 10.254.254.12\nUDP to 127.0.0.1:51820"]
+    WSC["wstunnel client\nwss://<bgw route>:443"]
+  end
+  subgraph hub["Hub cluster"]
+    RT["Ingress router\nRoute tls passthrough"]
+    SVC["Service :443 -> VM :8443"]
+    WSS["wstunnel server (BGW VM)\n--restrict-to 127.0.0.1:51820"]
+    WG["BGW wg0 10.254.254.1\nlisten 51820 on lo"]
+  end
+  SGW --> WSC == "TCP/TLS 443" ==> RT --> SVC --> WSS --> WG
+```
+
+Encapsulation on the wire between the sites: tenant packet in VXLAN (VNI n) in WireGuard (UDP) in a WebSocket stream over TLS/TCP 443. Only TCP 443 to the hub ingress is needed; no UDP or NodePorts. Physical deployments with routed underlays use `tunnelType: none` instead.
 
 **Teardown:** drain BGP (graceful), bring down tunnel, clear Vault-dependent runtime state — **do not** delete Vault secrets.
 
@@ -383,7 +454,7 @@ Full procedure: **§10.3**.
 
 #### 8.5.4 `fabric_vni` (hub side)
 
-Ensure hub RR/BGW policy allows the VNI/RT for this fabric only (export filters). No cross-fabric import.
+**Implemented (2026-10-07):** the BGW reflects only EVPN routes whose RT is `<fabric ASN>:<VNI>` for a VNI in this fabric's ledger (extcommunity-list `FABRIC-RT` + route-map `SPOKES-EVPN-IN` applied inbound on the `SPOKES` peer-group, l2vpn evpn only). Spokes still import only their VRF's RT, so tenant separation does not depend on the hub filter alone. Not yet verified live on FRR 8.5.
 
 #### 8.5.5 `validate`
 
@@ -414,7 +485,7 @@ stateDiagram-v2
 | Layer introduced | Ansible creates / mutates | Must already exist |
 |------------------|---------------------------|--------------------|
 | L1 HybridFabric | Numbering CM, RR/BGW intent | L0 underlay + Vault |
-| L2 CloudGateway | Landing zone, spoke ASN prep | L1 Ready |
+| L2 CloudGateway | Landing zone (site gateway VM + EDPM for RHOSO) | L1 Ready |
 | L3 TransportLink | BGP neighbors ± tunnel | L2 Ready |
 | L4 HybridNetwork | VNI/RT allocation | L1 Ready |
 | L5 NetworkPlacement | CUDN/FRR/VTEP/RA **or** Neutron EVPN router (`--evpn-vni`) + Type-5 probes | L3 Ready + L4 allocated |
@@ -560,23 +631,26 @@ Native OVN installs Type-5-advertised prefixes into a Linux VRF/table; FRR adver
 
 ```mermaid
 flowchart LR
-  subgraph oso["RHOSO 18.0 FR6 OSO1"]
-    VM[Tenant VM]
-    NS[Neutron net/subnet]
-    RTR["Neutron router\n--evpn-vni VNI"]
-    GW[OVN Gateway chassis]
-    FRR[FRR l2vpn evpn]
+  subgraph site["Site A: OpenStack"]
+    direction TB
+    VM["Tenant VM\nprefix P3"]
+    NS["Neutron network + subnet\nMTU 1300"]
+    RTR["Neutron router\n--evpn-vni n\nsubnet --advertise-host"]
+    GWC["OVN gateway chassis\n(edpm_enable_chassis_gw)\nHA_Chassis_Group evpn-hcg-<router>"]
+    EV["ovn-evpn agent extension\nbr-evpn, vxlan-evpn, VRF n"]
+    FRR["EDPM FRR\nl2vpn evpn, source = fabric NIC"]
+    SG["Site gateway VM\n(router to the tunnel)"]
+    VM --> NS --> RTR --> GWC --> EV --> FRR
+    FRR -. "iBGP to 10.255.10.10" .-> SG
   end
-  subgraph hub["CENTRAL hub"]
-    RR[Fabric RR ASN]
+  subgraph hub["Hub"]
+    RR["BGW route reflector"]
   end
-  subgraph hcp["HCP1 OCP 4.22"]
-    CUDN["CUDN ipVRF same VNI/RT"]
+  subgraph hc["Hosted cluster A"]
+    CUDN["CUDN IP-VRF\nVNI n, RT ASN:n"]
   end
-  VM --> NS --> RTR --> GW
-  GW --> FRR
-  FRR <-->|EVPN Type-5| RR
-  RR <-->|EVPN Type-5| CUDN
+  SG == "WireGuard in wstunnel" ==> RR
+  RR <-. "EVPN Type-5 RT ASN:n" .-> CUDN
 ```
 
 #### 10.3.2 Platform prerequisites (CloudGateway / day-0 on OSO1)
@@ -589,7 +663,7 @@ Ansible `cloud_landing_zone` / `transport` for `cloud: openstack` must assert RH
 | Data plane / EDPM | FRR on gateway/network nodes; OVN **EVPN agent extension** (replaces BGP-agent EVPN expose) |
 | VTEP | Global reachable VTEP IP per EVPN chassis (`ovn-evpn-local-ip` / Open_vSwitch external_ids) |
 | BGP underlay | FRR peers toward `HybridFabric.spec.routeReflectors[]` (CENTRAL) with **address-family l2vpn evpn** activated |
-| AS / VNI | Spoke ASN from CloudGateway `domainAsn`; VNIs allocated only from fabric pool (never tenant-picked) |
+| AS / VNI | Fabric ASN (iBGP to the BGW); VNIs allocated only from the fabric pool (never tenant-picked) |
 | Verify | `openstack router create --help` shows `--evpn-vni`; OVN NB supports `dynamic-routing*` options |
 
 **Explicit non-goals on OSO for FR6 TP**
@@ -638,10 +712,12 @@ Same VNI on both spokes is mandatory for one HybridNetwork VPN. Overlapping tena
 
 | `tunnelType` | Use |
 |--------------|-----|
-| `none` | Lab / adjacent underlay — EVPN/VXLAN only between OSO gateway VTEPs and CENTRAL / HCP VTEPs |
-| `wireguard` / `ipsec` | When OSO site is remote; underlay tunnel first, then EVPN Type-5 inside or beside per fabric defaults |
+| `none` | Site underlay already routed to the hub (physical deployments): EDPM FRR peers the BGW loopback directly. |
+| `wireguard` | Remote site without a routed underlay to the hub. The CloudGateway lands a site gateway VM on the OpenStack management cluster (`br-fabric` on `siteUnderlay.interface` on every node, bridge NAD `openstack/fabric`, eth1 = `siteUnderlay.gatewayAddress`, WireGuard to the BGW carried over TLS 443 through the hub ingress), then the EDPM landing: NetConfig network `fabric` once, then each NodeSet in `CloudOSO.spec.dataplaneNodeSetRefs` **one at a time in CR order** (patch, one deployment scoped to that NodeSet, wait for Ready before the next; details §21.4). The optional MAC-translation shim (`siteUnderlay.macNatShim`) is for test environments only (Appendix A). |
 
-CloudGateway for OSO remains the Sovereign object that owns spoke ASN, `openstackCloudOSORef`, and peer endpoints; FR6 native EVPN does **not** remove the need for HybridFabric / CloudGateway / TransportLink CRs.
+Placement order matters: the Neutron `--evpn-vni` router only gets gateway chassis in `evpn-hcg-<router id>` if it is created after the EDPM landing; `backend_rhoso_ovn_evpn.yml` checks the group on the management cluster and recreates the router once when empty. Neutron networks are created with MTU 1300 (fabric.md §21.5).
+
+CloudGateway for OSO remains the Sovereign object that owns the site underlay, `openstackCloudOSORef`, and peer endpoints; FR6 native EVPN does **not** remove the need for HybridFabric / CloudGateway / TransportLink CRs.
 
 #### 10.3.6 Migration note (existing labs)
 
@@ -662,79 +738,64 @@ Peers only chad-fabric RRs (`10.255.20.x`). No neighbor to ASN 65010.
 
 ---
 
-## 11. Sample manifests (Acme + Chad)
+## 11. Sample manifests (platform fabric + Acme / Chad tenants)
 
-### 11.1 Acme platform
+> **History note.** Until 2026-10-07 this section showed one `HybridFabric` per Entity (`acme-fabric` AS 65010 with RRs 10.255.10.1/.2, `chad-fabric` AS 65020) and a per-spoke ASN scheme (CloudGateway `domainAsn` 65011, 65012, 65021, 65022, eBGP to the hub). Both are retired: there is one platform fabric, everything is iBGP in its ASN to the border gateway, and tenants are VRFs. Re-originating Type-5 routes per spoke ASN would need the BGW to be a VXLAN re-originator, which FRR does not do for imported EVPN routes (§21.1). The authoritative manifests are `gitops/apps/platform-fabric/templates/*.yaml`.
+
+### 11.1 Platform fabric and sites
 
 ```yaml
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
 metadata:
-  name: acme-fabric
+  name: platform-fabric
   namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
 spec:
   enabled: true
   domainAsn: 65010
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
-  vniPool: { start: 51000, end: 51127 }
+  entityRefs: [{ name: acme-corp }, { name: chad }]
+  underlay: { nadName: fabric-underlay, cidr: 192.168.64.0/18, gatewayAddress: 192.168.64.1, mtu: 1400 }
   borderGateway:
-    name: central-bgw-acme
+    name: fabric-bgw
     loopback: 10.255.10.10
-    vaultCredentialRef: fabric/acme/bgw
-  transportDefaults:
-    mtu: 9000
-    innerMssClamp: 1360
-    defaultTunnelType: none
+    vaultCredentialRef: fabric/platform-fabric/bgw
+    wireguard: { address: 10.254.254.1/24, listenPort: 51820 }
+  vniPool: { start: 51000, end: 52127 }
+  transportDefaults: { mtu: 1442, defaultTunnelType: none }
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
 metadata:
-  name: acme-hcp1-gw
+  name: acme-hcp1-gw          # one per site; hcp2 / hcp3 identical in shape
   namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
 spec:
   enabled: true
   cloud: openshift
-  region: local-virt
-  domainAsn: 65011
-  fabricRef: acme-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport: { type: none }
+  platformOpenshiftRef: hcp1
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
 metadata:
   name: acme-oso1-gw
   namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
 spec:
   enabled: true
   cloud: openstack
-  region: regionOne
-  domainAsn: 65012
-  fabricRef: acme-fabric
-  transport: { type: none }
+  domainAsn: 65010
+  fabricRef: platform-fabric
+  transport: { type: wireguard, vaultPeerConfigRef: fabric/wireguard/acme-oso1-gw }
   openstackCloudOSORef: oso1
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: acme-hcp1-link
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  fabricRef: acme-fabric
-  cloudGatewayRef: acme-hcp1-gw
-  tunnelType: none
+  wireguard: { address: 10.254.254.12/32 }
+  siteUnderlay:
+    interface: enp7s0
+    computeInterface: eth5
+    cidr: 192.168.80.0/24
+    gatewayAddress: 192.168.80.1
+    mtu: 1442
+    macNatShim: { enabled: true }   # lab only
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: TransportLink
@@ -743,82 +804,14 @@ metadata:
   namespace: sovereign-cloud
 spec:
   enabled: true
-  fabricRef: acme-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: acme-oso1-gw
-  tunnelType: none
+  tunnelType: wireguard
 ```
 
-### 11.2 Chad platform (HCP2 + HCP3 only)
+### 11.2 (retired) Chad platform
 
-```yaml
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: HybridFabric
-metadata:
-  name: chad-fabric
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: chad
-spec:
-  enabled: true
-  domainAsn: 65020
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.20.1
-    - name: central-rr-b
-      address: 10.255.20.2
-  vniPool: { start: 52000, end: 52127 }
-  transportDefaults:
-    mtu: 9000
-    defaultTunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
-  name: chad-hcp2-gw
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  cloud: openshift
-  region: local-virt
-  domainAsn: 65021
-  fabricRef: chad-fabric
-  transport: { type: none }
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
-  name: chad-hcp3-gw
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  cloud: openshift
-  region: local-virt
-  domainAsn: 65022
-  fabricRef: chad-fabric
-  transport: { type: none }
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: chad-hcp2-link
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  fabricRef: chad-fabric
-  cloudGatewayRef: chad-hcp2-gw
-  tunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: chad-hcp3-link
-  namespace: sovereign-cloud
-spec:
-  enabled: true
-  fabricRef: chad-fabric
-  cloudGatewayRef: chad-hcp3-gw
-  tunnelType: none
-```
+Chad no longer has its own fabric: `chad-hcp2-gw` / `chad-hcp3-gw` and their links use `fabricRef: platform-fabric`, `transport: none`. Chad is a tenant VRF (11.4).
 
 ### 11.3 Acme tenant
 
@@ -830,6 +823,7 @@ metadata:
   namespace: entity-acme-corp
 spec:
   description: Acme core VRF — HCP1 + OSO1 via EVPN IP-VRF
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
@@ -864,6 +858,7 @@ metadata:
   namespace: entity-chad
 spec:
   description: Chad app VRF — HCP2 + HCP3 only
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
@@ -1554,107 +1549,36 @@ status:
 
 ---
 
-## 16. PlatformOpenshift IP conflict prevention (fabric IPAM)
+## 16. Address ownership
 
-### 16.1 Problem
+**Fabric-wide unique, and only these:** VNI / RT (numbering ledger), underlay segments (`HybridFabric.spec.underlay`, each `CloudGateway.spec.siteUnderlay`), and gateway addresses (BGW loopback and underlay address, tunnel addresses, site gateway addresses).
 
-Hypershift / sample installs historically hard-code the same CIDRs on every cluster:
+**Per cluster:** pod and service CIDRs are never advertised into the fabric, so choosing them is not a fabric concern. Two constraints apply: (1) HyperShift on KubeVirt — a hosted cluster's pod/service CIDRs must not overlap the hub's; (2) OVN-K — a CUDN subnet must not overlap the cluster's own pod/service CIDRs. **Assumption (CG-NAT):** greenfield deployments select hub and hosted-cluster pod networks and service ranges from the CG-NAT space 100.64.0.0/10 so tenants have the full RFC1918 IPv4 space for overlay (HybridNetwork) prefixes; with that, constraint (2) never fires for an RFC1918 overlay. Clusters that predate the assumption are handled as legacy (Appendix A).
 
-- `clusterNetwork: 10.132.0.0/14`
-- `serviceNetwork: 172.31.0.0/16`
+**Per HybridNetwork:** overlay prefixes are unique within one HybridNetwork (VRF) only; different networks, of the same or different tenants, may use identical prefixes.
 
-When **HCP1, HCP2, HCP3** (and future clusters) join the **same HybridFabric**, identical pod/service ranges cause:
+### 16.1 Cluster CIDRs (`eda/common/tasks/platformopenshift_fabric_ipam.yml`, `eda/common/files/fabric_cluster_ipam.py`)
 
-| Failure mode | Impact on fabric |
-|--------------|------------------|
-| Duplicate underlay / node identity assumptions | Ambiguous VTEP or node routes |
-| Accidental Type-5 leak of clusterNetwork into EVPN | Blackholes / asymmetric routing across VRFs |
-| NetworkPlacement prefix overlap with a cluster CIDR | Hybrid overlay collides with spoke pod/service space |
-| Troubleshooting confusion | Same CIDR on two HCPs — unreachable “twins” |
+Candidates, in order: recorded `status.networking` (kept as-is), explicit `spec.networking`, a new block from the default ranges (`CloudVirt.spec.hostedClusterCidrDefaults`, else role vars `po_default_cluster_network_pool` 100.64.0.0/11 /14 and `po_default_service_network_pool` 100.96.0.0/11 /16), or HyperShift defaults when `allocateFromFabric: false`.
 
-**Design rule:** every `PlatformOpenshift` that may join a fabric MUST have a **unique, conflict-checked** address plan recorded on `status.networking` **before** HostedCluster / install manifests are applied.
-
-**Standalone clusters (no fabric):** installation still proceeds (§17). IPAM uses built-in platform pools or explicit `spec.networking` CIDRs when `allocateFromFabric: false` or no Ready fabric exists — never blocks Ready solely because HybridFabric is absent.
-
-### 16.2 CRD changes (implemented)
-
-#### `HybridFabric.spec.ipam`
-
-| Field | Purpose |
+| Check | Applies |
 |-------|---------|
-| `clusterNetworkPool.cidr` + `blockPrefixLength` | Superspace carved per OCP (e.g. `10.128.0.0/12` → `/14` blocks) |
-| `serviceNetworkPool` | Per-cluster service CIDRs (e.g. `172.30.0.0/15` → `/16`) |
-| `machineNetworkPool` | Optional node/underlay blocks (VTEP-adjacent) |
-| `hybridOverlayReserved[]` | CIDRs reserved for `NetworkPlacement` prefixes — never allocated as cluster/service/machine |
-| `denyOverlappingClusterCidrs` | Default true — reject overlapping joins |
+| No overlap with the hub's cluster/service CIDRs (`network.config.openshift.io/cluster`) | always |
+| No overlap with other PlatformOpenshift pod/service CIDRs | role var `po_deny_peer_cidr_overlap` (default true) |
+| No overlap between the cluster's own pod and service CIDRs | always |
+| **No** check against overlay prefixes | — |
 
-#### `PlatformOpenshift.spec.networking`
+No node blocks are allocated: nodes attach to the fabric underlay, reported in `status.networking.underlay {nadName, cidr}`. CIDRs outside the default ranges are kept and flagged `ipamCondition: LegacyClusterCidrs`. A conflict sets `conflictCheck: failed` and fails the job (unless `allowConflict`); `platform_fabric_join` refuses `Joined` until it passes.
 
-| Field | Purpose |
-|-------|---------|
-| `allocateFromFabric` | Default **true** — carve from fabric IPAM |
-| `fabricRef` | Which fabric pools to use (else discover) |
-| `clusterNetwork` / `serviceNetwork` / `machineNetwork` | Explicit override (still conflict-checked) |
-| `allowConflict` | Escape hatch (must stay false for fabric members) |
+### 16.2 Overlay prefixes (`networkplacement_provision/tasks/main.yml`)
 
-#### `PlatformOpenshift.status.networking`
+| Rule | Backend |
+|------|---------|
+| (a) No overlap with other `NetworkPlacement`s of the **same** `HybridNetwork` (`PrefixNetworkOverlap`) | all (CUDN and Neutron) |
+| (b) No overlap with the target cluster's pod/service CIDRs or its node underlay (`PrefixClusterOverlap`) | PlatformOpenshift |
+| (c) **No** check against other HybridNetworks | — |
 
-Records allocated CIDRs, `allocationSource` (`fabric-ipam` \| `explicit` \| `legacy-default`), and `conflictCheck` (`passed` \| `failed`).
-
-Also: `spec.fabric` join policy fields and `status.fabricMembership[]` (see §15).
-
-### 16.3 Ansible flow (implemented)
-
-Task: `eda/common/tasks/platformopenshift_fabric_ipam.yml`  
-Included from `platformopenshift_provision` **before** hosted/openstack/aws dispatch.
-
-```mermaid
-flowchart TD
-  A[Read PO spec.networking] --> B{status.networking already passed?}
-  B -->|yes| Z[Reuse CIDRs idempotent]
-  B -->|no| C{explicit CIDRs?}
-  C -->|yes| D[Use explicit]
-  C -->|no| E[Allocate next free blocks from fabric ipam pools]
-  D --> F[Conflict-check vs all other PO status.networking + hybridOverlayReserved]
-  E --> F
-  F -->|ok| G[Patch status.networking]
-  F -->|fail| H[Fail provision — do not create HostedCluster]
-  G --> I[hosted.yml uses po_cluster_networks / po_service_networks]
-```
-
-**Conflict domain:** all PlatformOpenshift `status.networking` CIDRs cluster-wide (plus fabric `hybridOverlayReserved`), not only same namespace — so Acme HCP1 and Chad HCP2 cannot silently share `10.132.0.0/14` if both are inventoried (lab default). When fabrics are isolated by VRF, overlapping **tenant overlay** prefixes across fabrics remain allowed; **cluster** CIDRs should still be globally unique in the platform inventory to avoid underlay mistakes.
-
-### 16.4 Example — two HCPs on acme-fabric
-
-```yaml
-# HybridFabric
-spec:
-  ipam:
-    clusterNetworkPool: { cidr: 10.128.0.0/12, blockPrefixLength: 14 }
-    serviceNetworkPool: { cidr: 172.30.0.0/15, blockPrefixLength: 16 }
-    hybridOverlayReserved: ["10.110.0.0/16"]
-```
-
-| Cluster | clusterNetwork | serviceNetwork |
-|---------|----------------|----------------|
-| hcp1 | 10.128.0.0/14 | 172.30.0.0/16 |
-| hcp2 (next alloc) | 10.132.0.0/14 | 172.31.0.0/16 |
-
-`NetworkPlacement` prefixes under `10.110.0.0/16` never get handed out as cluster CIDRs.
-
-### 16.5 NetworkPlacement validation (required companion)
-
-When placing a HybridNetwork onto a PlatformOpenshift backend, Ansible `validate` / `backend_openshift_evpn` MUST reject placement prefixes that overlap that cluster’s `status.networking` (or any peer on the same fabric if policy says so). Tenant overlays stay inside `hybridOverlayReserved`.
-
-### 16.6 Operator / UI checklist
-
-- [x] CRD fields on HybridFabric + PlatformOpenshift  
-- [x] IPAM allocate + conflict task; hosted networking wired  
-- [x] UI: show allocated CIDRs on PlatformOpenshift detail; warn on create if fabric pool exhausted (VNI signal today; CIDR ledger follow-up)  
-- [x] NetworkPlacement playbook overlap check against `status.networking`  
-- [x] `platform_fabric_join` refuses Joined phase when `conflictCheck != passed`
-
-### 16.7 Sample PlatformOpenshift (explicit CIDRs)
+### 16.3 Sample PlatformOpenshift
 
 ```yaml
 apiVersion: hybridsovereign.redhat/v1alpha1
@@ -1668,8 +1592,8 @@ spec:
     environment: local-virt
   networking:
     allocateFromFabric: true
-    fabricRef: acme-fabric
-    # omit clusterNetwork/serviceNetwork to auto-allocate
+    fabricRef: platform-fabric
+    # omit clusterNetwork/serviceNetwork to allocate from the default ranges
   fabric:
     joinPolicy: AutoWhenFabricReady
 ```
@@ -1966,7 +1890,7 @@ One gateway per spoke attachment (e.g. HCP1, OSO1).
 |-------|---------|
 | `spec.fabricRef` | Must reference a Ready fabric |
 | `spec.cloud` | `openshift` \| `openstack` \| … |
-| `spec.domainAsn` | Spoke ASN |
+| `spec.domainAsn` | Fabric ASN (per-spoke ASNs retired 2026-10-07) |
 | `spec.openstackCloudOSORef` / Virt / PlatformOpenshift refs | Which backend this gateway fronts |
 | Labels `hybridsovereign.redhat/entity` | Optional denormalized entity hint |
 
@@ -2329,9 +2253,9 @@ oc patch network.operator cluster --type=merge -p '{
 
 Wait until `openshift-frr-k8s` DaemonSet is Ready, then create:
 
-1. **Unmanaged `VTEP`** (CIDR covering per-node dummy VTEP IPs)  
-2. **`FRRConfiguration`** peering fabric RRs (`10.255.10.1/2`, fabric ASN)  
-3. **`RouteAdvertisements`** selecting `evpn: "true"` FRR + CUDN labels  
+1. **Unmanaged `VTEP`** with `cidrs: [<HybridFabric spec.underlay.cidr>]` (192.168.64.0/18): the VTEP is each worker's eth1 on the hub underlay (NodePool `additionalNetworks`, DHCP from the BGW). No dummy `evpn-vtep0`, no pinned routes, no WireGuard pods.  
+2. **`FRRConfiguration`** with one neighbor: the BGW loopback (`10.255.10.10`, fabric ASN 65010, iBGP, `ebgp-multihop 32` via raw config, `l2vpn evpn` + `ipv4 unicast` activated). No `bgp router-id`, `update-source` or `allowas-in`.  
+3. **`RouteAdvertisements`** selecting `evpn: "true"` FRR + CUDN labels (unchanged)  
 
 Namespace for probes **must be created with** both:
 
@@ -2477,3 +2401,153 @@ openstack router show acme-core-oso1-evpn-rtr -c evpn_vni -c status
 > **Host B:** “Overlapping CIDRs are allowed. Shared routers are not.”  
 > **Host A:** “Hybrid Fabric doesn’t hope tenants pick different subnets — it gives them different VNIs, different RTs, and a fail-closed FR6 path when OpenStack isn’t ready.”  
 > **Together:** “That’s entity-isolated EVPN. Cue the credits — and the route reflector encore.”
+
+---
+
+## 21. Reference implementation (verified)
+
+The design above is realized with ordinary platform features plus two gateway VMs. Nothing custom runs on hosted-cluster nodes or EDPM computes: OpenShift peers through OVN-Kubernetes EVPN + FRR-k8s, OpenStack through the EDPM `frr` and `neutron-ovn` (`ovn-evpn` extension) services. It was verified end to end in a lab (hub OCP 4.22, RHOSO 18.0.22 on OCP 4.20): BGP Established from a hosted-cluster worker and from an EDPM compute to the BGW loopback, Type-5 routes reflected between them with the spokes' own VTEPs as next hop, and pod-to-VM ping across the VRF including 1272-byte payloads. The lab-only pieces are listed in Appendix A.
+
+### 21.1 Addressing (reference values)
+
+| Role | Address | Notes |
+|---|---|---|
+| Hub underlay L2 | 192.168.64.0/18 | `HybridFabric.spec.underlay`; NAD `fabric-underlay` (OVN-K layer2, no IPAM) |
+| BGW underlay | 192.168.64.1/18 | DHCP server for hosted-cluster workers |
+| Worker underlay (VTEP) | DHCP 192.168.64.100-192.168.127.250 | VTEP CR `cidrs: [192.168.64.0/18]` |
+| BGW loopback | 10.255.10.10/32 | `borderGateway.loopback`; BGP peer of every spoke |
+| Tunnel net | 10.254.254.0/24 | BGW .1, one address per site gateway |
+| Site underlay L2 | 192.168.80.0/24 | NetConfig network `fabric`; `br-fabric` on the management-cluster nodes |
+| Site gateway | 192.168.80.1/24 | `siteUnderlay.gatewayAddress` |
+| EDPM compute fabric NIC (VTEP) | 192.168.80.100-150 | NodeSet `fabric` network fixed IPs |
+| Tenant overlays | any RFC1918 | unique per HybridNetwork only (§16) |
+
+Control plane: iBGP in the fabric ASN everywhere; the BGW is route reflector (`bgp listen range`, `route-reflector-client`, `attribute-unchanged next-hop`). The BGW never re-originates EVPN routes (FRR does not re-export imported EVPN routes), so per-spoke ASNs are not used.
+
+### 21.2 Hub border gateway VM (`hybridfabric_provision/tasks/deploy_border_gateway.yml`)
+
+Objects in the fabric namespace:
+
+- NAD `<spec.underlay.nadName>`: `ovn-k8s-cni-overlay`, `topology: layer2`, no subnets (MAC-only port security, so the VM can route transit traffic), `mtu: 1400`.
+- Secret `<bgw>-cloudinit` (first boot) and Secret `<bgw>-config` (`wg0.conf`, `frr.conf`, dnsmasq, nftables) attached as a disk; the guest re-reads it at every boot and EDA restarts the VMI when it changes.
+- VirtualMachine `<bgw>`: CentOS Stream 9 / RHEL 9, 2 vCPU / 4 GiB, interfaces `default` (masquerade) + `underlay` (bridge binding, fixed MAC).
+- Service `<bgw>-wss` (443 -> 8443) and Route `<bgw>` with `tls.termination: passthrough`.
+
+Guest:
+
+- `lo` = loopback /32; `eth1` = underlay gateway address, NetworkManager keyfile matched on MAC, no default route; `wg0` = tunnel address, MTU 1380, listen 51820, one peer per site gateway (AllowedIPs = gateway tunnel /32 + that site's underlay CIDR).
+- sysctl `ip_forward=1`, `rp_filter=2`. nftables input policy drop with exceptions for established, loopback, ICMP, SSH, TCP 8443 on eth0, TCP 179 + UDP 4789 + DHCP from eth1/wg0, UDP 51820 on lo; forward only eth1 <-> wg0.
+- dnsmasq on eth1 only: DHCP range, no router/DNS options, option 26 (MTU), option 121 routes for the loopback and every site underlay via the BGW.
+- wstunnel server `--restrict-to 127.0.0.1:51820 wss://0.0.0.0:8443`.
+- FRR bgpd:
+
+```
+bgp extcommunity-list standard FABRIC-RT permit rt <asn>:<vni>    ! one per ledger VNI
+route-map SPOKES-EVPN-IN permit 10
+ match extcommunity FABRIC-RT
+route-map SPOKES-EVPN-IN deny 100
+router bgp <asn>
+ bgp router-id <loopback>
+ bgp cluster-id <loopback>
+ no bgp ebgp-requires-policy
+ no bgp default ipv4-unicast
+ neighbor SPOKES peer-group
+ neighbor SPOKES remote-as <asn>
+ neighbor SPOKES ebgp-multihop 32
+ bgp listen range <hub underlay> peer-group SPOKES
+ bgp listen range <each site underlay> peer-group SPOKES
+ bgp listen range <tunnel net> peer-group SPOKES
+ address-family ipv4 unicast
+  neighbor SPOKES activate
+  neighbor SPOKES route-reflector-client
+ address-family l2vpn evpn
+  neighbor SPOKES activate
+  neighbor SPOKES route-reflector-client
+  neighbor SPOKES attribute-unchanged next-hop
+  neighbor SPOKES route-map SPOKES-EVPN-IN in
+```
+
+### 21.3 Hosted-cluster spoke
+
+- An identical underlay NAD (same network `name`, `netAttachDefName` pointing at its own namespace) in the HostedCluster VM namespace `clusters-<hc>-<hc>`; Multus namespace isolation requires the copy.
+- NodePool `spec.platform.kubevirt.additionalNetworks: [{name: clusters-<hc>-<hc>/<nadName>}]`, `attachDefaultNetwork: true`. Workers DHCP eth1 from the BGW (address, MTU 1400, option-121 routes); OVN-K adds it to `k8s.ovn.org/host-cidrs`.
+- VTEP CR `<network>-evpn-vtep`: `mode: Unmanaged`, `cidrs: [<hub underlay>]`.
+- FRRConfiguration `<network>-evpn` (namespace `openshift-frr-k8s`): one neighbor, the BGW loopback, fabric ASN, `toAdvertise`/`toReceive` all; raw config adds `ebgp-multihop 32` and activates the neighbor in `l2vpn evpn` and `ipv4 unicast`. No router-id, update-source or allowas-in.
+- CUDN and RouteAdvertisements as in §10.2. Transport `none`.
+
+### 21.4 OpenStack site
+
+Management cluster (namespace `openstack`, `cloudgateway_provision/tasks/openstack_site_gateway.yml`):
+
+- NNCP `fabric-underlay-<node>` on every worker node: linux-bridge `br-fabric` with port `siteUnderlay.interface`, no IP, STP off, MTU `siteUnderlay.mtu`.
+- NAD `openstack/fabric`: `type: bridge`, `bridge: br-fabric`, `ipam: {}`, annotation `k8s.v1.cni.cncf.io/resourceName: bridge.network.kubevirt.io/br-fabric`.
+- Site gateway VM `fabric-gw-<cloudoso>`: CentOS Stream 9 DataSource, 1 vCPU, interfaces `default` (masquerade) + `fabric` (bridge on `openstack/fabric`). Guest: eth1 = site gateway address, MTU 1442; wg0 = site tunnel address /32, MTU 1380, peer = BGW public key, endpoint 127.0.0.1:51820, AllowedIPs = BGW tunnel /32, BGW loopback /32, hub underlay, keepalive 25; wstunnel client `-L 'udp://127.0.0.1:51820:127.0.0.1:51820?timeout_sec=0' wss://<bgw route>:443`; `ip_forward=1`, `rp_filter=2`; nftables forward eth1 <-> wg0 only.
+
+EDPM landing (`openstack_edpm_evpn.yml` / `openstack_edpm_nodeset.yml`):
+
+- NetConfig: network `fabric` (site CIDR, MTU, allocation range, **subnet `routes`** to the BGW loopback, hub underlay and tunnel net via the site gateway). Routes must live in NetConfig: the dataplane operator overwrites `<net>_host_routes`. Patched once before any NodeSet.
+- NodeSets from `CloudOSO.spec.dataplaneNodeSetRefs`, **one at a time, in CR order**. Per NodeSet: `nodes[].networks += {name: fabric, subnetName: subnet1, fixedIP}` (fixed IPs unique across all NodeSets); per-node `edpm_neutron_ovn_evpn_local_ip`; ansibleVars `fabric_cidr`, `fabric_mtu`, the compute-interface block in `edpm_network_config_template` (`siteUnderlay.nodeSetInterfaces[<nodeset>]`, else `computeInterface`), `edpm_enable_chassis_gw: true` (required; without it the EVPN router's HA chassis group stays empty), `edpm_frr_bgp_asn`, `edpm_frr_bgp_ipv4_src_network: fabric`, `edpm_frr_bgp_peers: [<loopback>]`, `edpm_frr_bgp_uplinks: []`, `edpm_frr_bgp_uplinks_scope: internal`, `edpm_frr_bgp_l2vpn: true`, `edpm_frr_bgp_l2vpn_uplink_activate: true`, `edpm_frr_bgp_l2vpn_peers: []`, `edpm_frr_bgp_neighbor_ttl_security_hops: 0`, `edpm_frr_bgp_expose_only_host: true`, `edpm_frr_bgp_learning_routes: false`, `edpm_frr_bgp_ipv6: false`, `edpm_frr_bfd: false`, `edpm_neutron_ovn_agent_agent_extensions: ovn-evpn`, `edpm_neutron_ovn_evpn_vxlan_port: 4789`, `edpm_neutron_ovn_agent_ovn_evpn_bgp_as`, `edpm_neutron_ovn_agent_ovn_evpn_bgp_local_interface`, `edpm_nftables_user_rules` for UDP 4789 / TCP 179 from the fabric prefixes; services `frr` after `install-certs`, `neutron-ovn` after `ovn`.
+- One OpenStackDataPlaneDeployment per NodeSet, `fabric-<gateway>-<nodeset>-<fingerprint>`, `servicesOverride: [install-certs, configure-network, frr, ovn, neutron-ovn]`, with `edpm_network_config_update: true` for that run only. The next NodeSet starts only after this one is Ready; NodeSets whose fingerprint annotation already matches are skipped; the rollout stops after `cgw_edpm_max_failures` failures (default 0) and reports the rest as NotAttempted in `CloudGateway.status.edpmNodeSets`.
+- Operational rules: a NodeSet cannot be patched while one of its deployments is in progress; re-running `ovn` alone clears the `ovn-evpn-*` OVS external IDs, so `neutron-ovn` always follows `ovn`; the Neutron EVPN router must be created after the chassis is gateway-enabled (placement checks `evpn-hcg-<router>` and recreates the router once when empty); Neutron networks use MTU 1300.
+
+### 21.5 MTU budget
+
+| Segment | MTU |
+|---|---|
+| Hub pod network / hub underlay NAD / worker eth1 | 1400 |
+| Site underlay (bridge, compute fabric NIC, site gateway eth1) | 1442 (lab physical limit, Appendix A) |
+| Tunnel interface (both gateways) | 1380 |
+| VXLAN payload end to end | 1330 |
+| CUDN and Neutron tenant networks | 1300 |
+
+MSS clamping is not possible at the gateways (inner TCP is inside VXLAN); the overlay MTUs are the control.
+
+---
+
+## 22. Cutover for an existing environment
+
+Use when an environment already runs an earlier fabric build (per-tenant fabrics, hub route-reflector pods, hand-built gateway VMs).
+
+**Keep:** the hub underlay NAD (the new BGW reuses it), Vault key pairs (seed `fabric/<fabric>/bgw` with the existing BGW pair so site gateways stay valid), HybridNetwork VNIs (the ledger migration and the allocator's preferred-VNI rule keep them), NetConfig/NodeSet fabric settings (re-applied idempotently), PlatformOpenshift `status.networking` (kept as legacy, §16).
+
+**Order:**
+
+1. Seed Vault: `fabric/<fabric>/bgw`, `fabric/wireguard/<gateway>`, `oso/<cloudoso>/mgmt-kubeconfig`. Set `CloudOSO.spec.dataplaneNodeSetRefs`.
+2. Immediately before the sync, delete the old hub BGW VM, its Secrets, Service and Route. Two VMs with the same loopback and underlay address must never run at once. The fabric is down until the new BGW finishes first boot.
+3. Delete the old site gateway VMs on the management clusters if the BGW Route host changes (their tunnel endpoint is fixed at first boot).
+4. Sync GitOps. The platform fabric is created; retired fabrics are pruned and their teardown completes once their VNIs have been moved (it never deletes an underlay NAD or BGW name still used by another fabric).
+5. The first fabric reconcile migrates legacy VNI ledgers and creates the BGW with the RT allow-list.
+6. HybridNetworks keep their VNIs; a network that changes fabric ASN gets a new RT and its placements re-render CUDN, FRRConfiguration and VTEP. If OVN-K rejects in-place changes, delete and recreate those objects (CUDN pods must be recreated).
+7. NodePools of clusters that were not on the underlay roll their workers onto it.
+8. CloudGateways recreate site gateway VMs; EDPM runs one fingerprinted deployment per NodeSet; TransportLinks confirm the BGW peers.
+9. Verify: every spoke Established to the loopback, Type-5 routes present, positive probe within a VRF, negative probe across VRFs.
+
+---
+
+## 23. Open items
+
+- Live config reload on the BGW: today a new VNI (RT allow-list) or a new site peer restarts the BGW VM (all sessions flap for 1-2 min). Alternatives: a pool-wide static allow-list or an in-guest config fetch.
+- RT filter behaviour (`match extcommunity` on reflected EVPN routes) not yet verified on FRR 8.5.
+- High availability: a second BGW (second loopback, both reflectors) and VRRP for the site gateway address.
+- Live migration of gateway VMs: the underlay NAD and per-node `br-fabric` allow it; untested.
+- One BGW serving several fabrics would need one loopback and BGP instance per fabric; one BGW per fabric is the model.
+- WireGuard handshake is only observed indirectly (guest-agent interface report + BGP state).
+- Per-cluster underlay ranges via dnsmasq tags.
+
+---
+
+## Appendix A. Lab environment notes
+
+Specific to the lab the reference implementation was built in (hub and OpenStack site in separate cloud-hosted lab environments). Physical deployments do not need these.
+
+| Item | Why | Where |
+|---|---|---|
+| kubemacpool ignore label (`mutatevirtualmachines.kubemacpool.io=ignore`) on the fabric namespace and HostedCluster VM namespaces | The hub's kubemacpool webhook was unavailable and blocked VM create/update; fabric NICs use explicit MACs or DHCP, so no MAC pool is needed | `hybridfabric_provision`, `platformopenshift_provision` |
+| MAC-translation DaemonSet `openstack/fabric-gw-macnat` (`siteUnderlay.macNatShim`) | The lab hypervisor enforces source-MAC filtering on node NICs, so a bridged VM cannot talk on the spare NIC. The DaemonSet runs on every node, reads the local NIC MAC at runtime and applies an nft bridge table that swaps the gateway VM MAC and the node MAC on that NIC | `cloudgateway_provision` |
+| WireGuard carried by wstunnel over the hub ingress | Between the two lab environments only TCP 443/6443 on public VIPs is reachable (no UDP, no NodePorts, overlapping node networks) | `transportlink_provision`, both gateway VMs |
+| Underlay MTU 1442 | Every lab segment passes 1442-byte frames and drops 1500 | `siteUnderlay.mtu`, §21.5 |
+| BGW image imported from a registry containerdisk | The hub's OS image DataSources were not populated | `borderGateway.image` |
+| Site gateway VM memory request 256Mi with guest overhead overcommit | Lab management-cluster nodes are almost fully memory-committed | `cloudgateway_provision` vars |
+| Legacy cluster CIDRs | Hub and hosted clusters predate the CG-NAT assumption (hub 10.232.0.0/14 + 172.231.0.0/16; clusters 10.128-10.151/14, 172.30-172.33/16) and are flagged `LegacyClusterCidrs` | §16 |
+
+Live lab state is captured in `fabric-verify.md`.

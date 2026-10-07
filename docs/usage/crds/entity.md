@@ -17,11 +17,11 @@ Create Entity in sovereign-cloud
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Entity
 metadata:
-  name: acme-corp
+  name: example-corp
   namespace: sovereign-cloud
 spec:
-  description: Acme Corp tenant
-  billingID: acme-001
+  description: Example Corp tenant
+  billingID: example-001
 ```
 
 ## Important fields
@@ -35,9 +35,9 @@ spec:
 ## Check
 
 ```bash
-oc get entity acme-corp -n sovereign-cloud
-oc get ns entity-acme-corp
-oc get deploy -n entity-acme-corp   # namespace operator
+oc get entity example-corp -n sovereign-cloud
+oc get ns entity-example-corp
+oc get deploy -n entity-example-corp   # namespace operator
 ```
 
 ## Delete

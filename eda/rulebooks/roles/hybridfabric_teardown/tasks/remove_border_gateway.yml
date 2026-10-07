@@ -1,0 +1,110 @@
+---
+# Remove the fabric border gateway VM and its supporting objects
+# (counterpart of hybridfabric_provision/tasks/deploy_border_gateway.yml).
+# Only reached when the numbering ledger has zero allocated VNIs.
+
+- name: Read deleting HybridFabric for its borderGateway
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridFabric
+    name: "{{ hybridfabric_cr_name }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"
+  register: hf_teardown_bgw_self
+
+- name: Set BGW names to remove
+  ansible.builtin.set_fact:
+    hf_teardown_bgw: "{{ (hf_teardown_bgw_self.resources | default([{}]))[0].spec.borderGateway | default({}) }}"
+
+- name: Remove BGW objects
+  when: (hf_teardown_bgw.loopback | default('')) | length > 0
+  block:
+    - name: Resolve BGW name and underlay NAD
+      ansible.builtin.set_fact:
+        hf_teardown_bgw_name: >-
+          {{ hf_teardown_bgw.name | default('fabric-bgw-' ~ (hybridfabric_cr_name | regex_replace('-fabric$', '')), true) }}
+        hf_teardown_bgw_nad: >-
+          {{ ((hf_teardown_bgw_self.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true) }}
+
+    - name: List HybridFabrics that name the same BGW
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        namespace: "{{ hybridfabric_cr_namespace }}"
+      register: hf_teardown_bgw_same
+
+    # VM deletion also removes the VMI and the root DataVolume (owned by the VM).
+    - name: Delete BGW VM, Route, Service and Secrets (unless another fabric owns that BGW name)
+      when: >-
+        hf_teardown_bgw_same.resources | default([])
+        | rejectattr('metadata.name', 'equalto', hybridfabric_cr_name)
+        | rejectattr('metadata.deletionTimestamp', 'defined')
+        | selectattr('spec.borderGateway.name', 'defined')
+        | selectattr('spec.borderGateway.name', 'equalto', hf_teardown_bgw_name)
+        | list | length == 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: "{{ item.api_version }}"
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+        namespace: "{{ hybridfabric_cr_namespace }}"
+        wait: "{{ item.kind == 'VirtualMachine' }}"
+        wait_timeout: 300
+      loop:
+        - {api_version: route.openshift.io/v1, kind: Route, name: "{{ hf_teardown_bgw_name }}"}
+        - {api_version: v1, kind: Service, name: "{{ hf_teardown_bgw_name }}-wss"}
+        - {api_version: kubevirt.io/v1, kind: VirtualMachine, name: "{{ hf_teardown_bgw_name }}"}
+        - {api_version: v1, kind: Secret, name: "{{ hf_teardown_bgw_name }}-cloudinit"}
+        - {api_version: v1, kind: Secret, name: "{{ hf_teardown_bgw_name }}-config"}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.name }}"
+
+    # Another (non-deleting) fabric may use the same underlay network, e.g. the
+    # retired acme-fabric and platform-fabric both use fabric-underlay during the
+    # single-fabric consolidation. Keep the NAD (and a same-named BGW) then.
+    - name: List HybridFabrics still using this underlay
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        namespace: "{{ hybridfabric_cr_namespace }}"
+      register: hf_teardown_bgw_others
+
+    - name: Compute other fabrics using this underlay NAD
+      ansible.builtin.set_fact:
+        # nadName defaults to fabric-underlay when unset.
+        hf_teardown_nad_user_count: >-
+          {% set users = [] %}
+          {% for f in hf_teardown_bgw_others.resources | default([]) %}
+          {%   if f.metadata.name != hybridfabric_cr_name
+                 and f.metadata.deletionTimestamp is not defined
+                 and (f.spec.borderGateway | default({})).loopback | default('') | length > 0
+                 and ((f.spec.underlay | default({})).nadName | default('fabric-underlay', true)) == hf_teardown_bgw_nad %}
+          {%     set _ = users.append(f.metadata.name) %}
+          {%   endif %}
+          {% endfor %}
+          {{ users | length }}
+
+    # HostedCluster VM namespaces carry their own copy of the NAD; those are
+    # removed with the HostedCluster (platformopenshift teardown).
+    - name: Delete underlay NAD in the fabric namespace (only when no other fabric uses it)
+      when: (hf_teardown_nad_user_count | trim | int) == 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+        name: "{{ hf_teardown_bgw_nad }}"
+        namespace: "{{ hybridfabric_cr_namespace }}"

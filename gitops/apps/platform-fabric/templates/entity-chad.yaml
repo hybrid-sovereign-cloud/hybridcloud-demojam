@@ -1,4 +1,5 @@
-# Chad tenant — dual-HCP fabric isolation (design/fabric.md §6). Always-on ZTP.
+# Tenant entity with one VRF across two hosted clusters on the platform fabric
+# (design/fabric.md §6).
 ---
 apiVersion: v1
 kind: Namespace
@@ -23,7 +24,7 @@ metadata:
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   description: >-
-    Chad — ZTP tenant for HCP2 ↔ HCP3 EVPN fabric isolation (no RHOSO).
+    Chad — ZTP tenant for HCP2 ↔ HCP3 EVPN VRF isolation on the shared platform fabric (no RHOSO).
   billingID: CHAD-2026-001
   websiteLink: https://chad.example.com
   namespaceRbac:

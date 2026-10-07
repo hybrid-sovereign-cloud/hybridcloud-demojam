@@ -1,0 +1,78 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: "{{ bgw_name }}"
+  namespace: "{{ bgw_namespace }}"
+  labels:
+    app: "{{ bgw_name }}"
+    hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+    hybridsovereign.redhat/border-gateway: "true"
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+  - metadata:
+      name: "{{ bgw_name }}-root"
+    spec:
+      # Registry import: hub DataSources (openshift-virtualization-os-images) are not
+      # populated in the lab, so import the containerdisk directly.
+      source:
+        registry:
+          url: "{{ bgw_image }}"
+      storage:
+{% if bgw_storage_class | length > 0 %}
+        storageClassName: "{{ bgw_storage_class }}"
+{% endif %}
+        resources:
+          requests:
+            storage: "{{ bgw_root_disk_size }}"
+  template:
+    metadata:
+      labels:
+        app: "{{ bgw_name }}"
+        kubevirt.io/domain: "{{ bgw_name }}"
+        hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+    spec:
+      domain:
+        cpu:
+          cores: {{ bgw_cpu | int }}
+        memory:
+          guest: "{{ bgw_memory }}"
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+          - name: cloudinitdisk
+            disk:
+              bus: virtio
+          # Config Secret as a disk (serial fabriccfg); fabric-config-sync.service
+          # copies wg0.conf / frr.conf / dnsmasq / nft from it at every boot.
+          - name: fabriccfg
+            serial: fabriccfg
+            disk:
+              bus: virtio
+          interfaces:
+          - name: default
+            masquerade: {}
+            model: virtio
+          - name: underlay
+            bridge: {}
+            model: virtio
+            macAddress: "{{ bgw_underlay_mac }}"
+      networks:
+      - name: default
+        pod: {}
+      - name: underlay
+        multus:
+          networkName: "{{ bgw_namespace }}/{{ bgw_underlay_nad }}"
+      volumes:
+      - name: rootdisk
+        dataVolume:
+          name: "{{ bgw_name }}-root"
+      - name: cloudinitdisk
+        cloudInitNoCloud:
+          secretRef:
+            name: "{{ bgw_name }}-cloudinit"
+      - name: fabriccfg
+        secret:
+          secretName: "{{ bgw_name }}-config"

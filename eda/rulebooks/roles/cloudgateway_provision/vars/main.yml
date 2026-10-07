@@ -1,1 +1,39 @@
 ---
+# RHOSO site gateway (cloud=openstack, transport.type=wireguard) —
+# design/fabric.md §21.4 Defaults reproduce the lab build of 2026-10-07.
+cgw_oso_namespace: openstack
+cgw_su_bridge: br-fabric
+cgw_su_nad: fabric
+# NetConfig network / NodeSet network name for the site underlay.
+cgw_su_netconfig_network: fabric
+cgw_su_default_mtu: 1442
+cgw_gw_default_mac: "02:fa:b0:50:00:01"
+cgw_gw_datasource: centos-stream9
+cgw_gw_datasource_namespace: openshift-virtualization-os-images
+cgw_gw_storage_class: ocs-external-storagecluster-ceph-rbd
+cgw_gw_root_disk_size: 30Gi
+cgw_gw_cpu: 1
+cgw_gw_memory: 1Gi
+cgw_gw_memory_request: 256Mi
+cgw_macnat_image: registry.redhat.io/rhel9/support-tools
+# Nodes that get the br-fabric NNCP (all of them by default, so the gateway VM
+# can run / migrate anywhere).
+cgw_nncp_node_selector: node-role.kubernetes.io/worker
+cgw_wait_retries: 60
+cgw_wait_delay: 10
+# EDPM deployment (frr + ovn + neutron-ovn) can take 15-30 minutes.
+cgw_edpm_services_override:
+  - install-certs
+  - configure-network
+  - frr
+  - ovn
+  - neutron-ovn
+cgw_edpm_wait_delay: 30
+# Per-NodeSet deployment timeout (seconds); NodeSets roll out one at a time.
+cgw_edpm_nodeset_timeout: 3600
+# NodeSet failures tolerated before the rollout stops (0 = stop on the first).
+cgw_edpm_max_failures: 0
+# Fabric fixed-IP allocation range inside siteUnderlay.cidr (network + offset).
+# Size siteUnderlay.cidr and these offsets for the total number of computes.
+cgw_fabric_alloc_start_offset: 100
+cgw_fabric_alloc_end_offset: 150

@@ -1,0 +1,12 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: "{{ cgw_su_nad }}"
+  namespace: "{{ cgw_oso_namespace }}"
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: "bridge.network.kubevirt.io/{{ cgw_su_bridge }}"
+  labels:
+    hybridsovereign.redhat/fabric-underlay: "true"
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+spec:
+  config: '{{ {"cniVersion": "0.3.1", "name": cgw_su_nad, "type": "bridge", "bridge": cgw_su_bridge, "mtu": cgw_su_mtu | int, "ipam": {}} | to_json }}'

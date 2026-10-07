@@ -60,6 +60,7 @@ metadata:
     hybridsovereign.redhat/sample: "true"
 spec:
   description: Application payments tier hybrid network
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Rbac

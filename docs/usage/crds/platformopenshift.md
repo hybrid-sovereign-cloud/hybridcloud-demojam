@@ -30,7 +30,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
 metadata:
   name: workshop-ocp-oso
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   type: openstack
   openstack:
@@ -47,7 +47,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
 metadata:
   name: workshop-ocp-aws
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   type: aws
   aws:
@@ -65,7 +65,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: PlatformOpenshift
 metadata:
   name: pe-hosted
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   type: hosted
   hosted:
@@ -76,8 +76,8 @@ spec:
 ## Status to watch
 
 ```bash
-oc get platformopenshift -n entity-acme-corp
-oc describe platformopenshift workshop-ocp-aws -n entity-acme-corp
+oc get platformopenshift -n entity-example-corp
+oc describe platformopenshift workshop-ocp-aws -n entity-example-corp
 # Hive / ACM
 oc get clusterdeployment -A | grep workshop
 oc get managedcluster | grep workshop

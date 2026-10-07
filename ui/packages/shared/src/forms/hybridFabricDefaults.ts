@@ -7,12 +7,12 @@ export interface FabricRouteReflector {
   address: string;
 }
 
-export interface FabricIpamDefaults {
-  clusterNetworkPool: { cidr: string; blockPrefixLength: number };
-  serviceNetworkPool: { cidr: string; blockPrefixLength: number };
-  machineNetworkPool: { cidr: string; blockPrefixLength: number };
-  hybridOverlayReserved: string[];
-  denyOverlappingClusterCidrs: boolean;
+/** Hub underlay segment (HybridFabric.spec.underlay). */
+export interface FabricUnderlayDefaults {
+  nadName: string;
+  cidr: string;
+  gatewayAddress: string;
+  mtu: number;
 }
 
 export const DEFAULT_FABRIC_ROUTE_REFLECTORS: FabricRouteReflector[] = [
@@ -26,12 +26,11 @@ export const DEFAULT_FABRIC_TRANSPORT = {
   defaultTunnelType: 'none' as FabricTunnelType,
 };
 
-export const DEFAULT_FABRIC_IPAM: FabricIpamDefaults = {
-  clusterNetworkPool: { cidr: '10.128.0.0/12', blockPrefixLength: 14 },
-  serviceNetworkPool: { cidr: '172.30.0.0/15', blockPrefixLength: 16 },
-  machineNetworkPool: { cidr: '192.168.64.0/18', blockPrefixLength: 24 },
-  hybridOverlayReserved: ['10.110.0.0/16'],
-  denyOverlappingClusterCidrs: true,
+export const DEFAULT_FABRIC_UNDERLAY: FabricUnderlayDefaults = {
+  nadName: 'fabric-underlay',
+  cidr: '192.168.64.0/18',
+  gatewayAddress: '192.168.64.1',
+  mtu: 1400,
 };
 
 export const DEFAULT_FABRIC_VNI = { start: 51000, end: 51127 };

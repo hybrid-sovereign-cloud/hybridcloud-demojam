@@ -6,6 +6,11 @@
 #   fn_fabric_name       - HybridFabric metadata.name
 #   fn_fabric_namespace   - namespace of the numbering ConfigMap (sovereign-cloud)
 #   fn_alloc_key          - unique ledger key for the caller (e.g. "<ns>/<name>")
+# Optional:
+#   fn_preferred_vni      - VNI to reuse when free and inside the pool (the
+#                           caller's previous status.vni). Keeps VNIs stable when a
+#                           HybridNetwork moves to another fabric (single platform
+#                           fabric consolidation) regardless of job ordering.
 #
 # Sets facts:
 #   fn_vni                (int) allocated / reused VNI
@@ -57,7 +62,10 @@
               next_hint = pool_start
 
           vni = None
-          for candidate in list(range(next_hint, pool_end + 1)) + list(range(pool_start, next_hint)):
+          preferred = int(os.environ.get("PREFERRED_VNI") or 0)
+          if preferred and pool_start <= preferred <= pool_end and preferred not in used:
+              vni = preferred
+          for candidate in [] if vni is not None else list(range(next_hint, pool_end + 1)) + list(range(pool_start, next_hint)):
               if candidate not in used:
                   vni = candidate
                   break
@@ -100,6 +108,7 @@
     CM_NAMESPACE: "{{ fn_fabric_namespace }}"
     CM_NAME: "fabric-numbering-{{ fn_fabric_name }}"
     ALLOC_KEY: "{{ fn_alloc_key }}"
+    PREFERRED_VNI: "{{ fn_preferred_vni | default(0) | string }}"
   register: _fn_allocate_result
   changed_when: true
   no_log: false

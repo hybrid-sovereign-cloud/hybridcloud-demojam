@@ -53,16 +53,73 @@ spec:
                   properties:
                     type:
                       type: string
-                      enum: [wireguard, ipsec, macsec, sshtunnel, none]
+                      description: >-
+                        none: the site peers with the border gateway over the underlay. wireguard: a site gateway
+                        VM tunnels to the border gateway (WireGuard carried over TLS through the hub ingress).
+                      enum: [wireguard, ipsec, macsec, none]
                     vaultPeerConfigRef:
                       type: string
+                      description: >-
+                        Vault KV path holding this gateway's WireGuard key pair (wgPrivateKey, wgPublicKey).
+                        Defaults to fabric/wireguard/<gateway>.
+                siteUnderlay:
+                  type: object
+                  description: >-
+                    cloud=openstack only. Site underlay L2 between the site gateway VM and the data plane compute nodes.
+                  properties:
+                    interface:
+                      type: string
+                      description: Node NIC on the management cluster bridged to the site underlay.
+                    computeInterface:
+                      type: string
+                      description: Compute node NIC on the site underlay; used as the EVPN VTEP and BGP source.
+                    nodeSetInterfaces:
+                      type: object
+                      description: Optional per-NodeSet compute NIC override (NodeSet name to interface); falls back to computeInterface.
+                      additionalProperties:
+                        type: string
+                    cidr:
+                      type: string
+                      description: Site underlay CIDR, e.g. 192.168.80.0/24
+                    gatewayAddress:
+                      type: string
+                      description: Site gateway address. Defaults to the first host of cidr.
+                    mtu:
+                      type: integer
+                      default: 1442
+                    macNatShim:
+                      type: object
+                      description: >-
+                        Enable a MAC-translation shim for environments whose hypervisor enforces source-MAC
+                        filtering on node NICs; test environments only.
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        vmMac:
+                          type: string
+                          default: "02:fa:b0:50:00:01"
+                          description: MAC address of the site gateway VM underlay interface.
+                        interface:
+                          type: string
+                          description: Node NIC to translate on. Defaults to siteUnderlay.interface.
+                wireguard:
+                  type: object
+                  properties:
+                    address:
+                      type: string
+                      description: Site gateway tunnel address with prefix length, e.g. 10.254.254.12/32
+                managementClusterKubeconfigRef:
+                  type: string
+                  description: >-
+                    Vault KV path (key kubeconfig) for the OpenStack management cluster. Defaults to the CloudOSO value.
                 awsAccountId:
                   type: string
                 openstackCloudOSORef:
                   type: string
                 platformOpenshiftRef:
                   type: string
-                  description: PlatformOpenshift name in the gateway entity namespace (hosted/openstack spokes)
+                  description: PlatformOpenshift name in the gateway entity namespace.
                 virtCloudVirtRef:
                   type: string
                   description: Optional CloudVirt environment name when landing on CNV
@@ -77,6 +134,25 @@ spec:
                   type: boolean
                 peerCount:
                   type: integer
+                edpmNodeSets:
+                  type: array
+                  description: Fabric rollout state per data plane NodeSet, in rollout order.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      fingerprint:
+                        type: string
+                      deployment:
+                        type: string
+                      state:
+                        type: string
+                        enum:
+                          - Converged
+                          - Ready
+                          - Failed
+                          - NotAttempted
                 status:
                   type: string
                 message:

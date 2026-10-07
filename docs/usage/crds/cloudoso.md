@@ -20,7 +20,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: oso-clouds-new
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 type: Opaque
 stringData:
   clouds.yaml: |
@@ -42,7 +42,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudOSO
 metadata:
   name: workshop-oso
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   project: workshop-oso
   baseDomain: lab.example.com
@@ -74,7 +74,7 @@ spec:
 - Helper created: `status.osoHelperCreated`
 
 ```bash
-oc get cloudoso workshop-oso -n entity-acme-corp -o yaml
+oc get cloudoso workshop-oso -n entity-example-corp -o yaml
 ```
 
 ## Next

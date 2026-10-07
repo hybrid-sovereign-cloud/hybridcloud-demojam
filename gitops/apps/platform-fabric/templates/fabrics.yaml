@@ -1,14 +1,17 @@
-# HybridFabrics — design/fabric.md §3–§6 / §11 (HCP spokes only; no RHOSO/OSO).
+# Platform fabric: one HybridFabric per hub, owned by the platform
+# (design/fabric.md §1.1). Tenants are VRFs (HybridNetwork: VNI + RT) on it and
+# share the border gateway and site tunnels; isolation is by route target.
+# Fabric-wide unique: VNI/RT, underlay segments, gateway addresses (§16).
+# WireGuard keys: Vault fabric/<fabric>/bgw (generated when missing).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
 metadata:
-  name: acme-fabric
+  name: platform-fabric
   namespace: sovereign-cloud
   annotations:
     argocd.argoproj.io/sync-wave: "20"
   labels:
-    hybridsovereign.redhat/entity: acme-corp
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
@@ -16,69 +19,33 @@ spec:
   domainAsn: 65010
   entityRefs:
     - name: acme-corp
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
+    - name: chad
+  # Hub underlay segment: border gateway + hosted-cluster worker NICs (VTEPs).
+  underlay:
+    nadName: fabric-underlay
+    cidr: 192.168.64.0/18
+    gatewayAddress: 192.168.64.1
+    dhcpRange:
+      start: 192.168.64.100
+      end: 192.168.127.250
+      leaseTime: 10m
+    mtu: 1400
+  borderGateway:
+    name: fabric-bgw
+    loopback: 10.255.10.10
+    vaultCredentialRef: fabric/platform-fabric/bgw
+    # ingressHost defaults to fabric-bgw.<hub ingress domain>.
+    wireguard:
+      address: 10.254.254.1/24
+      listenPort: 51820
+    vmSize:
+      cpu: 2
+      memory: 4Gi
+    image: docker://quay.io/containerdisks/centos-stream:9
   vniPool:
     start: 51000
-    end: 51127
-  ipam:
-    clusterNetworkPool:
-      cidr: 10.128.0.0/12
-      blockPrefixLength: 14
-    serviceNetworkPool:
-      cidr: 172.30.0.0/15
-      blockPrefixLength: 16
-    machineNetworkPool:
-      cidr: 192.168.64.0/18
-      blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.110.0.0/16
-    denyOverlappingClusterCidrs: true
-  transportDefaults:
-    mtu: 9000
-    innerMssClamp: 1360
-    defaultTunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: HybridFabric
-metadata:
-  name: chad-fabric
-  namespace: sovereign-cloud
-  annotations:
-    argocd.argoproj.io/sync-wave: "20"
-  labels:
-    hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/platform-fabric: "true"
-spec:
-  enabled: true
-  domainAsn: 65020
-  entityRefs:
-    - name: chad
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
-  vniPool:
-    start: 52000
     end: 52127
-  ipam:
-    clusterNetworkPool:
-      cidr: 10.144.0.0/12
-      blockPrefixLength: 14
-    serviceNetworkPool:
-      cidr: 172.32.0.0/15
-      blockPrefixLength: 16
-    machineNetworkPool:
-      cidr: 192.168.128.0/18
-      blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.120.0.0/16
-    denyOverlappingClusterCidrs: true
   transportDefaults:
-    mtu: 9000
+    mtu: 1442
+    innerMssClamp: 1360
     defaultTunnelType: none

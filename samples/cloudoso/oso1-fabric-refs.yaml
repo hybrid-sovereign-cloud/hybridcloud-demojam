@@ -1,0 +1,11 @@
+# Fabric refs for the existing CloudOSO oso1 (design/fabric.md §21.4).
+# oso1 itself is created outside GitOps; merge these fields onto it:
+#   oc patch cloudoso oso1 -n entity-acme-corp --type merge --patch-file samples/cloudoso/oso1-fabric-refs.yaml
+# Vault oso/oso1/mgmt-kubeconfig must hold key `kubeconfig` for the RHOSO
+# management OpenShift cluster (namespace openstack: NetConfig, NodeSet, VMs).
+spec:
+  managementClusterKubeconfigRef: oso/oso1/mgmt-kubeconfig
+  # Rolled out one NodeSet at a time, in this order.
+  dataplaneNodeSetRefs:
+    - openstack-compute01
+  netConfigRef: openstacknetconfig

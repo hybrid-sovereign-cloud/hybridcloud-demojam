@@ -1,0 +1,133 @@
+---
+# Remove the RHOSO site gateway objects created by
+# cloudgateway_provision/tasks/openstack_site_gateway.yml.
+# EDPM (NetConfig `fabric`, NodeSet vars/services) is NOT reverted automatically:
+# rolling computes back is an operator decision (design/fabric.md §21.4).
+
+- name: Read CloudOSO for the management cluster kubeconfig ref
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudOSO
+    name: "{{ cgwt_spec.openstackCloudOSORef }}"
+  register: cgwt_cloudoso
+
+- name: Resolve management cluster kubeconfig ref
+  ansible.builtin.set_fact:
+    cgwt_kube_ref: >-
+      {{
+        cgwt_spec.managementClusterKubeconfigRef
+        | default(((cgwt_cloudoso.resources | default([]) + [{}])[0].spec | default({})).managementClusterKubeconfigRef | default(''), true)
+        | default('oso/' ~ cgwt_spec.openstackCloudOSORef ~ '/mgmt-kubeconfig', true)
+      }}
+    cgwt_kubeconfig: "/tmp/cgwt-{{ cloudgateway_cr_name }}-mgmt-kubeconfig"
+    cgwt_vm: "fabric-gw-{{ cgwt_spec.openstackCloudOSORef }}"
+    cgwt_ns: openstack
+
+- name: Remove site gateway objects on the management cluster
+  when: cgwt_kube_ref | length > 0
+  block:
+    - name: Read management cluster kubeconfig from Vault
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+      vars:
+        vault_kv_path: "{{ cgwt_kube_ref }}"
+
+    - name: Write management cluster kubeconfig
+      ansible.builtin.copy:
+        content: "{{ vault_kv_data.kubeconfig }}"
+        dest: "{{ cgwt_kubeconfig }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Delete gateway VM, cloud-init Secret, NAD and MAC-NAT shim
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgwt_kubeconfig }}"
+        validate_certs: false
+        state: absent
+        api_version: "{{ item.api_version }}"
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+        namespace: "{{ item.namespace | default(omit) }}"
+        wait: "{{ item.kind == 'VirtualMachine' }}"
+        wait_timeout: 300
+      loop:
+        - {api_version: kubevirt.io/v1, kind: VirtualMachine, name: "{{ cgwt_vm }}", namespace: "{{ cgwt_ns }}"}
+        - {api_version: v1, kind: Secret, name: "{{ cgwt_vm }}-cloudinit", namespace: "{{ cgwt_ns }}"}
+        - {api_version: k8s.cni.cncf.io/v1, kind: NetworkAttachmentDefinition, name: fabric, namespace: "{{ cgwt_ns }}"}
+        - {api_version: apps/v1, kind: DaemonSet, name: fabric-gw-macnat, namespace: "{{ cgwt_ns }}"}
+        - {api_version: v1, kind: ConfigMap, name: fabric-gw-macnat, namespace: "{{ cgwt_ns }}"}
+        - {api_version: v1, kind: ServiceAccount, name: fabric-gw-macnat, namespace: "{{ cgwt_ns }}"}
+        - {api_version: rbac.authorization.k8s.io/v1, kind: ClusterRoleBinding, name: fabric-gw-macnat-privileged}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.name }}"
+
+    # The MAC-NAT nft table stays on nodes until reboot; it only rewrites the
+    # (now absent) gateway VM MAC, so it is inert.
+    - name: List br-fabric NNCPs of this gateway
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cgwt_kubeconfig }}"
+        validate_certs: false
+        api_version: nmstate.io/v1
+        kind: NodeNetworkConfigurationPolicy
+        label_selectors:
+          - "hybridsovereign.redhat/cloudgateway={{ cloudgateway_cr_name }}"
+      register: cgwt_nncps
+
+    # Deleting an NNCP does not remove the bridge; set it absent first.
+    - name: Set br-fabric absent on each node
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgwt_kubeconfig }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: nmstate.io/v1
+          kind: NodeNetworkConfigurationPolicy
+          metadata:
+            name: "{{ item.metadata.name }}"
+          spec:
+            nodeSelector: "{{ item.spec.nodeSelector }}"
+            desiredState:
+              interfaces:
+                - name: br-fabric
+                  type: linux-bridge
+                  state: absent
+      loop: "{{ cgwt_nncps.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Wait for bridge removal to apply
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cgwt_kubeconfig }}"
+        validate_certs: false
+        api_version: nmstate.io/v1
+        kind: NodeNetworkConfigurationPolicy
+        name: "{{ item.metadata.name }}"
+      register: cgwt_nncp_wait
+      until: >-
+        (cgwt_nncp_wait.resources | default([]) + [{}])[0].status.conditions | default([])
+        | selectattr('type', 'equalto', 'Available') | selectattr('status', 'equalto', 'True') | list | length > 0
+      retries: 30
+      delay: 10
+      failed_when: false
+      loop: "{{ cgwt_nncps.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Delete br-fabric NNCPs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgwt_kubeconfig }}"
+        validate_certs: false
+        state: absent
+        api_version: nmstate.io/v1
+        kind: NodeNetworkConfigurationPolicy
+        name: "{{ item.metadata.name }}"
+      loop: "{{ cgwt_nncps.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+  always:
+    - name: Remove management cluster kubeconfig
+      ansible.builtin.file:
+        path: "{{ cgwt_kubeconfig }}"
+        state: absent

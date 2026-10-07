@@ -1,0 +1,119 @@
+---
+# Render the BGW dynamic configuration (wg0.conf, frr.conf, dnsmasq, nftables)
+# into Secret <bgw>-config and restart the VMI when it changed, so the guest's
+# fabric-config-sync.service picks it up at boot.
+#
+# Entry point for transportlink_provision (include_role tasks_from) as well as
+# deploy_border_gateway.yml. Required vars: bgw_fabric_cr, services_api_host,
+# services_bearer_token. Optional: bgw_restart_on_change (default role var).
+# Sets: bgw_config_changed, bgw_vmi_restarted, plus all bgw_* facts.
+
+- name: Compute BGW facts
+  ansible.builtin.include_tasks: bgw_facts.yml
+
+- name: Render BGW config files
+  ansible.builtin.set_fact:
+    bgw_frr_conf: "{{ lookup('template', 'bgw-frr.conf.j2') }}"
+    bgw_dnsmasq_conf: "{{ lookup('template', 'bgw-dnsmasq.conf.j2') }}"
+    bgw_fabric_nft: "{{ lookup('template', 'bgw-fabric.nft.j2') }}"
+    bgw_wg0_conf: "{{ lookup('template', 'bgw-wg0.conf.j2') if (bgw_wg_enabled | bool) else '' }}"
+  no_log: true
+
+- name: Build BGW config Secret data
+  ansible.builtin.set_fact:
+    _bgw_cfg_data: >-
+      {{
+        {
+          'frr.conf': bgw_frr_conf | b64encode,
+          'dnsmasq-fabric.conf': bgw_dnsmasq_conf | b64encode,
+          'fabric.nft': bgw_fabric_nft | b64encode
+        }
+        | combine({'wg0.conf': bgw_wg0_conf | b64encode} if (bgw_wg_enabled | bool) else {})
+      }}
+  no_log: true
+
+- name: Hash BGW config
+  ansible.builtin.set_fact:
+    _bgw_cfg_hash: "{{ (_bgw_cfg_data | to_json(sort_keys=true)) | hash('sha256') }}"
+  no_log: true
+
+- name: Read existing BGW config Secret
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Secret
+    name: "{{ bgw_name }}-config"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_cfg_existing
+  no_log: true
+
+- name: Detect BGW config change
+  ansible.builtin.set_fact:
+    bgw_config_changed: >-
+      {{
+        ((_bgw_cfg_existing.resources | default([{}]))[0].metadata.annotations | default({})).get('hybridsovereign.redhat/config-hash', '')
+        != _bgw_cfg_hash
+      }}
+    _bgw_cfg_existed: "{{ (_bgw_cfg_existing.resources | default([])) | length > 0 }}"
+
+- name: Apply BGW config Secret
+  when: bgw_config_changed | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    force: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ bgw_name }}-config"
+        namespace: "{{ bgw_namespace }}"
+        labels:
+          app: "{{ bgw_name }}"
+          hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+        annotations:
+          hybridsovereign.redhat/config-hash: "{{ _bgw_cfg_hash }}"
+          hybridsovereign.redhat/peers: "{{ bgw_peers | map(attribute='name') | join(',') }}"
+      data: "{{ _bgw_cfg_data }}"
+  no_log: true
+
+- name: Read BGW VMI
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_vmi_before
+
+# The Secret disk is built when the VMI starts, so a running VMI only sees the
+# new config after a restart (runStrategy Always recreates it). BGP sessions and
+# the WireGuard tunnel drop for the duration of the reboot (~1-2 min); dnsmasq
+# leases persist on the root disk so HCP worker addresses do not change.
+- name: Restart BGW VMI to roll out changed config
+  when:
+    - bgw_config_changed | bool
+    - _bgw_cfg_existed | bool
+    - (_bgw_vmi_before.resources | default([])) | length > 0
+    - bgw_restart_on_change | default(true) | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_vmi_restart
+
+- name: Record BGW restart outcome
+  ansible.builtin.set_fact:
+    bgw_vmi_restarted: "{{ _bgw_vmi_restart is changed }}"

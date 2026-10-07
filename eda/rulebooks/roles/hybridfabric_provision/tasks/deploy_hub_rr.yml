@@ -1,4 +1,8 @@
 ---
+# DEPRECATED (2026-10-07): superseded by deploy_border_gateway.yml (BGW VM is the
+# fabric route reflector, design/fabric.md §21). main.yml only includes this
+# file when HybridFabric.spec.routeReflectors[] is non-empty; kept for fabrics that
+# have not migrated yet.
 # Deploy shared hostNetwork FRR hub route reflectors for HybridFabric.spec.routeReflectors[].
 # Multiple fabrics that list the same address share one Deployment. One BGP instance per
 # RR IP (TCP/179); local ASN = min(domainAsn) among fabrics that share the address.

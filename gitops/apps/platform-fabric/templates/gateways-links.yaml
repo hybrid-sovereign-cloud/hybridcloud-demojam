@@ -1,4 +1,7 @@
-# EVPN zoning — Acme HCP1 + OSO1; Chad HCP2+HCP3.
+# One CloudGateway + TransportLink per site (design/fabric.md §8.2, §8.3).
+# Sites are shared by all tenant VRFs; domainAsn is the fabric ASN (iBGP).
+# Hosted clusters: transport none (nodes on the hub underlay).
+# OpenStack site: transport wireguard (site gateway VM tunnels to the border gateway).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
@@ -9,7 +12,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "50"
   labels:
     hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp1
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
@@ -17,10 +20,10 @@ spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65011
-  fabricRef: acme-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
-    type: wireguard
+    type: none
   platformOpenshiftRef: hcp1
   virtCloudVirtRef: local-virt
 ---
@@ -33,18 +36,33 @@ metadata:
     argocd.argoproj.io/sync-wave: "50"
   labels:
     hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   enabled: true
   cloud: openstack
   region: regionOne
-  domainAsn: 65012
-  fabricRef: acme-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
-    type: sshtunnel
+    type: wireguard
+    # WireGuard key pair; generated when missing.
+    vaultPeerConfigRef: fabric/wireguard/acme-oso1-gw
   openstackCloudOSORef: oso1
+  # Management cluster kubeconfig: CloudOSO spec.managementClusterKubeconfigRef.
+  wireguard:
+    address: 10.254.254.12/32
+  siteUnderlay:
+    interface: enp7s0          # management-cluster node NIC on the site underlay
+    computeInterface: eth5     # compute node NIC on the site underlay (VTEP)
+    cidr: 192.168.80.0/24
+    gatewayAddress: 192.168.80.1
+    mtu: 1442
+    # Lab-only shim (hypervisor source-MAC filtering); off on physical sites.
+    macNatShim:
+      enabled: true
+      vmMac: "02:fa:b0:50:00:01"
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
@@ -55,7 +73,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "50"
   labels:
     hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp2
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
@@ -63,8 +81,8 @@ spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65021
-  fabricRef: chad-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
     type: none
   platformOpenshiftRef: hcp2
@@ -79,7 +97,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "50"
   labels:
     hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/platformopenshift: hcp3
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
@@ -87,8 +105,8 @@ spec:
   enabled: true
   cloud: openshift
   region: local-virt
-  domainAsn: 65022
-  fabricRef: chad-fabric
+  domainAsn: 65010
+  fabricRef: platform-fabric
   transport:
     type: none
   platformOpenshiftRef: hcp3
@@ -103,14 +121,14 @@ metadata:
     argocd.argoproj.io/sync-wave: "55"
   labels:
     hybridsovereign.redhat/platformopenshift: hcp1
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   enabled: true
-  fabricRef: acme-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: acme-hcp1-gw
-  tunnelType: wireguard
-  vaultConfigRef: fabric/wireguard/hub
+  tunnelType: none
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: TransportLink
@@ -121,15 +139,15 @@ metadata:
     argocd.argoproj.io/sync-wave: "55"
   labels:
     hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   enabled: true
-  fabricRef: acme-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: acme-oso1-gw
-  tunnelType: sshtunnel
-  vaultConfigRef: fabric/sshtunnel/oso1
+  # Keys come from the border gateway and site gateway Vault entries.
+  tunnelType: wireguard
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: TransportLink
@@ -140,11 +158,12 @@ metadata:
     argocd.argoproj.io/sync-wave: "55"
   labels:
     hybridsovereign.redhat/platformopenshift: hcp2
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   enabled: true
-  fabricRef: chad-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: chad-hcp2-gw
   tunnelType: none
 ---
@@ -157,10 +176,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "55"
   labels:
     hybridsovereign.redhat/platformopenshift: hcp3
+    hybridsovereign.redhat/fabric: platform-fabric
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   enabled: true
-  fabricRef: chad-fabric
+  fabricRef: platform-fabric
   cloudGatewayRef: chad-hcp3-gw
   tunnelType: none

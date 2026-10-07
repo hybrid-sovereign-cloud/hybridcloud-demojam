@@ -1,0 +1,72 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: "{{ cgw_gw_vm_name }}"
+  namespace: "{{ cgw_oso_namespace }}"
+  labels:
+    app: "{{ cgw_gw_vm_name }}"
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+  - metadata:
+      name: "{{ cgw_gw_vm_name }}-root"
+    spec:
+      sourceRef:
+        kind: DataSource
+        name: "{{ cgw_gw_datasource }}"
+        namespace: "{{ cgw_gw_datasource_namespace }}"
+      storage:
+        resources:
+          requests:
+            storage: "{{ cgw_gw_root_disk_size }}"
+{% if cgw_gw_storage_class | length > 0 %}
+        storageClassName: "{{ cgw_gw_storage_class }}"
+{% endif %}
+  template:
+    metadata:
+      labels:
+        app: "{{ cgw_gw_vm_name }}"
+        kubevirt.io/domain: "{{ cgw_gw_vm_name }}"
+    spec:
+      # No nodeSelector: br-fabric exists on every node (NNCP) and the optional
+      # MAC-NAT shim runs on every node, so the VM may schedule / migrate anywhere.
+      domain:
+        cpu:
+          cores: {{ cgw_gw_cpu | int }}
+        memory:
+          guest: "{{ cgw_gw_memory }}"
+        devices:
+          disks:
+          - name: root
+            disk:
+              bus: virtio
+          - name: cloudinit
+            disk:
+              bus: virtio
+          interfaces:
+          - name: default
+            masquerade: {}
+          - name: fabric
+            bridge: {}
+            macAddress: "{{ cgw_gw_mac }}"
+          rng: {}
+        resources:
+          # Lab RHOSO control-plane nodes are ~99% memory-committed.
+          overcommitGuestOverhead: true
+          requests:
+            memory: "{{ cgw_gw_memory_request }}"
+      networks:
+      - name: default
+        pod: {}
+      - name: fabric
+        multus:
+          networkName: "{{ cgw_oso_namespace }}/{{ cgw_su_nad }}"
+      volumes:
+      - name: root
+        dataVolume:
+          name: "{{ cgw_gw_vm_name }}-root"
+      - name: cloudinit
+        cloudInitNoCloud:
+          secretRef:
+            name: "{{ cgw_gw_vm_name }}-cloudinit"

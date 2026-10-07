@@ -158,11 +158,32 @@
         fn_fabric_name: "{{ hn_selected_fabric_name }}"
         fn_fabric_namespace: sovereign-cloud
         fn_alloc_key: "{{ hn_alloc_key }}"
+        # Keep the VNI this network already uses (e.g. after moving to platform-fabric).
+        fn_preferred_vni: "{{ hybridnetwork_prior_status.vni | default(0) }}"
 
     - name: Derive VRF + canonical RT (design §8.4)
       ansible.builtin.set_fact:
         hn_vrf_name: "vrf-{{ hybridnetwork_cr_name }}"
         hn_canonical_rt: "{{ hn_domain_asn }}:{{ fn_vni }}"
+
+    # Shared BGW reflects only ledger RTs (design §8.5.4): re-render its config so
+    # the new RT is allowed. Restarts the BGW VMI (all tenants' sessions flap ~1-2 min).
+    - name: Refresh the border gateway RT allow-list for a newly allocated VNI
+      when:
+        - not (fn_reused | default(false) | bool)
+        - ((hn_fabric.spec.borderGateway | default({})).loopback | default('')) | length > 0
+      block:
+        - name: Re-render BGW config
+          ansible.builtin.include_role:
+            name: hybridfabric_provision
+            tasks_from: bgw_config.yml
+          vars:
+            bgw_fabric_cr: "{{ hn_fabric }}"
+      rescue:
+        - name: Record BGW refresh failure (the next HybridFabric reconcile retries)
+          ansible.builtin.set_fact:
+            hn_bgw_refresh_warning: >-
+              BGW RT allow-list not refreshed: {{ ansible_failed_result.msg | default('error') }}
 
     # Recompute placement counts from live NetworkPlacement CRs referencing
     # this HybridNetwork (owned here so HybridNetwork stays authoritative).
@@ -210,6 +231,7 @@
           message: >-
             VNI {{ fn_vni }} {{ 'reused' if (fn_reused | default(false)) else 'allocated' }}
             from fabric-numbering-{{ hn_selected_fabric_name }} (fabric {{ hn_selected_fabric_name }}).
+            {{ hn_bgw_refresh_warning | default('') }}
           lastReconciledAt: "{{ hybridnetwork_status_transition_time }}"
           observedGeneration: "{{ hybridnetwork_generation }}"
           entity: "{{ hn_entity }}"

@@ -1,0 +1,238 @@
+---
+# RHOSO site gateway on the management OpenShift cluster
+# (design/fabric.md §21.4). Objects in namespace openstack unless noted:
+#   NNCP fabric-underlay-<node> (cluster)  linux-bridge br-fabric on siteUnderlay.interface
+#   NAD fabric                              bridge CNI on br-fabric, no IPAM
+#   fabric-gw-macnat SA/CRB/CM/DaemonSet    LAB ONLY MAC-NAT shim (macNatShim.enabled)
+#   Secret fabric-gw-<oso>-cloudinit        cloud-init (WireGuard private key from Vault)
+#   VirtualMachine fabric-gw-<oso>          eth1 = siteUnderlay.gatewayAddress, wg0 to the BGW
+#
+# Expected: cloudgateway_spec, cloudgateway_cr_name, cgw_fabric, cgw_mgmt_kubeconfig,
+#           services_api_host/services_bearer_token.
+# Sets: cgw_gateway_address, cgw_site_gw_ready, cgw_site_gw_message
+
+- name: BGW facts (public key, wg address, loopback, hub underlay, wss host)
+  ansible.builtin.include_role:
+    name: hybridfabric_provision
+    tasks_from: bgw_facts.yml
+  vars:
+    bgw_fabric_cr: "{{ cgw_fabric }}"
+
+- name: Set site underlay facts
+  ansible.builtin.set_fact:
+    cgw_su: "{{ cloudgateway_spec.siteUnderlay | default({}) }}"
+    cgw_gw_vm_name: "fabric-gw-{{ cloudgateway_spec.openstackCloudOSORef }}"
+    cgw_gw_wg_address: "{{ (cloudgateway_spec.wireguard | default({})).address | default('') }}"
+    # Vault layout: fabric/wireguard/<gateway> unless spec.transport.vaultPeerConfigRef overrides.
+    cgw_gw_vault_path: >-
+      {{ cloudgateway_spec.transport.vaultPeerConfigRef | default('fabric/wireguard/' ~ cloudgateway_cr_name, true) }}
+
+- name: Set site underlay detail facts
+  ansible.builtin.set_fact:
+    cgw_su_interface: "{{ cgw_su.interface | default('') }}"
+    cgw_su_compute_interface: "{{ cgw_su.computeInterface | default('') }}"
+    cgw_su_cidr: "{{ cgw_su.cidr | default('') }}"
+    cgw_su_mtu: "{{ cgw_su.mtu | default(cgw_su_default_mtu, true) | int }}"
+    cgw_macnat_enabled: "{{ (cgw_su.macNatShim | default({})).enabled | default(false) | bool }}"
+    cgw_gw_mac: "{{ (cgw_su.macNatShim | default({})).vmMac | default(cgw_gw_default_mac, true) }}"
+    cgw_macnat_interface: "{{ (cgw_su.macNatShim | default({})).interface | default(cgw_su.interface | default(''), true) }}"
+
+- name: Set site-underlay-invalid failure reason before validating
+  when: >-
+    cgw_su_interface | length == 0 or cgw_su_compute_interface | length == 0
+    or cgw_su_cidr | length == 0 or cgw_gw_wg_address | length == 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: SiteUnderlayInvalid
+
+- name: Require siteUnderlay and wireguard.address
+  ansible.builtin.assert:
+    that:
+      - cgw_su_interface | length > 0
+      - cgw_su_compute_interface | length > 0
+      - cgw_su_cidr | length > 0
+      - cgw_gw_wg_address | length > 0
+    fail_msg: >-
+      CloudGateway {{ cloudgateway_cr_name }} (cloud=openstack, transport=wireguard) needs
+      spec.siteUnderlay.{interface,computeInterface,cidr} and spec.wireguard.address.
+
+- name: Compute site underlay addressing
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os
+    net = ipaddress.ip_network(os.environ["CIDR"], strict=False)
+    gw = os.environ.get("GW") or str(net.network_address + 1)
+    if ipaddress.ip_address(gw) not in net:
+        raise SystemExit("%s not in %s" % (gw, net))
+    print(json.dumps({"cidr": str(net), "prefixlen": net.prefixlen, "gw": gw}))
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    CIDR: "{{ cgw_su_cidr }}"
+    GW: "{{ cgw_su.gatewayAddress | default('') }}"
+  register: _cgw_su_calc
+  changed_when: false
+
+- name: Set computed site underlay facts
+  ansible.builtin.set_fact:
+    cgw_su_cidr: "{{ (_cgw_su_calc.stdout | from_json).cidr }}"
+    cgw_su_prefixlen: "{{ (_cgw_su_calc.stdout | from_json).prefixlen }}"
+    cgw_su_gateway_address: "{{ (_cgw_su_calc.stdout | from_json).gw }}"
+
+# Generated and stored on first run when the Vault entry has no key yet; the BGW
+# picks up the public key when the TransportLink renders its peer set.
+- name: Read (or generate) gateway WireGuard key pair in Vault
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/wg_keypair_ensure.yml"
+  vars:
+    wg_kv_path: "{{ cgw_gw_vault_path }}"
+
+- name: Keep gateway key material
+  ansible.builtin.set_fact:
+    cgw_gw_wg_private_key: "{{ wg_keypair.wgPrivateKey }}"
+    cgw_gw_ssh_public_key: "{{ wg_keypair.sshPublicKey }}"
+  no_log: true
+
+- name: Require gateway private key and BGW public key
+  ansible.builtin.assert:
+    that:
+      - cgw_gw_wg_private_key | length > 0
+      - bgw_wg_public_key | length > 0
+      - bgw_ingress_host | length > 0
+    fail_msg: >-
+      Missing WireGuard material: gateway Vault {{ cgw_gw_vault_path }}
+      wgPrivateKey, BGW Vault wgPublicKey, or BGW ingress host.
+  no_log: true
+
+# ------------------------------------------------------------------ underlay L2
+- name: List management cluster nodes for the br-fabric NNCP
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: v1
+    kind: Node
+    label_selectors:
+      - "{{ cgw_nncp_node_selector }}"
+  register: _cgw_nodes
+
+- name: Apply NNCP br-fabric per node
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'site-nncp.yaml.j2') | from_yaml }}"
+  loop: "{{ _cgw_nodes.resources | default([]) | map(attribute='metadata.name') | list }}"
+  loop_control:
+    loop_var: cgw_nncp_node
+
+- name: Wait for NNCPs Available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: nmstate.io/v1
+    kind: NodeNetworkConfigurationPolicy
+    name: "fabric-underlay-{{ item }}"
+  register: _cgw_nncp
+  until: >-
+    (_cgw_nncp.resources | default([]) | length > 0)
+    and ((_cgw_nncp.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Available') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+  retries: 30
+  delay: 10
+  loop: "{{ _cgw_nodes.resources | default([]) | map(attribute='metadata.name') | list }}"
+
+- name: Apply site underlay NAD (bridge on br-fabric, no IPAM)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'site-nad.yaml.j2') | from_yaml }}"
+
+# LAB ONLY: RHDP hypervisor anti-spoof. Physical deployments leave it disabled.
+- name: Apply MAC-NAT shim (macNatShim.enabled)
+  when: cgw_macnat_enabled | bool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'site-macnat.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+- name: Remove MAC-NAT shim when disabled
+  when: not (cgw_macnat_enabled | bool)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: absent
+    api_version: apps/v1
+    kind: DaemonSet
+    name: fabric-gw-macnat
+    namespace: "{{ cgw_oso_namespace }}"
+
+# ------------------------------------------------------------------ gateway VM
+- name: Render gateway cloud-init
+  ansible.builtin.set_fact:
+    _cgw_userdata: "{{ lookup('template', 'site-gw-user-data.j2') }}"
+  no_log: true
+
+- name: Validate gateway cloud-init parses as YAML
+  ansible.builtin.assert:
+    that:
+      - (_cgw_userdata | from_yaml).write_files | length > 0
+    quiet: true
+  no_log: true
+
+- name: Apply gateway cloud-init Secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ cgw_gw_vm_name }}-cloudinit"
+        namespace: "{{ cgw_oso_namespace }}"
+        labels:
+          app: "{{ cgw_gw_vm_name }}"
+          hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+      data:
+        userdata: "{{ _cgw_userdata | b64encode }}"
+  no_log: true
+
+- name: Apply gateway VirtualMachine
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'site-gw-vm.yaml.j2') | from_yaml }}"
+
+- name: Wait for gateway VMI Ready and guest agent connected
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ cgw_gw_vm_name }}"
+    namespace: "{{ cgw_oso_namespace }}"
+  register: _cgw_vmi
+  until: >-
+    (_cgw_vmi.resources | default([]) | length > 0)
+    and ((_cgw_vmi.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+    and ((_cgw_vmi.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'AgentConnected') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+  retries: "{{ cgw_wait_retries | int }}"
+  delay: "{{ cgw_wait_delay | int }}"
+
+- name: Set site gateway facts
+  ansible.builtin.set_fact:
+    cgw_gateway_address: "{{ cgw_su_gateway_address }}"
+    cgw_site_gw_message: >-
+      site gateway {{ cgw_oso_namespace }}/{{ cgw_gw_vm_name }} Ready on
+      {{ _cgw_vmi.resources[0].status.nodeName | default('?') }}
+      (eth1 {{ cgw_su_gateway_address }}/{{ cgw_su_prefixlen }} on {{ cgw_su_bridge }}/{{ cgw_su_interface }},
+      wg0 {{ cgw_gw_wg_address }} -> {{ bgw_ingress_host }}{{ ', MAC-NAT shim on' if (cgw_macnat_enabled | bool) else '' }})

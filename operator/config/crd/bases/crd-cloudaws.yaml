@@ -56,7 +56,7 @@ spec:
                       description: Name of the Secret in the CloudAWS namespace
                 baseDomain:
                   type: string
-                  description: "Parent DNS domain (e.g. sandbox5530.opentlc.com)"
+                  description: "Parent DNS domain, e.g. example.com"
                 landingzone:
                   type: string
                   description: Landing Zone template name

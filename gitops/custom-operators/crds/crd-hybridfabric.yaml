@@ -47,6 +47,8 @@ spec:
                   maximum: 4294967295
                 routeReflectors:
                   type: array
+                  description: >-
+                    Deprecated. Hub route-reflector pods; superseded by spec.borderGateway. Leave empty for new fabrics.
                   items:
                     type: object
                     required: [name, address]
@@ -58,9 +60,7 @@ spec:
                       nodeName:
                         type: string
                         description: >-
-                          Optional kubernetes.io/hostname pin for the hostNetwork hub RR
-                          pod. When omitted, the provisioner pins to the node whose
-                          InternalIP equals address (if any).
+                          Optional node pin for the route-reflector pod (deprecated).
                 vniPool:
                   type: object
                   required: [start, end]
@@ -71,80 +71,93 @@ spec:
                       type: integer
                 # Platform-owned CIDR pools so each PlatformOpenshift (and VTEP underlay)
                 # on this fabric gets non-overlapping address space.
-                ipam:
+                underlay:
                   type: object
                   description: >-
-                    Address pools for clusters joining this fabric. Allocations are
-                    recorded on PlatformOpenshift.status.networking and in a ledger
-                    ConfigMap. Prevents duplicate HostedCluster defaults (e.g. every
-                    HCP using 10.132.0.0/14) from colliding on the EVPN fabric.
+                    Hub underlay segment shared by the border gateway and member cluster nodes (OVN-K layer2
+                    network without IPAM). Fabric-wide unique.
                   properties:
-                    clusterNetworkPool:
+                    nadName:
+                      type: string
+                      description: Network attachment name; unique per fabric.
+                      default: fabric-underlay
+                    cidr:
+                      type: string
+                      description: Underlay CIDR, e.g. 192.168.64.0/18
+                    gatewayAddress:
+                      type: string
+                      description: Border gateway address on the underlay. Defaults to the first host of cidr.
+                    dhcpRange:
                       type: object
-                      description: Pod/cluster CIDR superspace carved per OpenShift cluster
-                      required: [cidr, blockPrefixLength]
+                      description: Dynamic address range served to member cluster nodes.
                       properties:
-                        cidr:
+                        start:
                           type: string
-                          description: "e.g. 10.128.0.0/12"
-                        blockPrefixLength:
-                          type: integer
-                          minimum: 8
-                          maximum: 28
-                          description: "Prefix length allocated per cluster (e.g. 14 → /14 blocks)"
-                          default: 14
-                    serviceNetworkPool:
-                      type: object
-                      description: Service CIDR superspace carved per OpenShift cluster
-                      required: [cidr, blockPrefixLength]
-                      properties:
-                        cidr:
+                        end:
                           type: string
-                          description: "e.g. 172.30.0.0/15"
-                        blockPrefixLength:
-                          type: integer
-                          minimum: 12
-                          maximum: 28
-                          default: 16
-                    machineNetworkPool:
-                      type: object
-                      description: Node/machine underlay CIDR superspace (VTEP-adjacent)
-                      required: [cidr, blockPrefixLength]
-                      properties:
-                        cidr:
+                        leaseTime:
                           type: string
-                          description: "e.g. 192.168.64.0/18"
-                        blockPrefixLength:
-                          type: integer
-                          minimum: 16
-                          maximum: 28
-                          default: 24
-                    hybridOverlayReserved:
-                      type: array
-                      description: >-
-                        CIDRs reserved for HybridNetwork / NetworkPlacement prefixes
-                        on this fabric; must not be allocated as cluster/service/machine.
-                      items:
-                        type: string
-                    denyOverlappingClusterCidrs:
-                      type: boolean
-                      default: true
-                      description: Reject PlatformOpenshift join when proposed CIDRs overlap any member
+                          default: 10m
+                    mtu:
+                      type: integer
+                      default: 1400
                 borderGateway:
                   type: object
+                  description: >-
+                    Border gateway virtual machine on the hub: fabric route reflector (l2vpn evpn, ipv4
+                    unicast), DHCP server and router for spec.underlay, and tunnel endpoint for remote site
+                    gateways.
                   properties:
                     name:
                       type: string
+                      description: Base name for the VM, Service and Route.
                     loopback:
                       type: string
+                      description: BGP router ID and the address all spokes peer with, e.g. 10.255.10.10
                     vaultCredentialRef:
                       type: string
+                      description: >-
+                        Vault KV path holding the WireGuard key pair (wgPrivateKey, wgPublicKey). Defaults to
+                        fabric/<fabric>/bgw.
+                    wireguard:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                          default: 10.254.254.1/24
+                          description: Tunnel interface address with prefix length.
+                        listenPort:
+                          type: integer
+                          default: 51820
+                        mtu:
+                          type: integer
+                          default: 1380
+                    ingressHost:
+                      type: string
+                      description: >-
+                        Route host for the tunnel endpoint. Defaults to <name>.<ingress domain>.
+                    vmSize:
+                      type: object
+                      properties:
+                        cpu:
+                          type: integer
+                          default: 2
+                        memory:
+                          type: string
+                          default: 4Gi
+                    image:
+                      type: string
+                      default: docker://quay.io/containerdisks/centos-stream:9
+                      description: Root disk image (container disk URL).
+                    storageClass:
+                      type: string
+                      description: StorageClass for the root disk.
                 transportDefaults:
                   type: object
                   properties:
                     mtu:
                       type: integer
-                      default: 9000
+                      default: 1442
                     innerMssClamp:
                       type: integer
                       default: 1360
@@ -166,7 +179,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        description: Entity metadata.name (e.g. acme-corp, chad)
+                        description: Entity name
             status:
               type: object
               properties:
@@ -174,19 +187,23 @@ spec:
                   type: boolean
                 borderBgwReady:
                   type: boolean
+                  description: True when the border gateway VM is ready, or when no border gateway is configured.
+                bgwEndpoint:
+                  type: string
+                  description: Tunnel endpoint (host:port) for remote site gateways.
+                bgwPeerCount:
+                  type: integer
+                  description: Number of remote site gateways configured as tunnel peers.
+                bgwAddress:
+                  type: string
+                  description: Border gateway underlay address.
                 hubRrReady:
                   type: boolean
                   description: >-
-                    True when managed hostNetwork FRR hub route-reflector pods for
-                    spec.routeReflectors[] are Available (or none configured).
+                    Deprecated. Readiness of route-reflector pods for spec.routeReflectors.
                 allocatedVniCount:
                   type: integer
                 availableVniCount:
-                  type: integer
-                ipamReady:
-                  type: boolean
-                  description: True when ipam pools are valid and ledger ConfigMap exists
-                allocatedClusterCidrCount:
                   type: integer
                 status:
                   type: string

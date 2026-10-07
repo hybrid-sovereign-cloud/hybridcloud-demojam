@@ -155,7 +155,9 @@ export interface PlatformOpenshiftNetworkingStatus {
   clusterNetwork?: string[];
   serviceNetwork?: string[];
   machineNetwork?: string[];
-  hybridOverlayReserved?: string[];
+  underlay?: { nadName?: string; cidr?: string };
+  legacyClusterCidrs?: boolean;
+  ipamCondition?: 'DefaultRange' | 'LegacyClusterCidrs' | string;
   conflictCheck?: 'passed' | 'failed' | string;
   conflictMessage?: string;
   fabricRef?: string;
@@ -322,18 +324,18 @@ export interface HybridFabricSpec {
   entityRefs?: Array<{ name: string }>;
   routeReflectors?: Array<{ name: string; address: string }>;
   vniPool?: { start: number; end: number };
+  underlay?: {
+    nadName?: string;
+    cidr?: string;
+    gatewayAddress?: string;
+    dhcpRange?: { start?: string; end?: string; leaseTime?: string };
+    mtu?: number;
+  };
   borderGateway?: { name?: string; loopback?: string; vaultCredentialRef?: string };
   transportDefaults?: {
     mtu?: number;
     innerMssClamp?: number;
     defaultTunnelType?: 'wireguard' | 'ipsec' | 'macsec' | 'none';
-  };
-  ipam?: {
-    clusterNetworkPool?: { cidr?: string; blockPrefixLength?: number };
-    serviceNetworkPool?: { cidr?: string; blockPrefixLength?: number };
-    machineNetworkPool?: { cidr?: string; blockPrefixLength?: number };
-    hybridOverlayReserved?: string[];
-    denyOverlappingClusterCidrs?: boolean;
   };
 }
 export type HybridFabric = K8sResource<HybridFabricSpec>;

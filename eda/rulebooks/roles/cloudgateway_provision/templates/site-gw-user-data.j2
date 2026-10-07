@@ -1,0 +1,100 @@
+#cloud-config
+# Fabric site gateway {{ cgw_gw_vm_name }} (CloudGateway {{ cloudgateway_cr_name }}).
+# Rendered by EDA cloudgateway_provision; stored only in Secret {{ cgw_gw_vm_name }}-cloudinit.
+hostname: {{ cgw_gw_vm_name }}
+{% if cgw_gw_ssh_public_key | length > 0 %}
+users:
+  - name: cloud-user
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - {{ cgw_gw_ssh_public_key }}
+{% endif %}
+packages: [wireguard-tools, nftables, tcpdump, iproute, bind-utils, qemu-guest-agent, tar]
+write_files:
+  - path: /etc/wireguard/wg0.conf
+    permissions: '0600'
+    content: |
+      [Interface]
+      PrivateKey = {{ cgw_gw_wg_private_key }}
+      Address = {{ cgw_gw_wg_address }}
+      MTU = {{ bgw_wg_mtu }}
+      [Peer]
+      PublicKey = {{ bgw_wg_public_key }}
+      Endpoint = 127.0.0.1:{{ bgw_wg_listen_port }}
+      AllowedIPs = {{ bgw_wg_ip }}/32, {{ bgw_loopback }}/32, {{ bgw_underlay_cidr }}
+      PersistentKeepalive = 25
+  - path: /etc/systemd/system/wstunnel-client.service
+    content: |
+      [Unit]
+      Description=Hybrid Sovereign fabric wstunnel client (WireGuard over hub ingress TLS)
+      After=network-online.target
+      Wants=network-online.target
+      [Service]
+      ExecStart=/usr/local/bin/wstunnel client -L 'udp://127.0.0.1:{{ bgw_wg_listen_port }}:127.0.0.1:{{ bgw_wg_listen_port }}?timeout_sec=0' wss://{{ bgw_ingress_host }}:443
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/sysctl.d/90-fabric-gw.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv4.conf.all.rp_filter = 2
+      net.ipv4.conf.default.rp_filter = 2
+  - path: /etc/sysconfig/nftables.conf
+    content: |
+      flush ruleset
+      table inet fabric {
+        chain input {
+          type filter hook input priority 0; policy drop;
+          ct state established,related accept
+          iifname "lo" accept
+          ip protocol icmp accept
+          tcp dport 22 accept
+          iifname { "eth1", "wg0" } udp dport 4789 accept
+          iifname { "eth1", "wg0" } tcp dport 179 accept
+        }
+        chain forward {
+          type filter hook forward priority 0; policy drop;
+          ct state established,related accept
+          iifname "eth1" oifname "wg0" accept
+          iifname "wg0" oifname "eth1" accept
+        }
+      }
+  - path: /etc/NetworkManager/system-connections/eth1.nmconnection
+    permissions: '0600'
+    content: |
+      [connection]
+      id=eth1
+      type=ethernet
+      interface-name=eth1
+      autoconnect=true
+      [ethernet]
+      mtu={{ cgw_su_mtu }}
+      [ipv4]
+      method=manual
+      address1={{ cgw_su_gateway_address }}/{{ cgw_su_prefixlen }}
+      never-default=true
+      [ipv6]
+      method=disabled
+  - path: /usr/local/sbin/fabric-gw-setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # First-boot setup. qemu-guest-agent is enabled last: VMI AgentConnected=True
+      # tells EDA that every step before it has run.
+      set -x
+      U=$(curl -sL https://api.github.com/repos/erebe/wstunnel/releases/latest | grep -oE 'https://[^"]+linux_amd64\.tar\.gz' | head -1)
+      echo "wstunnel url: $U"
+      curl -sL "$U" -o /tmp/wst.tgz && tar -xzf /tmp/wst.tgz -C /tmp && install -m0755 /tmp/wstunnel /usr/local/bin/wstunnel
+      /usr/local/bin/wstunnel --version
+      nmcli connection reload; nmcli connection up eth1
+      sysctl --system
+      systemctl enable --now nftables
+      systemctl daemon-reload
+      systemctl enable --now wstunnel-client.service
+      systemctl enable --now wg-quick@wg0
+      systemctl enable --now qemu-guest-agent
+runcmd:
+  - /usr/local/sbin/fabric-gw-setup.sh

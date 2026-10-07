@@ -9,7 +9,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Team
 metadata:
   name: platform-engineering
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   features:
     istio: false
@@ -27,7 +27,7 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Project
 metadata:
   name: website-redesign
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   description: Website redesign
 ```
@@ -45,16 +45,16 @@ apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Assignment
 metadata:
   name: pe-on-workshop-aws
-  namespace: entity-acme-corp
+  namespace: entity-example-corp
 spec:
   team: platform-engineering
   projects:
     - website-redesign
   openshift: workshop-ocp-aws
   toolRbac:
-    assignmentAdmin: acme-platform-admins
-    assignmentDeveloper: acme-devs
-    assignmentViewer: acme-viewers
+    assignmentAdmin: example-platform-admins
+    assignmentDeveloper: example-devs
+    assignmentViewer: example-viewers
 ```
 
 ### Lifecycle test (lab)
@@ -62,9 +62,9 @@ spec:
 ```bash
 # create
 oc apply -f assignment.yaml
-oc get assignment pe-on-workshop-aws -n entity-acme-corp -o yaml
+oc get assignment pe-on-workshop-aws -n entity-example-corp -o yaml
 # delete → spoke NS / bindings cleaned
-oc delete assignment pe-on-workshop-aws -n entity-acme-corp
+oc delete assignment pe-on-workshop-aws -n entity-example-corp
 # re-apply
 oc apply -f assignment.yaml
 ```

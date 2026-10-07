@@ -35,8 +35,8 @@ Never put keys in CR YAML in Git.
 ## Watch status
 
 ```bash
-oc get cloudaws,cloudoso,cloudvirt,platformopenshift -n entity-acme-corp
-oc describe platformopenshift <name> -n entity-acme-corp
+oc get cloudaws,cloudoso,cloudvirt,platformopenshift -n entity-example-corp
+oc describe platformopenshift <name> -n entity-example-corp
 ```
 
 Ready signals: `status.ready=true`, `status.status=ready`, or `status.provisionStatus` / Hive phase **Provisioned**.

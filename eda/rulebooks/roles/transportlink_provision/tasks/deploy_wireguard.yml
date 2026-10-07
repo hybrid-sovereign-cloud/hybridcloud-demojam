@@ -1,110 +1,148 @@
 ---
-# Deploy WireGuard VTEP underlay for tunnelType=wireguard (design/fabric.md §8.3).
-# Vault KV (vaultConfigRef) expected keys (never logged):
-#   hubPrivateKey, hubAddress (default 10.254.254.1/24), hubListenPort (default 51820),
-#   hubEndpoint, hubNodeName (optional), hubRoutes, spokeRoutes,
-#   peers: [{name, publicKey, privateKey, address, nodeName, allowedIPs}]
-# Spoke agents are applied when spokeKubeconfig is provided per peer (optional in v1;
-# hub gateway alone is enough for Vault-backed Ready; live lab also deploys spokes).
+# tunnelType=wireguard (design/fabric.md §21.4, §8):
+#   BGW side    : this gateway becomes a [Peer] on the border gateway — rendered by
+#                 hybridfabric_provision/tasks/bgw_config.yml from Vault
+#                 (gateway wgPublicKey via CloudGateway.spec.transport.vaultPeerConfigRef).
+#                 The BGW VMI restarts when its peer set changes.
+#   Gateway side: rendered by cloudgateway_provision (cloud-init of fabric-gw-<oso>,
+#                 BGW wgPublicKey via HybridFabric.spec.borderGateway.vaultCredentialRef).
+#   Handshake   : best effort. Without guest access the API only shows whether wg0 is
+#                 up in each guest (VMI status.interfaces from the guest agent); the
+#                 authoritative check is the EDPM FRR session to the BGW loopback
+#                 (NetworkPlacement validate).
+# Sets: tl_tunnel_up, tl_ready, tl_border_endpoint, tl_cloud_endpoint, tl_message
 
-- name: Set WireGuard defaults
+- name: Set wrong-cloud failure reason before validating
+  when: (tl_gateway.spec.cloud | default('')) != 'openstack'
   ansible.builtin.set_fact:
-    tl_wg_namespace: "{{ vault_kv_data.namespace | default('fabric-wg') }}"
-    tl_wg_image: "{{ vault_kv_data.image | default('quay.io/frrouting/frr:10.3.1') }}"
-    tl_wg_listen_port: "{{ vault_kv_data.hubListenPort | default(51820) | int }}"
-    tl_wg_hub_address: "{{ vault_kv_data.hubAddress | default('10.254.254.1/24') }}"
-    tl_wg_hub_endpoint: "{{ vault_kv_data.hubEndpoint | default('') }}"
-    tl_wg_hub_node: "{{ vault_kv_data.hubNodeName | default('') }}"
-    # Hub must NOT route its own RR loopbacks (10.255.10.0/24) into wg0.
-    # Only spoke VTEP underlays belong on the hub WG routes.
-    tl_wg_hub_routes: "{{ vault_kv_data.hubRoutes | default('10.255.11.0/24 10.255.12.0/24') }}"
-    # Spoke must keep RR + peer VTEP CIDRs on wg0 (CNV default GW will steal them otherwise).
-    tl_wg_spoke_routes: "{{ vault_kv_data.spokeRoutes | default('10.255.10.0/24 10.255.11.0/24 10.255.12.0/24') }}"
-    tl_wg_route_interval: "{{ vault_kv_data.routeInterval | default('15') }}"
-    tl_wg_hub_secret: fabric-wg-hub
-    tl_wg_peers: "{{ vault_kv_data.peers | default([]) }}"
-    tl_wg_start_script: "{{ lookup('file', role_path ~ '/files/wg-start.sh') }}"
+    transportlink_fail_reason: TunnelTypeUnsupported
 
-- name: Fail closed when WireGuard Vault payload missing hub key or peers
+- name: Wireguard links terminate on a RHOSO site gateway VM
+  ansible.builtin.assert:
+    that:
+      - (tl_gateway.spec.cloud | default('')) == 'openstack'
+      - ((tl_fabric.spec.borderGateway | default({})).loopback | default('')) | length > 0
+    fail_msg: >-
+      TransportLink {{ transportlink_cr_name }} tunnelType=wireguard needs a cloud=openstack
+      CloudGateway and a HybridFabric with spec.borderGateway (HCP spokes use tunnelType none).
+
+- name: Render the BGW peer set (restarts the BGW VMI when it changed)
+  ansible.builtin.include_role:
+    name: hybridfabric_provision
+    tasks_from: bgw_config.yml
+  vars:
+    bgw_fabric_cr: "{{ tl_fabric }}"
+
+- name: Set peer-missing failure reason before failing
+  when: tl_gateway.metadata.name not in (bgw_peers | map(attribute='name') | list)
+  ansible.builtin.set_fact:
+    transportlink_fail_reason: TunnelConfigUnavailable
+
+- name: Require this gateway on the BGW peer list
   ansible.builtin.fail:
     msg: >-
-      TransportLink {{ transportlink_cr_name }} tunnelType=wireguard Vault
-      {{ transportlink_spec.vaultConfigRef }} requires hubPrivateKey and peers[].
-  when: >-
-    (vault_kv_data.hubPrivateKey | default('') | length == 0)
-    or (tl_wg_peers | length == 0)
+      CloudGateway {{ tl_gateway.metadata.name }} is not a WireGuard peer on
+      {{ bgw_name }}: {{ bgw_peer_errors | join('; ') | default('unknown', true) }}
+  when: tl_gateway.metadata.name not in (bgw_peers | map(attribute='name') | list)
 
-- name: Fail closed when hubEndpoint missing
-  ansible.builtin.fail:
-    msg: >-
-      TransportLink {{ transportlink_cr_name }} wireguard requires Vault hubEndpoint
-      (UDP address spokes dial, e.g. CENTRAL node IP).
-  when: (tl_wg_hub_endpoint | length == 0)
-
-- name: Ensure fabric-wg namespace on hub
-  kubernetes.core.k8s:
+- name: Wait for the BGW guest agent (after a restart) and read its interfaces
+  kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
     validate_certs: false
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: "{{ tl_wg_namespace }}"
-        labels:
-          hybridsovereign.redhat/fabric-wg: "true"
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: tl_bgw_vmi
+  until: >-
+    ((tl_bgw_vmi.resources | default([]) + [{}])[0].status.conditions | default([])
+     | selectattr('type', 'equalto', 'AgentConnected') | selectattr('status', 'equalto', 'True') | list | length) > 0
+  retries: "{{ tl_bgw_wait_retries | int if (bgw_vmi_restarted | default(false) | bool) else 1 }}"
+  delay: "{{ tl_bgw_wait_delay | int }}"
+  failed_when: false
 
-- name: Render hub WireGuard conf (Address set via ip addr in start script)
+- name: Read the site gateway VMI on the RHOSO management cluster (best effort)
+  block:
+    - name: Read CloudOSO for the management cluster kubeconfig ref
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudOSO
+        name: "{{ tl_gateway.spec.openstackCloudOSORef | default('') }}"
+      register: tl_cloudoso
+
+    - name: Resolve management cluster kubeconfig ref
+      ansible.builtin.set_fact:
+        tl_mgmt_ref: >-
+          {{
+            tl_gateway.spec.managementClusterKubeconfigRef
+            | default(((tl_cloudoso.resources | default([]) + [{}])[0].spec | default({})).managementClusterKubeconfigRef | default(''), true)
+            | default('oso/' ~ tl_gateway.spec.openstackCloudOSORef ~ '/mgmt-kubeconfig', true)
+          }}
+
+    - name: Read management cluster kubeconfig from Vault
+      when: tl_mgmt_ref | length > 0
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
+      vars:
+        vault_kv_path: "{{ tl_mgmt_ref }}"
+
+    - name: Write management cluster kubeconfig
+      when: tl_mgmt_ref | length > 0
+      ansible.builtin.copy:
+        content: "{{ vault_kv_data.kubeconfig }}"
+        dest: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
+        mode: "0600"
+      no_log: true
+
+    - name: Read site gateway VMI
+      when: tl_mgmt_ref | length > 0
+      kubernetes.core.k8s_info:
+        kubeconfig: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
+        validate_certs: false
+        api_version: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        name: "fabric-gw-{{ tl_gateway.spec.openstackCloudOSORef }}"
+        namespace: "{{ tl_oso_namespace }}"
+      register: tl_gw_vmi
+  rescue:
+    - name: Site gateway VMI not observable
+      ansible.builtin.set_fact:
+        tl_gw_vmi: {resources: []}
+  always:
+    - name: Remove management cluster kubeconfig
+      ansible.builtin.file:
+        path: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
+        state: absent
+
+- name: Evaluate wg0 presence on both ends (guest agent interface report)
   ansible.builtin.set_fact:
-    tl_wg_hub_conf: |
-      [Interface]
-      PrivateKey = {{ vault_kv_data.hubPrivateKey }}
-      ListenPort = {{ tl_wg_listen_port }}
-      {% for p in tl_wg_peers %}
-      [Peer]
-      # {{ p.name | default(loop.index) }}
-      PublicKey = {{ p.publicKey }}
-      AllowedIPs = {{ p.allowedIPs | default((p.vtep | default('')) ~ '/32') }}
-      PersistentKeepalive = 25
-      {% endfor %}
+    tl_bgw_wg0: >-
+      {{
+        ((tl_bgw_vmi.resources | default([]) + [{}])[0].status.interfaces | default([])
+         | selectattr('interfaceName', 'defined') | selectattr('interfaceName', 'equalto', 'wg0') | list | length) > 0
+      }}
+    tl_gw_wg0: >-
+      {{
+        ((tl_gw_vmi.resources | default([]) + [{}])[0].status.interfaces | default([])
+         | selectattr('interfaceName', 'defined') | selectattr('interfaceName', 'equalto', 'wg0') | list | length) > 0
+      }}
 
-- name: Apply hub WireGuard Secret
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: "{{ tl_wg_hub_secret }}"
-        namespace: "{{ tl_wg_namespace }}"
-        labels:
-          hybridsovereign.redhat/fabric-wg: hub
-      type: Opaque
-      stringData:
-        wg0.conf: "{{ tl_wg_hub_conf }}"
-
-- name: Apply hub WireGuard manifests (SA, SCC, scripts CM, Deployment)
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition: "{{ item }}"
-  loop: "{{ lookup('template', 'wg-hub-deploy.yml.j2') | from_yaml_all | list }}"
-  loop_control:
-    label: "{{ item.kind }}/{{ item.metadata.name | default('?') }}"
+- name: Set restart note
+  ansible.builtin.set_fact:
+    tl_restart_note: "{{ ', BGW restarted for new peer set' if (bgw_vmi_restarted | default(false) | bool) else '' }}"
 
 - name: Set WireGuard Ready facts
   ansible.builtin.set_fact:
-    tl_tunnel_up: true
+    tl_tunnel_up: "{{ (tl_bgw_wg0 | bool) and (tl_gw_wg0 | bool) }}"
     tl_ready: true
-    tl_border_endpoint: "{{ tl_wg_hub_endpoint }}:{{ tl_wg_listen_port }}"
-    tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
+    tl_border_endpoint: "{{ bgw_endpoint }}"
+    tl_cloud_endpoint: "{{ (tl_gateway.spec.wireguard | default({})).address | default('') }}"
     tl_message: >-
-      tunnelType=wireguard: hub {{ tl_wg_hub_endpoint }}:{{ tl_wg_listen_port }}
-      peers={{ tl_wg_peers | map(attribute='name') | select('defined') | list | join(',') }}
-      (VTEP CIDRs via wg0 — design/fabric.md §8.3).
+      tunnelType=wireguard: {{ tl_gateway.metadata.name }} is peer
+      {{ (bgw_peers | selectattr('name', 'equalto', tl_gateway.metadata.name) | first).wgIp }}
+      on {{ bgw_namespace }}/{{ bgw_name }} (wss {{ bgw_endpoint }}, {{ bgw_peers | length }} peer(s){{ tl_restart_note }});
+      wg0 up: bgw={{ tl_bgw_wg0 }} gateway={{ tl_gw_wg0 }} (handshake itself is confirmed by
+      the EDPM BGP session to {{ bgw_loopback }}).
