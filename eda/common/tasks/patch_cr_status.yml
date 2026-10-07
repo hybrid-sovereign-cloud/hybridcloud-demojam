@@ -56,7 +56,7 @@
           # Ansible Jinja | int still serializes as JSON strings; coerce known int fields.
           for _k in (
               "observedGeneration", "vni", "domainAsn", "allocatedVniCount",
-              "availableVniCount", "allocatedClusterCidrCount", "peerCount",
+              "availableVniCount", "allocatedClusterCidrCount", "peerCount", "bgwPeerCount",
               "networkId", "placementCount", "placementsReady",
           ):
               if _k in status_body and status_body[_k] is not None and status_body[_k] != "":
