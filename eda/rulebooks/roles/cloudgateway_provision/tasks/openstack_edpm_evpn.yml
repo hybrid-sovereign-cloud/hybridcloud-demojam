@@ -66,11 +66,18 @@
     path: "{{ cgw_edpm_workdir }}/netconfig-patch.json"
     state: absent
 
+- name: Write NetConfig planner input
+  ansible.builtin.copy:
+    content: "{{ _cgw_netconfig.resources[0] | to_json }}"
+    dest: "/tmp/cgw-{{ cloudgateway_cr_name }}-netconfig.json"
+    mode: "0600"
+  no_log: true
+
 - name: Compute NetConfig fabric patch
   ansible.builtin.command:
     argv: [python3, "{{ role_path }}/files/edpm_fabric_patch.py", "{{ cgw_edpm_workdir }}", netconfig]
   environment:
-    NETCONFIG: "{{ _cgw_netconfig.resources[0] | to_json }}"
+    NETCONFIG_FILE: "/tmp/cgw-{{ cloudgateway_cr_name }}-netconfig.json"
     PARAMS: "{{ cgw_edpm_params | combine({'computeInterface': cgw_su_compute_interface}) | to_json }}"
   register: _cgw_nc_calc
   changed_when: false

@@ -16,6 +16,18 @@
   ansible.builtin.set_fact:
     cgw_edpm_results: "{{ cgw_edpm_results + [{'name': cgw_ns_name, 'fingerprint': '', 'deployment': '', 'state': 'NotAttempted'}] }}"
 
+- name: Write EDPM planner inputs (lists are too large for the process environment)
+  ansible.builtin.copy:
+    content: "{{ item.content | to_json }}"
+    dest: "{{ item.dest }}"
+    mode: "0600"
+  loop:
+    - { dest: "/tmp/cgw-{{ cloudgateway_cr_name }}-netconfig.json", content: "{{ _cgw_netconfig.resources[0] }}" }
+    - { dest: "/tmp/cgw-{{ cloudgateway_cr_name }}-all-nodesets.json", content: "{{ _cgw_all_ns.resources | default([]) }}" }
+  loop_control:
+    label: "{{ item.dest }}"
+  no_log: true
+
 - name: "Roll out NodeSet {{ cgw_ns_name }}"
   when: not (cgw_edpm_stop | bool)
   block:
@@ -54,9 +66,9 @@
       ansible.builtin.command:
         argv: [python3, "{{ role_path }}/files/edpm_fabric_patch.py", "{{ cgw_edpm_workdir }}", nodeset]
       environment:
-        NETCONFIG: "{{ _cgw_netconfig.resources[0] | to_json }}"
+        NETCONFIG_FILE: "/tmp/cgw-{{ cloudgateway_cr_name }}-netconfig.json"
         NODESET: "{{ _cgw_ns | to_json }}"
-        ALL_NODESETS: "{{ _cgw_all_ns.resources | default([]) | to_json }}"
+        ALL_NODESETS_FILE: "/tmp/cgw-{{ cloudgateway_cr_name }}-all-nodesets.json"
         PARAMS: "{{ cgw_edpm_params | combine({'computeInterface': _cgw_ns_iface}) | to_json }}"
       register: _cgw_ns_calc
       changed_when: false

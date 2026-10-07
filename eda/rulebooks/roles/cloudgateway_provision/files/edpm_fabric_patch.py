@@ -31,7 +31,8 @@ import sys
 
 out_dir, mode = sys.argv[1], sys.argv[2]
 p = json.loads(os.environ["PARAMS"])
-netconfig = json.loads(os.environ.get("NETCONFIG") or "{}")
+netconfig = (json.load(open(os.environ["NETCONFIG_FILE"])) if os.environ.get("NETCONFIG_FILE")
+             else json.loads(os.environ.get("NETCONFIG") or "{}"))
 
 net_name = p["network"]                      # NetConfig network name, e.g. fabric
 subnet_name = p.get("subnetName", "subnet1")
@@ -95,7 +96,8 @@ if mode == "netconfig":
 
 # --------------------------------------------------------------- nodeset mode
 nodeset = json.loads(os.environ["NODESET"])
-all_nodesets = json.loads(os.environ.get("ALL_NODESETS") or "[]")
+all_nodesets = (json.load(open(os.environ["ALL_NODESETS_FILE"])) if os.environ.get("ALL_NODESETS_FILE")
+                else json.loads(os.environ.get("ALL_NODESETS") or "[]"))
 iface = p["computeInterface"]                 # already resolved for this NodeSet
 my_name = nodeset["metadata"]["name"]
 
