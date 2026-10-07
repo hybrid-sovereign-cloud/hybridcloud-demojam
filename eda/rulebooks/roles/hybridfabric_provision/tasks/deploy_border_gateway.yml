@@ -1,0 +1,153 @@
+---
+# Hub border gateway (BGW) VM for HybridFabric.spec.borderGateway
+# (design/fabric-bgw-plan.md §4; replaces the hub RR pods of deploy_hub_rr.yml).
+#
+# Objects (namespace = HybridFabric namespace, normally sovereign-cloud):
+#   NAD <underlay.nadName>        OVN-K layer2, no IPAM, mtu underlay.mtu
+#   Secret <bgw>-config           wg0.conf / frr.conf / dnsmasq / nft (bgw_config.yml)
+#   Secret <bgw>-cloudinit        cloud-init userdata (first boot)
+#   VirtualMachine <bgw>          CentOS Stream 9, default (masquerade) + underlay (bridge)
+#   Service <bgw>-wss + Route <bgw> (passthrough) for wstunnel (WireGuard over TLS 443)
+#
+# Sets: hf_border_bgw_ready, hf_border_message, hf_bgw_endpoint, hf_bgw_peer_count
+
+- name: Render and apply BGW config Secret
+  ansible.builtin.include_tasks: bgw_config.yml
+  vars:
+    bgw_fabric_cr: "{{ hybridfabric_cr_lookup.resources[0] }}"
+
+# Lab: the hub kubemacpool webhook was down and rejected VM create/update.
+# Explicit MACs are set on every fabric interface, so opting out is safe.
+- name: Opt the BGW namespace out of kubemacpool
+  when: bgw_kubemacpool_ignore | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: patched
+    api_version: v1
+    kind: Namespace
+    name: "{{ bgw_namespace }}"
+    definition:
+      metadata:
+        labels:
+          mutatevirtualmachines.kubemacpool.io: ignore
+
+- name: Apply fabric underlay NAD (OVN-K layer2, no IPAM)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'bgw-nad.yaml.j2') | from_yaml }}"
+
+- name: Render BGW cloud-init
+  ansible.builtin.set_fact:
+    _bgw_userdata: "{{ lookup('template', 'bgw-user-data.j2') }}"
+  no_log: true
+
+- name: Validate BGW cloud-init parses as YAML
+  ansible.builtin.assert:
+    that:
+      - (_bgw_userdata | from_yaml).write_files | length > 0
+    fail_msg: BGW cloud-init did not render to valid cloud-config YAML
+    quiet: true
+  no_log: true
+
+- name: Apply BGW cloud-init Secret
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ bgw_name }}-cloudinit"
+        namespace: "{{ bgw_namespace }}"
+        labels:
+          app: "{{ bgw_name }}"
+          hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+      data:
+        userdata: "{{ _bgw_userdata | b64encode }}"
+  no_log: true
+
+- name: Apply BGW VirtualMachine
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'bgw-vm.yaml.j2') | from_yaml }}"
+
+- name: Apply BGW wstunnel Service and passthrough Route
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'bgw-svc-route.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+# AgentConnected is the "setup finished" signal: fabric-bgw-setup.sh enables
+# qemu-guest-agent as its last step (after frr, dnsmasq, wg-quick, wstunnel).
+- name: Wait for BGW VMI Ready and guest agent connected
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_vmi
+  until: >-
+    (_bgw_vmi.resources | default([]) | length > 0)
+    and ((_bgw_vmi.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+    and ((_bgw_vmi.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'AgentConnected') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+  retries: "{{ bgw_wait_retries | int }}"
+  delay: "{{ bgw_wait_delay | int }}"
+  failed_when: false
+
+- name: Set BGW readiness facts
+  ansible.builtin.set_fact:
+    hf_border_bgw_ready: >-
+      {{
+        (_bgw_vmi.resources | default([]) | length > 0)
+        and ((_bgw_vmi.resources[0].status.conditions | default([])
+              | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+        and ((_bgw_vmi.resources[0].status.conditions | default([])
+              | selectattr('type', 'equalto', 'AgentConnected') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+      }}
+    hf_bgw_endpoint: "{{ bgw_endpoint }}"
+    hf_bgw_address: "{{ bgw_underlay_address }}"
+    hf_bgw_peer_count: "{{ bgw_peers | length }}"
+
+- name: Set BGW status message
+  ansible.builtin.set_fact:
+    hf_border_message: >-
+      BGW {{ bgw_namespace }}/{{ bgw_name }} {{ 'Ready' if (hf_border_bgw_ready | bool) else 'NOT Ready' }}:
+      loopback {{ bgw_loopback }} AS{{ bgw_asn }}, underlay {{ bgw_underlay_nad }}
+      {{ bgw_underlay_address }}/{{ bgw_underlay_prefixlen }}, wss {{ bgw_endpoint }},
+      wireguard peers={{ bgw_peers | map(attribute='name') | join(',') | default('none', true) }}
+      {{ ('(skipped: ' ~ (bgw_peer_errors | join('; ')) ~ ')') if (bgw_peer_errors | length > 0) else '' }}
+      {{ '(config changed; VMI restarted)' if (bgw_vmi_restarted | default(false) | bool) else '' }}
+
+- name: Fail closed when the BGW is required but not Ready
+  when:
+    - bgw_required | bool
+    - not (hf_border_bgw_ready | bool)
+  block:
+    - name: Set BGW failure reason
+      ansible.builtin.set_fact:
+        hybridfabric_fail_reason: BorderGatewayNotReady
+
+    - name: Fail on BGW not Ready
+      ansible.builtin.fail:
+        msg: "{{ hf_border_message }}"

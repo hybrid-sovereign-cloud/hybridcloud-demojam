@@ -78,6 +78,10 @@
       when: hf_teardown_allocated_count | int == 0
       ansible.builtin.include_tasks: remove_hub_rr.yml
 
+    - name: Remove the fabric border gateway VM
+      when: hf_teardown_allocated_count | int == 0
+      ansible.builtin.include_tasks: remove_border_gateway.yml
+
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:

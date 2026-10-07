@@ -316,6 +316,9 @@
     state: present
     definition: "{{ hc_definition }}"
 
+- name: Attach HostedCluster workers to the fabric underlay (when joining a fabric)
+  ansible.builtin.include_tasks: hosted_fabric_underlay.yml
+
 - name: Create NodePool for HostedCluster workers
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"

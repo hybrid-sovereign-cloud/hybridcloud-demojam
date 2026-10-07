@@ -1,0 +1,15 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: "{{ bgw_underlay_nad }}"
+  namespace: "{{ bgw_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+    hybridsovereign.redhat/fabric-underlay: "true"
+  annotations:
+    hybridsovereign.redhat/description: >-
+      Fabric hub underlay L2 (OVN-K layer2, no IPAM => MAC-only port security so the
+      BGW can route transit traffic). Same network name is rendered into each joined
+      HostedCluster VM namespace (Multus namespace isolation).
+spec:
+  config: '{{ {"cniVersion": "0.3.1", "name": bgw_underlay_nad, "type": "ovn-k8s-cni-overlay", "topology": "layer2", "mtu": bgw_underlay_mtu | int, "netAttachDefName": bgw_namespace ~ "/" ~ bgw_underlay_nad} | to_json }}'

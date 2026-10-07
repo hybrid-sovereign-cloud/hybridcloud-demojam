@@ -1,0 +1,79 @@
+# LAB ONLY (CloudGateway.spec.siteUnderlay.macNatShim.enabled): see files/macnat.sh.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fabric-gw-macnat
+  namespace: "{{ cgw_oso_namespace }}"
+  labels:
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fabric-gw-macnat-privileged
+  labels:
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+- kind: ServiceAccount
+  name: fabric-gw-macnat
+  namespace: "{{ cgw_oso_namespace }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fabric-gw-macnat
+  namespace: "{{ cgw_oso_namespace }}"
+  labels:
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+data:
+  UNDERLAY_IFACE: "{{ cgw_macnat_interface }}"
+  VM_MAC: "{{ cgw_gw_mac }}"
+  macnat.sh: |
+    {{ lookup('file', role_path ~ '/files/macnat.sh') | indent(4) }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fabric-gw-macnat
+  namespace: "{{ cgw_oso_namespace }}"
+  labels:
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+spec:
+  selector:
+    matchLabels:
+      app: fabric-gw-macnat
+  template:
+    metadata:
+      labels:
+        app: fabric-gw-macnat
+      annotations:
+        # Roll the pods when the script or MACs change.
+        hybridsovereign.redhat/config-hash: "{{ (cgw_macnat_interface ~ cgw_gw_mac ~ lookup('file', role_path ~ '/files/macnat.sh')) | hash('sha256') | truncate(16, true, '') }}"
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: macnat
+        image: "{{ cgw_macnat_image }}"
+        command:
+        - /bin/bash
+        - /config/macnat.sh
+        envFrom:
+        - configMapRef:
+            name: fabric-gw-macnat
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: fabric-gw-macnat
+      serviceAccountName: fabric-gw-macnat

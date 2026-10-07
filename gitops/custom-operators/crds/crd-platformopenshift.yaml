@@ -304,6 +304,17 @@ spec:
                       enum: [passed, failed, skipped]
                     conflictMessage:
                       type: string
+                    legacyClusterCidrs:
+                      type: boolean
+                      description: >-
+                        True when cluster/service CIDRs lie outside the fabric's default pools
+                        (pre-CG-NAT clusters). They are kept and only checked against the hub
+                        and other clusters (design/fabric.md §16).
+                    ipamCondition:
+                      type: string
+                      enum: [FabricPool, LegacyClusterCidrs]
+                    ipamMessage:
+                      type: string
                 fabricMembership:
                   type: array
                   description: Fabrics this cluster has joined (design §15)

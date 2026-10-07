@@ -1,1 +1,9 @@
 ---
+# Neutron MTU for fabric-placed networks (design/fabric-bgw-plan.md §7:
+# 1442 RHDP segment - WireGuard/wstunnel - VXLAN leaves 1330; 1300 keeps margin
+# and matches the HCP CUDN MTU).
+np_oso_network_mtu: 1300
+# RHOSO control plane namespace on the management cluster.
+np_oso_namespace: openstack
+np_oso_nb_pod: ovsdbserver-nb-0
+np_oso_nb_container: ovsdbserver-nb

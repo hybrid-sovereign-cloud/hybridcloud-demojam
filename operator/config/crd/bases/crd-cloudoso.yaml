@@ -88,6 +88,21 @@ spec:
                 vrfId:
                   type: string
                   description: VRF identifier when enableVRF is true
+                managementClusterKubeconfigRef:
+                  type: string
+                  description: >-
+                    Vault KV path (key kubeconfig) for the RHOSO management OpenShift cluster
+                    (the cluster running the openstack-operator, NetConfig and
+                    OpenStackDataPlaneNodeSet). Used by EDA for fabric site-gateway landing
+                    and EDPM EVPN configuration (e.g. oso/oso1/mgmt-kubeconfig).
+                dataplaneNodeSetRef:
+                  type: string
+                  description: >-
+                    OpenStackDataPlaneNodeSet (namespace openstack) whose computes join the
+                    EVPN fabric (e.g. openstack-compute01).
+                netConfigRef:
+                  type: string
+                  description: NetConfig (namespace openstack) that receives the `fabric` network (e.g. openstacknetconfig)
             status:
               description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
               type: object

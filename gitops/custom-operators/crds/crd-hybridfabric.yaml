@@ -47,6 +47,10 @@ spec:
                   maximum: 4294967295
                 routeReflectors:
                   type: array
+                  description: >-
+                    DEPRECATED. Legacy hostNetwork FRR hub route-reflector pods. Superseded by
+                    spec.borderGateway (BGW VM is the route reflector). Only honoured when set;
+                    leave empty for new fabrics.
                   items:
                     type: object
                     required: [name, address]
@@ -74,14 +78,21 @@ spec:
                 ipam:
                   type: object
                   description: >-
-                    Address pools for clusters joining this fabric. Allocations are
-                    recorded on PlatformOpenshift.status.networking and in a ledger
-                    ConfigMap. Prevents duplicate HostedCluster defaults (e.g. every
-                    HCP using 10.132.0.0/14) from colliding on the EVPN fabric.
+                    Fabric address management (design/fabric.md §16). Fabric-wide unique:
+                    VNI/RT (numbering ledger), the underlay (machineNetworkPool) and
+                    BGW/gateway addresses. Cluster pod/service CIDRs are never advertised
+                    into the fabric; they only must not overlap the hub's (HyperShift on
+                    KubeVirt) and, with denyOverlappingClusterCidrs, other clusters'.
+                    Overlay (HybridNetwork) prefixes are unique per HybridNetwork only.
+                    Greenfield: pick hub and cluster pod/service ranges from CG-NAT
+                    100.64.0.0/10 so tenants can use all of RFC1918 for overlays.
                   properties:
                     clusterNetworkPool:
                       type: object
-                      description: Pod/cluster CIDR superspace carved per OpenShift cluster
+                      description: >-
+                        Optional. Default pod CIDR space for NEW clusters joined with
+                        allocateFromFabric (e.g. 100.64.0.0/11); not a uniqueness pool. Clusters
+                        outside it are kept and flagged LegacyClusterCidrs.
                       required: [cidr, blockPrefixLength]
                       properties:
                         cidr:
@@ -95,7 +106,9 @@ spec:
                           default: 14
                     serviceNetworkPool:
                       type: object
-                      description: Service CIDR superspace carved per OpenShift cluster
+                      description: >-
+                        Optional. Default service CIDR space for NEW clusters joined with
+                        allocateFromFabric (e.g. 100.96.0.0/11); not a uniqueness pool.
                       required: [cidr, blockPrefixLength]
                       properties:
                         cidr:
@@ -108,7 +121,9 @@ spec:
                           default: 16
                     machineNetworkPool:
                       type: object
-                      description: Node/machine underlay CIDR superspace (VTEP-adjacent)
+                      description: >-
+                        Hub underlay (VTEP) space, fabric-wide unique; per-cluster machine
+                        blocks never overlap each other.
                       required: [cidr, blockPrefixLength]
                       properties:
                         cidr:
@@ -122,29 +137,106 @@ spec:
                     hybridOverlayReserved:
                       type: array
                       description: >-
-                        CIDRs reserved for HybridNetwork / NetworkPlacement prefixes
-                        on this fabric; must not be allocated as cluster/service/machine.
+                        DEPRECATED / advisory only. Not enforced: overlay prefixes are unique
+                        per HybridNetwork (NetworkPlacement checks siblings of the same
+                        network and the target cluster's own pod/service CIDRs).
                       items:
                         type: string
                     denyOverlappingClusterCidrs:
                       type: boolean
                       default: true
-                      description: Reject PlatformOpenshift join when proposed CIDRs overlap any member
+                      description: >-
+                        Reject a PlatformOpenshift whose pod/service CIDRs overlap another
+                        member cluster's (the hub's CIDRs are always checked).
                 borderGateway:
                   type: object
+                  description: >-
+                    Hub border gateway (BGW) KubeVirt VM: iBGP route reflector for the fabric
+                    (l2vpn evpn + ipv4 unicast, next-hop unchanged), DHCP server and IP router
+                    for the hub underlay L2, WireGuard-over-WSS endpoint for remote site
+                    gateways (design/fabric-bgw-plan.md §4).
                   properties:
                     name:
                       type: string
+                      description: VM / Service / Route base name (default fabric-bgw-<fabric minus -fabric suffix>)
                     loopback:
                       type: string
+                      description: BGP router-id / cluster-id and the address every spoke peers with (e.g. 10.255.10.10)
                     vaultCredentialRef:
                       type: string
+                      description: >-
+                        Vault KV path with keys wgPrivateKey, wgPublicKey (and optional
+                        sshPublicKey for debug access). Never stored in Git.
+                    underlay:
+                      type: object
+                      description: Hub underlay L2 (OVN-K layer2 NAD, no IPAM) shared by the BGW and HCP workers
+                      properties:
+                        nadName:
+                          type: string
+                          default: fabric-underlay
+                          description: >-
+                            NAD name and OVN-K network name. Must be unique per fabric; the same
+                            NAD is also rendered into every joined HostedCluster VM namespace.
+                        cidr:
+                          type: string
+                          description: Underlay CIDR (default spec.ipam.machineNetworkPool.cidr, e.g. 192.168.64.0/18)
+                        address:
+                          type: string
+                          description: BGW eth1 address without prefix length (default first host of cidr)
+                        dhcpRange:
+                          type: object
+                          description: dnsmasq dynamic range served to HCP workers on the underlay
+                          properties:
+                            start:
+                              type: string
+                            end:
+                              type: string
+                            leaseTime:
+                              type: string
+                              default: 10m
+                        mtu:
+                          type: integer
+                          default: 1400
+                    wireguard:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                          default: 10.254.254.1/24
+                          description: BGW wg0 address with prefix length
+                        listenPort:
+                          type: integer
+                          default: 51820
+                        mtu:
+                          type: integer
+                          default: 1380
+                    ingressHost:
+                      type: string
+                      description: >-
+                        Passthrough Route host for the wstunnel server. Default
+                        <name>.<hub ingress domain>.
+                    vmSize:
+                      type: object
+                      properties:
+                        cpu:
+                          type: integer
+                          default: 2
+                        memory:
+                          type: string
+                          default: 4Gi
+                    image:
+                      type: string
+                      default: docker://quay.io/containerdisks/centos-stream:9
+                      description: Root disk registry import URL (CentOS Stream 9 / RHEL 9 containerdisk)
+                    storageClass:
+                      type: string
+                      description: StorageClass for the BGW root DataVolume (default role value)
                 transportDefaults:
                   type: object
                   properties:
                     mtu:
                       type: integer
-                      default: 9000
+                      default: 1442
                     innerMssClamp:
                       type: integer
                       default: 1360
@@ -174,6 +266,16 @@ spec:
                   type: boolean
                 borderBgwReady:
                   type: boolean
+                  description: True when the BGW VM is Ready (VMI Ready + guest agent connected) or no borderGateway is configured
+                bgwEndpoint:
+                  type: string
+                  description: wss host:port remote site gateways dial (passthrough Route)
+                bgwPeerCount:
+                  type: integer
+                  description: Number of WireGuard peers (remote site gateways) rendered on the BGW
+                bgwAddress:
+                  type: string
+                  description: BGW underlay address (DHCP server / next hop for spoke routes)
                 hubRrReady:
                   type: boolean
                   description: >-

@@ -179,7 +179,13 @@
             | default(pfj_fabric_cr.spec.transportDefaults.defaultTunnelType | default('none'), true)
           }}
         pfj_cloud_type: "{{ 'openshift' if platform_type == 'hosted' else 'openstack' }}"
-        pfj_spoke_asn: "{{ 65100 + ((platformopenshift_cr_name | length) * 7 % 900) }}"
+        # Border gateway fabrics are iBGP in the fabric ASN (per-spoke ASNs retired).
+        pfj_spoke_asn: >-
+          {{
+            (pfj_fabric_cr.spec.domainAsn | int)
+            if ((pfj_fabric_cr.spec.borderGateway | default({})).loopback | default('')) | length > 0
+            else (65100 + ((platformopenshift_cr_name | length) * 7 % 900))
+          }}
 
     # Mode B (manageGatewayAndLink=false): admin-created CloudGateway/TransportLink.
     # Discover by (1) label hybridsovereign.redhat/platformopenshift, else

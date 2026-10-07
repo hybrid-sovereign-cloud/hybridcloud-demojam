@@ -1,14 +1,22 @@
-# HybridFabrics — design/fabric.md §3–§6 / §11 (HCP spokes only; no RHOSO/OSO).
+# Platform fabric — ONE HybridFabric per hub, owned by the platform
+# (design/fabric.md §1 tenancy model, design/fabric-bgw-plan.md §12).
+#   Platform owns: ASN (iBGP everywhere), the border gateway (BGW) VM, the hub
+#   underlay L2, the VNI pool and the cluster IPAM pools.
+#   Tenants (Entities) own HybridNetworks = VRFs (VNI + RT 65010:<vni>) on this
+#   fabric. Tenants share the BGW and the site tunnels; isolation is by RT
+#   (spokes import only their VRF's RT; the BGW reflects only RTs allocated in
+#   this fabric's numbering ledger). Overlay prefixes may repeat across VRFs.
+# Vault (KV hybridsovereign/): fabric/platform-fabric/bgw holds wgPrivateKey /
+# wgPublicKey (+ optional sshPublicKey); EDA generates the pair when missing.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
 metadata:
-  name: acme-fabric
+  name: platform-fabric
   namespace: sovereign-cloud
   annotations:
     argocd.argoproj.io/sync-wave: "20"
   labels:
-    hybridsovereign.redhat/entity: acme-corp
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
@@ -16,69 +24,56 @@ spec:
   domainAsn: 65010
   entityRefs:
     - name: acme-corp
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
+    - name: chad
+  borderGateway:
+    name: fabric-bgw
+    loopback: 10.255.10.10
+    vaultCredentialRef: fabric/platform-fabric/bgw
+    # ingressHost omitted on purpose: EDA derives fabric-bgw.<hub ingress domain>
+    # (= fabric-bgw.apps.<hub>) from ingresses.config.openshift.io/cluster.
+    underlay:
+      nadName: fabric-underlay
+      cidr: 192.168.64.0/18
+      address: 192.168.64.1
+      dhcpRange:
+        start: 192.168.64.100
+        end: 192.168.127.250
+        leaseTime: 10m
+      mtu: 1400
+    wireguard:
+      address: 10.254.254.1/24
+      listenPort: 51820
+    vmSize:
+      cpu: 2
+      memory: 4Gi
+    image: docker://quay.io/containerdisks/centos-stream:9
+  # Covers the legacy acme (51000-51127) and chad (52000-52127) pools so
+  # existing VNIs (acme-core 51001, payments-vpc 51000, chad-app 52000) are
+  # carried over unchanged by the ledger migration in hybridfabric_provision.
   vniPool:
     start: 51000
-    end: 51127
+    end: 52127
+  # Fabric-wide unique: VNI/RT (ledger), the underlay (machineNetworkPool) and
+  # BGW/gateway addresses. Overlay (HybridNetwork) prefixes are unique per
+  # HybridNetwork only, so tenants may reuse any RFC1918 prefix in their own VRF.
+  # Cluster pod/service CIDRs are never advertised; they must only avoid the hub's
+  # and (denyOverlappingClusterCidrs) each other. Greenfield assumption: hub and
+  # hosted-cluster pod/service ranges come from CG-NAT 100.64.0.0/10. The lab's
+  # existing clusters (hub 10.232/14 + 172.231/16; HCPs 10.128-10.151/14,
+  # 172.30-172.33/16) predate this and are kept as LegacyClusterCidrs.
   ipam:
+    # Defaults for NEW clusters joined with allocateFromFabric (not uniqueness pools).
     clusterNetworkPool:
-      cidr: 10.128.0.0/12
+      cidr: 100.64.0.0/11
       blockPrefixLength: 14
     serviceNetworkPool:
-      cidr: 172.30.0.0/15
+      cidr: 100.96.0.0/11
       blockPrefixLength: 16
     machineNetworkPool:
       cidr: 192.168.64.0/18
       blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.110.0.0/16
     denyOverlappingClusterCidrs: true
   transportDefaults:
-    mtu: 9000
+    mtu: 1442
     innerMssClamp: 1360
-    defaultTunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: HybridFabric
-metadata:
-  name: chad-fabric
-  namespace: sovereign-cloud
-  annotations:
-    argocd.argoproj.io/sync-wave: "20"
-  labels:
-    hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/platform-fabric: "true"
-spec:
-  enabled: true
-  domainAsn: 65020
-  entityRefs:
-    - name: chad
-  routeReflectors:
-    - name: central-rr-a
-      address: 10.255.10.1
-    - name: central-rr-b
-      address: 10.255.10.2
-  vniPool:
-    start: 52000
-    end: 52127
-  ipam:
-    clusterNetworkPool:
-      cidr: 10.144.0.0/12
-      blockPrefixLength: 14
-    serviceNetworkPool:
-      cidr: 172.32.0.0/15
-      blockPrefixLength: 16
-    machineNetworkPool:
-      cidr: 192.168.128.0/18
-      blockPrefixLength: 24
-    hybridOverlayReserved:
-      - 10.120.0.0/16
-    denyOverlappingClusterCidrs: true
-  transportDefaults:
-    mtu: 9000
     defaultTunnelType: none

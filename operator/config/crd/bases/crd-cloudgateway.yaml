@@ -53,9 +53,71 @@ spec:
                   properties:
                     type:
                       type: string
-                      enum: [wireguard, ipsec, macsec, sshtunnel, none]
+                      description: >-
+                        none = native underlay peering to the fabric BGW (HCP spokes on the hub
+                        underlay L2). wireguard = site gateway VM tunnels to the BGW over
+                        WireGuard inside wstunnel (TLS via the hub ingress).
+                      enum: [wireguard, ipsec, macsec, none]
                     vaultPeerConfigRef:
                       type: string
+                      description: >-
+                        Vault KV path holding this gateway's WireGuard key pair
+                        (wgPrivateKey, wgPublicKey; optional sshPublicKey). Read by the
+                        BGW (public key) and by the site gateway VM (private key).
+                siteUnderlay:
+                  type: object
+                  description: >-
+                    cloud=openstack only. Site underlay L2 between the gateway VM (on the RHOSO
+                    management OpenShift cluster) and the EDPM computes' fabric NIC.
+                  properties:
+                    interface:
+                      type: string
+                      description: Spare NIC on the management-cluster nodes enslaved to br-fabric (e.g. enp7s0)
+                    computeInterface:
+                      type: string
+                      description: EDPM compute NIC on the same L2 (e.g. eth5); becomes the EVPN VTEP / FRR source
+                    cidr:
+                      type: string
+                      description: Site underlay CIDR (e.g. 192.168.80.0/24); NetConfig network `fabric`
+                    gatewayAddress:
+                      type: string
+                      description: Gateway VM eth1 address without prefix length (default first host of cidr)
+                    mtu:
+                      type: integer
+                      default: 1442
+                    macNatShim:
+                      type: object
+                      description: >-
+                        LAB ONLY. The RHDP hypervisor drops frames whose source MAC is not the
+                        node NIC's own MAC, so a bridged VM cannot talk on the spare NIC. When
+                        enabled, a privileged DaemonSet runs on every node, reads the local NIC
+                        MAC at runtime (/sys/class/net/<interface>/address in the host netns)
+                        and applies an nft bridge table rewriting vmMac <-> node MAC on that
+                        NIC. Harmless on nodes not hosting the gateway VM, so the VM is not
+                        pinned and no per-node values are needed. Physical deployments leave
+                        this off.
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        vmMac:
+                          type: string
+                          default: "02:fa:b0:50:00:01"
+                          description: Gateway VM fabric NIC MAC (also used as the VM interface macAddress)
+                        interface:
+                          type: string
+                          description: Node NIC to translate on (default siteUnderlay.interface)
+                wireguard:
+                  type: object
+                  properties:
+                    address:
+                      type: string
+                      description: Gateway wg0 address with prefix length (e.g. 10.254.254.12/32)
+                managementClusterKubeconfigRef:
+                  type: string
+                  description: >-
+                    Vault KV path (key kubeconfig) for the RHOSO management OpenShift cluster.
+                    Defaults to the referenced CloudOSO.spec.managementClusterKubeconfigRef.
                 awsAccountId:
                   type: string
                 openstackCloudOSORef:

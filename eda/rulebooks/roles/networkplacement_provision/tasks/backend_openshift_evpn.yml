@@ -5,7 +5,8 @@
 #
 # Expected vars: np_spec, np_backend_name, np_vni, np_canonical_rt,
 #                np_domain_asn, networkplacement_cr_name/namespace,
-#                hn_fabric_cr (HybridFabric detail; used for RR addresses)
+#                hn_fabric_cr (HybridFabric detail; borderGateway.loopback is the
+#                single BGP neighbor; legacy routeReflectors[] only when no BGW)
 #
 # Sets facts:
 #   np_backend_applied, np_backend_ready, np_backend_message
@@ -147,8 +148,52 @@
             np_backend_fail_reason: EvpnPrepPending
             np_backend_message: "{{ spoke_evpn_prep_message | default('EvpnPrepPending') }}"
 
-        - name: Reset FRR neighbor accumulator
+        # design/fabric-bgw-plan.md §5 — one iBGP neighbor: the fabric border
+        # gateway loopback (route reflector, next-hop unchanged). No bgp router-id,
+        # update-source or allowas-in: those are node-specific / not needed, FRR
+        # sources the session from eth1 (hub underlay, DHCP from the BGW).
+        - name: Set BGW peering facts
           when: spoke_evpn_prep_ready | default(false) | bool
+          ansible.builtin.set_fact:
+            np_bgw_loopback: "{{ (hn_fabric_cr.spec.borderGateway | default({})).loopback | default('') }}"
+            np_fabric_asn: "{{ hn_fabric_cr.spec.domainAsn | default(np_domain_asn) | int }}"
+
+        - name: Build FRR neighbor + rawConfig for the border gateway
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - np_bgw_loopback | length > 0
+          # Do NOT set ebgpMultiHop on the CRD neighbor: OVN-generated FRRConfigurations
+          # copy neighbors without it and the merge webhook rejects the conflict.
+          # remote-as MUST precede ebgp-multihop in rawConfig.
+          ansible.builtin.set_fact:
+            # Single expression keeps asn an integer in the to_json manifest below.
+            np_frr_neighbors: >-
+              {{
+                [{
+                  'address': np_bgw_loopback,
+                  'asn': (np_fabric_asn | int),
+                  'disableMP': false,
+                  'toAdvertise': {'allowed': {'mode': 'all'}},
+                  'toReceive': {'allowed': {'mode': 'all'}}
+                }]
+              }}
+            np_frr_raw_config: |
+              router bgp {{ np_fabric_asn | int }}
+               neighbor {{ np_bgw_loopback }} remote-as {{ np_fabric_asn | int }}
+               neighbor {{ np_bgw_loopback }} ebgp-multihop 32
+               address-family l2vpn evpn
+                neighbor {{ np_bgw_loopback }} activate
+               exit-address-family
+               address-family ipv4 unicast
+                neighbor {{ np_bgw_loopback }} activate
+               exit-address-family
+              exit
+
+        # ---- DEPRECATED legacy path: hub RR pods (spec.routeReflectors, no BGW) ----
+        - name: Reset FRR neighbor accumulator
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           ansible.builtin.set_fact:
             np_frr_neighbors: []
 
@@ -156,7 +201,9 @@
         # same routeReflector address (one BGP instance per IP:179). Spoke neighbor
         # ASN must match that hub local ASN — not necessarily this fabric's domainAsn.
         - name: List HybridFabrics for shared hub ASN resolution
-          when: spoke_evpn_prep_ready | default(false) | bool
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           kubernetes.core.k8s_info:
             host: "{{ services_api_host }}"
             api_key: "{{ services_bearer_token }}"
@@ -168,7 +215,9 @@
           failed_when: false
 
         - name: Resolve hub RR local ASN for spoke FRR neighbors
-          when: spoke_evpn_prep_ready | default(false) | bool
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           ansible.builtin.shell: |
             python3 <<'PY'
             import json, os
@@ -197,7 +246,9 @@
           failed_when: false
 
         - name: Set hub local ASN fact
-          when: spoke_evpn_prep_ready | default(false) | bool
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           ansible.builtin.set_fact:
             np_hub_rr_asn: >-
               {{
@@ -207,7 +258,9 @@
               }}
 
         - name: Build FRR neighbor list from fabric route reflectors
-          when: spoke_evpn_prep_ready | default(false) | bool
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           # Do NOT set ebgpMultiHop on the CRD field: OVN-generated FRRConfigurations
           # copy neighbors without that field and the MetalLB merge webhook rejects the conflict.
           # Inject ebgp-multihop via rawConfig instead (see Apply FRRConfiguration below).
@@ -227,7 +280,9 @@
             label: "{{ item.name | default(item.address) }}"
 
         - name: Build spoke FRR rawConfig for ebgp-multihop + allowas-in
-          when: spoke_evpn_prep_ready | default(false) | bool
+          when:
+            - spoke_evpn_prep_ready | default(false) | bool
+            - (np_bgw_loopback | default('')) | length == 0
           # remote-as MUST precede ebgp-multihop/allowas-in when rawConfig is merged
           # before the CRD neighbor block (FRR: "Specify remote-as ... first").
           ansible.builtin.set_fact:
@@ -268,17 +323,21 @@
               }}
           loop: "{{ np_spec.prefixes | default([]) }}"
 
-        - name: Resolve Unmanaged VTEP CIDR (fabric vtepCidr or spoke underlay default)
+        - name: Resolve Unmanaged VTEP CIDR (hub underlay = fabric machine network)
           when: spoke_evpn_prep_ready | default(false) | bool
-          # Do NOT use PlatformOpenshift machineNetwork — that is the Hypershift node CIDR
-          # (e.g. 192.168.64.0/24), not the EVPN VTEP underlay. Unmanaged VTEP requires
-          # on-node IPs in this CIDR (dummy iface / annotation k8s.ovn.org/vteps).
+          # HCP workers get eth1 on the fabric underlay by DHCP from the BGW, so the
+          # VTEP CIDR is the underlay (machineNetworkPool / borderGateway.underlay.cidr).
+          # Legacy (no BGW): dummy evpn-vtep0 addresses in spec.vtepCidr / 10.255.11.0/24.
           ansible.builtin.set_fact:
             np_vtep_name: "{{ np_spec.network }}-evpn-vtep"
             np_vtep_cidr: >-
               {{
-                hn_fabric_cr.spec.vtepCidr
-                | default('10.255.11.0/24', true)
+                (
+                  ((hn_fabric_cr.spec.borderGateway | default({})).underlay | default({})).cidr
+                  | default(((hn_fabric_cr.spec.ipam | default({})).machineNetworkPool | default({})).cidr | default(''), true)
+                )
+                if (np_bgw_loopback | default('')) | length > 0
+                else (hn_fabric_cr.spec.vtepCidr | default('10.255.11.0/24', true))
               }}
 
         - name: Apply Unmanaged VTEP on the spoke (design §8.5.2 / OCP 4.22)
@@ -328,7 +387,7 @@
                   "bgp": {
                     "routers": [
                       {
-                        "asn": {{ np_domain_asn | int }},
+                        "asn": {{ (np_fabric_asn | default(np_domain_asn)) | int }},
                         "neighbors": {{ np_frr_neighbors | to_json }}
                       }
                     ]
@@ -336,7 +395,7 @@
                 }
               }
 
-        - name: Apply FRRConfiguration on the spoke (BGP neighbors = fabric RRs)
+        - name: Apply FRRConfiguration on the spoke (BGP neighbor = fabric BGW loopback)
           when: spoke_evpn_prep_ready | default(false) | bool
           kubernetes.core.k8s:
             kubeconfig: "/tmp/np-{{ networkplacement_cr_name }}-spoke-kubeconfig"

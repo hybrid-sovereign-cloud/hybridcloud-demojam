@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ bgw_name }}-wss"
+  namespace: "{{ bgw_namespace }}"
+  labels:
+    app: "{{ bgw_name }}"
+    hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+spec:
+  selector:
+    app: "{{ bgw_name }}"
+  ports:
+  - name: wss
+    port: 443
+    targetPort: {{ bgw_wss_port | int }}
+    protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "{{ bgw_name }}"
+  namespace: "{{ bgw_namespace }}"
+  labels:
+    app: "{{ bgw_name }}"
+    hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+spec:
+  host: "{{ bgw_ingress_host }}"
+  to:
+    kind: Service
+    name: "{{ bgw_name }}-wss"
+  port:
+    targetPort: wss
+  tls:
+    # wstunnel terminates TLS inside the VM.
+    termination: passthrough
+    insecureEdgeTerminationPolicy: None

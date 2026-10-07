@@ -1,0 +1,13 @@
+# fabric underlay DHCP (no DNS) — rendered by EDA hybridfabric_provision
+port=0
+interface=eth1
+bind-interfaces
+except-interface=lo
+dhcp-authoritative
+dhcp-range={{ bgw_dhcp_start }},{{ bgw_dhcp_end }},{{ bgw_underlay_netmask }},{{ bgw_dhcp_lease }}
+dhcp-option=3
+dhcp-option=6
+dhcp-option=121,{{ bgw_loopback }}/32,{{ bgw_underlay_address }}{% for p in bgw_peers %},{{ p.siteCidr }},{{ bgw_underlay_address }}{% endfor %}
+
+dhcp-option=option:mtu,{{ bgw_underlay_mtu }}
+log-dhcp

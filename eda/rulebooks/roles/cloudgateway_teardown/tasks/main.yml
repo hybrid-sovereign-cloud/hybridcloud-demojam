@@ -8,9 +8,27 @@
     - name: Resolve services cluster API connection from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
 
-    - name: Stub debug teardown for CloudGateway
-      ansible.builtin.debug:
-        msg: "Stub teardown CloudGateway/{{ cloudgateway_cr_name }}"
+    - name: Read CloudGateway CR
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudGateway
+        name: "{{ cloudgateway_cr_name }}"
+        namespace: "{{ cloudgateway_cr_namespace }}"
+      register: cgwt_lookup
+
+    - name: Set CloudGateway spec fact
+      ansible.builtin.set_fact:
+        cgwt_spec: "{{ (cgwt_lookup.resources | default([]) + [{}])[0].spec | default({}) }}"
+
+    - name: Remove RHOSO site gateway (cloud=openstack, transport wireguard)
+      when:
+        - (cgwt_spec.cloud | default('')) == 'openstack'
+        - (cgwt_spec.transport.type | default('')) == 'wireguard'
+        - (cgwt_spec.openstackCloudOSORef | default('')) | length > 0
+      ansible.builtin.include_tasks: remove_site_gateway.yml
 
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -23,7 +41,7 @@
           status: ready
           ready: true
           deletionComplete: true
-          message: "Stub deleted by EDA hybridvpc"
+          message: "CloudGateway teardown complete (site gateway removed when cloud=openstack/wireguard; EDPM left as-is)."
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:
@@ -37,10 +55,10 @@
         cr_status_body:
           status: failed
           ready: false
-          message: "{{ ansible_failed_result.msg | default('EDA stub teardown failed') }}"
+          message: "{{ ansible_failed_result.msg | default('EDA teardown failed') }}"
       ignore_errors: true
       when: services_api_host is defined
 
     - name: Re-raise
       ansible.builtin.fail:
-        msg: "CloudGateway teardown stub failed"
+        msg: "CloudGateway teardown failed"

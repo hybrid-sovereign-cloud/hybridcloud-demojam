@@ -109,9 +109,21 @@
         - (cgw_entity | length) > 0
         - cgw_entity not in cgw_fabric_entity_names
 
-    - name: Set route reflector peer count fact
+    # BGW fabrics: every spoke peers with the single border gateway loopback.
+    # Legacy fabrics: one peer per spec.routeReflectors[] entry.
+    - name: Set fabric peering facts (border gateway or legacy RRs)
       ansible.builtin.set_fact:
-        cgw_peer_count: "{{ cgw_fabric.spec.routeReflectors | default([]) | length }}"
+        cgw_bgw_loopback: "{{ (cgw_fabric.spec.borderGateway | default({})).loopback | default('') }}"
+        cgw_rr_addrs: >-
+          {{
+            cgw_fabric.spec.routeReflectors | default([])
+            | map(attribute='address') | select('string') | list
+          }}
+
+    - name: Set fabric peer list and count
+      ansible.builtin.set_fact:
+        cgw_fabric_peers: "{{ [cgw_bgw_loopback] if (cgw_bgw_loopback | length > 0) else cgw_rr_addrs }}"
+        cgw_peer_count: "{{ 1 if (cgw_bgw_loopback | length > 0) else (cgw_rr_addrs | length) }}"
 
     # ---------------------------------------------------------------
     # AWS: no EVPN fabric landing (design §8.2 / §15.0)
@@ -219,28 +231,44 @@
             - name: Probe RHOSO FR6 native OVN BGP-EVPN support
               ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
 
-        - name: Require spoke domainAsn for OpenStack landing (design §10.3.2)
-          when: (cloudgateway_spec.domainAsn | default(0) | int) == 0
+        # Legacy RR fabrics only: with a border gateway everything is iBGP in the
+        # fabric ASN (per-spoke ASNs retired, design §11).
+        - name: Require spoke domainAsn for OpenStack landing (legacy RR fabrics)
+          when:
+            - (cloudgateway_spec.domainAsn | default(0) | int) == 0
+            - cgw_bgw_loopback | length == 0
           ansible.builtin.fail:
             msg: >-
               CloudGateway {{ cloudgateway_cr_name }} cloud=openstack requires
               spec.domainAsn (spoke ASN) for fabric peering / FR6 OVN BGP-EVPN.
 
-        - name: Collect fabric RR peers for landing readiness
-          ansible.builtin.set_fact:
-            cgw_rr_addrs: >-
-              {{
-                cgw_fabric.spec.routeReflectors | default([])
-                | map(attribute='address') | select('string') | list
-              }}
-
-        - name: Fail closed when fabric has no routeReflectors for OSO landing
-          when: (cgw_rr_addrs | default([]) | length) == 0
+        - name: Fail closed when fabric has neither a border gateway nor routeReflectors
+          when: (cgw_fabric_peers | default([]) | length) == 0
           ansible.builtin.fail:
             msg: >-
               CloudGateway {{ cloudgateway_cr_name }}: HybridFabric
-              {{ cloudgateway_spec.fabricRef }} has empty spec.routeReflectors[];
-              cannot peer FRR l2vpn evpn (design/fabric.md §10.3.2).
+              {{ cloudgateway_spec.fabricRef }} has no spec.borderGateway.loopback (and no
+              legacy routeReflectors[]); EDPM FRR has nothing to peer with.
+
+        # design/fabric-bgw-plan.md §6 — site gateway VM + EDPM EVPN landing on
+        # the RHOSO management cluster. Must complete before NetworkPlacement
+        # creates the EVPN router (HA chassis group needs the gateway chassis).
+        - name: Land the site gateway and EDPM EVPN (transport wireguard)
+          when: (cloudgateway_spec.transport.type | default('none')) == 'wireguard'
+          block:
+            - name: Resolve management cluster kubeconfig
+              ansible.builtin.include_tasks: openstack_mgmt_kubeconfig.yml
+
+            - name: Site gateway VM, br-fabric, NAD, MAC-NAT shim
+              ansible.builtin.include_tasks: openstack_site_gateway.yml
+
+            - name: EDPM NetConfig / NodeSet / deployment
+              ansible.builtin.include_tasks: openstack_edpm_evpn.yml
+          always:
+            - name: Remove management cluster kubeconfig
+              ansible.builtin.file:
+                path: "/tmp/cgw-{{ cloudgateway_cr_name }}-mgmt-kubeconfig"
+                state: absent
 
         # Lab soft-realize: RHOSO without Neutron FR6 EVPN still gets a Ready
         # CloudGateway so NetworkPlacement can create the tenant Neutron network.
@@ -249,11 +277,11 @@
           ansible.builtin.set_fact:
             cgw_landing_zone_ready: true
             cgw_transport_ready: true
-            cgw_peer_count: "{{ cgw_rr_addrs | default([]) | length }}"
+            cgw_peer_count: "{{ cgw_fabric_peers | default([]) | length }}"
             cgw_gateway_address: >-
               {{
-                cgw_cloudoso.status.apiVIP
-                | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true)
+                cgw_gateway_address
+                | default(cgw_cloudoso.status.apiVIP | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true), true)
               }}
             cloudgateway_fail_reason: "{{ '' if (fr6_probe_available | default(false)) else 'Fr6EvpnDeferred' }}"
             cgw_message: >-
@@ -262,18 +290,18 @@
                   'OpenStack FR6 landing Ready on CloudOSO '
                   ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
                   ~ (fr6_probe_message | default(''))
-                  ~ '; spokeASN=' ~ cloudgateway_spec.domainAsn
-                  ~ ' RR peers=' ~ (cgw_rr_addrs | join(','))
-                  ~ ' (native OVN BGP-EVPN Type-5).'
+                  ~ '; fabric peers=' ~ (cgw_fabric_peers | join(','))
+                  ~ ' (native OVN BGP-EVPN Type-5). '
+                  ~ (cgw_site_gw_message | default('')) ~ ' ' ~ (cgw_edpm_message | default(''))
                 )
                 if (fr6_probe_available | default(false))
                 else (
                   'OpenStack landing Ready (EvpnDeferred) on CloudOSO '
                   ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
                   ~ (fr6_probe_message | default('FR6 EVPN unavailable'))
-                  ~ '; spokeASN=' ~ cloudgateway_spec.domainAsn
-                  ~ ' RR peers=' ~ (cgw_rr_addrs | join(','))
-                  ~ ' — Neutron network placement allowed; EVPN Type-5 deferred.'
+                  ~ '; fabric peers=' ~ (cgw_fabric_peers | join(','))
+                  ~ ' — Neutron network placement allowed; EVPN Type-5 deferred. '
+                  ~ (cgw_site_gw_message | default('')) ~ ' ' ~ (cgw_edpm_message | default(''))
                 )
               }}
 
@@ -283,15 +311,17 @@
     - name: Handle cloud=openshift landing zone
       when: cloudgateway_spec.cloud == 'openshift'
       block:
-        - name: Reuse existing gatewayAddress when already set (idempotent)
-          ansible.builtin.set_fact:
-            cgw_gateway_address: "{{ cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default('') }}"
-
-        - name: Derive placeholder peer IP from domainAsn when not yet set
-          when: (cgw_gateway_address | default('')) | length == 0
+        # HCP spokes peer natively over the hub underlay (eth1, DHCP from the BGW);
+        # the gateway address is the BGP peer: the border gateway loopback.
+        - name: Set gatewayAddress to the fabric BGP peer
           ansible.builtin.set_fact:
             cgw_gateway_address: >-
-              10.255.{{ (cloudgateway_spec.domainAsn | default(cgw_fabric.spec.domainAsn | default(0)) | int) % 250 }}.1
+              {{
+                cgw_bgw_loopback
+                if (cgw_bgw_loopback | length > 0)
+                else (cloudgateway_cr_lookup.resources[0].status.gatewayAddress
+                      | default('10.255.' ~ ((cloudgateway_spec.domainAsn | default(cgw_fabric.spec.domainAsn | default(0)) | int) % 250) ~ '.1', true))
+              }}
 
         - name: Set OpenShift landing zone facts
           ansible.builtin.set_fact:

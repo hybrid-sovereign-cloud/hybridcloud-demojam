@@ -1,0 +1,84 @@
+---
+# Ensure a WireGuard key pair exists at a Vault KV v2 path; generate and store
+# one when absent (blank environments need no manual key seeding).
+# Required var: wg_kv_path. Optional: wg_kv_generate (default true).
+# Uses env VAULT_ADDR / VAULT_TOKEN like vault_kv_read.yml.
+# Sets: wg_keypair = {wgPrivateKey, wgPublicKey, sshPublicKey, generated}
+# Secret values are never logged.
+
+- name: Validate Vault admin token is available on the job
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'VAULT_TOKEN') | length > 0
+    fail_msg: VAULT_TOKEN is not set. Attach sovereign-vault-admin-credential to the job template.
+
+- name: Read WireGuard key pair from Vault
+  ansible.builtin.uri:
+    url: >-
+      {{ lookup('env', 'VAULT_ADDR') | default('', true) }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ wg_kv_path }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+    validate_certs: false
+    status_code: [200, 404]
+  register: _wg_kv_get
+  no_log: true
+
+- name: Keep existing Vault data
+  ansible.builtin.set_fact:
+    _wg_kv_existing: "{{ (_wg_kv_get.json.data.data | default({})) if _wg_kv_get.status == 200 else {} }}"
+  no_log: true
+
+- name: Generate and store a key pair when missing
+  when:
+    - (_wg_kv_existing.wgPrivateKey | default('')) | length == 0
+    - wg_kv_generate | default(true) | bool
+  block:
+    - name: Generate X25519 key pair (WireGuard format)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 <<'PY'
+        import base64, json
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        k = X25519PrivateKey.generate()
+        priv = k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                               serialization.NoEncryption())
+        pub = k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        print(json.dumps({"wgPrivateKey": base64.b64encode(priv).decode(),
+                          "wgPublicKey": base64.b64encode(pub).decode()}))
+        PY
+      args:
+        executable: /bin/bash
+      register: _wg_gen
+      changed_when: true
+      no_log: true
+
+    - name: Write key pair to Vault (merged with existing fields)
+      ansible.builtin.uri:
+        url: >-
+          {{ lookup('env', 'VAULT_ADDR') | default('', true) }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ wg_kv_path }}
+        method: POST
+        headers:
+          X-Vault-Token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+        body_format: json
+        body:
+          data: "{{ _wg_kv_existing | combine(_wg_gen.stdout | from_json) }}"
+        validate_certs: false
+        status_code: [200, 204]
+      no_log: true
+
+    - name: Use generated key pair
+      ansible.builtin.set_fact:
+        _wg_kv_existing: "{{ _wg_kv_existing | combine(_wg_gen.stdout | from_json) }}"
+        _wg_kv_generated: true
+      no_log: true
+
+- name: Expose WireGuard key pair
+  ansible.builtin.set_fact:
+    wg_keypair:
+      wgPrivateKey: "{{ _wg_kv_existing.wgPrivateKey | default('') }}"
+      wgPublicKey: "{{ _wg_kv_existing.wgPublicKey | default('') }}"
+      sshPublicKey: "{{ _wg_kv_existing.sshPublicKey | default('') }}"
+      generated: "{{ _wg_kv_generated | default(false) }}"
+  no_log: true

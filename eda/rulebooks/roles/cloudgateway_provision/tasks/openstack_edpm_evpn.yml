@@ -1,0 +1,332 @@
+---
+# EDPM computes join the fabric (design/fabric-bgw-plan.md §6.2), all via CRs on
+# the RHOSO management cluster:
+#   NetConfig: network `fabric` (siteUnderlay.cidr, mtu, allocation .100-.150, subnet
+#     routes to the BGW loopback / hub underlay / WireGuard net via the gateway VM).
+#     Routes MUST be in NetConfig: the dataplane operator overwrites <net>_host_routes.
+#   NodeSet: nodes[].networks += fabric; ansibleVars for FRR (iBGP to the BGW
+#     loopback, l2vpn evpn) + neutron-ovn ovn-evpn + nftables; the computeInterface
+#     block in edpm_network_config_template; services += frr (after install-certs),
+#     neutron-ovn (after ovn). edpm_enable_chassis_gw=true is REQUIRED.
+#   OpenStackDataPlaneDeployment fabric-<gateway>-<fingerprint> with
+#     servicesOverride [install-certs, configure-network, frr, ovn, neutron-ovn].
+# Gotchas encoded here:
+#   * A NodeSet cannot be patched while one of its deployments is in progress
+#     (webhook): wait for foreign deployments, delete our own stale ones.
+#   * Re-running `ovn` alone clears the ovn-evpn-* OVS external_ids: neutron-ovn
+#     always runs right after ovn in the same deployment.
+#   * edpm_network_config_update is set true only for the fabric deployment and
+#     restored afterwards.
+#
+# Expected: cgw_mgmt_kubeconfig, cgw_cloudoso, cgw_fabric, facts from
+#           openstack_site_gateway.yml (cgw_su_*, bgw_*).
+# Sets: cgw_edpm_ready, cgw_edpm_message
+
+- name: Resolve dataplane refs from CloudOSO
+  ansible.builtin.set_fact:
+    cgw_nodeset_name: "{{ (cgw_cloudoso.spec | default({})).dataplaneNodeSetRef | default('') }}"
+    cgw_netconfig_name: "{{ (cgw_cloudoso.spec | default({})).netConfigRef | default('openstacknetconfig', true) }}"
+    cgw_edpm_workdir: "/tmp/cgw-{{ cloudgateway_cr_name }}-edpm"
+
+- name: Set nodeset-ref-missing failure reason before failing
+  when: cgw_nodeset_name | length == 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: DataplaneNodeSetRefMissing
+
+- name: Require CloudOSO.spec.dataplaneNodeSetRef
+  ansible.builtin.fail:
+    msg: "CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }} needs spec.dataplaneNodeSetRef for fabric EDPM landing"
+  when: cgw_nodeset_name | length == 0
+
+- name: Read NetConfig
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: network.openstack.org/v1beta1
+    kind: NetConfig
+    name: "{{ cgw_netconfig_name }}"
+    namespace: "{{ cgw_oso_namespace }}"
+  register: _cgw_netconfig
+  failed_when: _cgw_netconfig.resources | default([]) | length == 0
+
+- name: Read OpenStackDataPlaneNodeSet
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+    validate_certs: false
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ cgw_nodeset_name }}"
+    namespace: "{{ cgw_oso_namespace }}"
+  register: _cgw_nodeset
+  failed_when: _cgw_nodeset.resources | default([]) | length == 0
+
+- name: Prepare EDPM work directory
+  ansible.builtin.file:
+    path: "{{ cgw_edpm_workdir }}"
+    state: directory
+    mode: "0700"
+
+- name: Remove stale patch files
+  ansible.builtin.file:
+    path: "{{ cgw_edpm_workdir }}/{{ item }}"
+    state: absent
+  loop: [netconfig-patch.json, nodeset-patch.json]
+
+- name: Compute NetConfig / NodeSet fabric patches
+  ansible.builtin.command:
+    argv: [python3, "{{ role_path }}/files/edpm_fabric_patch.py", "{{ cgw_edpm_workdir }}"]
+  environment:
+    NETCONFIG: "{{ _cgw_netconfig.resources[0] | to_json }}"
+    NODESET: "{{ _cgw_nodeset.resources[0] | to_json }}"
+    PARAMS: >-
+      {{
+        {
+          'network': cgw_su_netconfig_network,
+          'cidr': cgw_su_cidr,
+          'mtu': cgw_su_mtu | int,
+          'gatewayAddress': cgw_su_gateway_address,
+          'computeInterface': cgw_su_compute_interface,
+          'asn': bgw_asn | int,
+          'bgwLoopback': bgw_loopback,
+          'routeDestinations': [bgw_loopback ~ '/32', bgw_underlay_cidr, bgw_wg_network],
+          'nftSources': [cgw_su_cidr, bgw_underlay_cidr, bgw_loopback ~ '/32', bgw_wg_network]
+        } | to_json
+      }}
+  register: _cgw_edpm_calc
+  changed_when: false
+
+- name: Set EDPM plan facts
+  ansible.builtin.set_fact:
+    cgw_edpm_plan: "{{ _cgw_edpm_calc.stdout | from_json }}"
+
+- name: Set EDPM deployment facts
+  ansible.builtin.set_fact:
+    cgw_edpm_deploy_name: "fabric-{{ cloudgateway_cr_name }}-{{ cgw_edpm_plan.fingerprint }}"
+    cgw_edpm_deployed_fp: >-
+      {{ (_cgw_nodeset.resources[0].metadata.annotations | default({})).get('hybridsovereign.redhat/fabric-deployed', '') }}
+
+- name: Decide whether an EDPM deployment is needed
+  ansible.builtin.set_fact:
+    cgw_edpm_needs_deploy: >-
+      {{
+        (cgw_edpm_plan.netconfig_changed | bool)
+        or (cgw_edpm_plan.nodeset_changed | bool)
+        or (cgw_edpm_deployed_fp != cgw_edpm_plan.fingerprint)
+      }}
+
+- name: Roll out fabric EDPM configuration
+  when: cgw_edpm_needs_deploy | bool
+  block:
+    - name: List dataplane deployments
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        namespace: "{{ cgw_oso_namespace }}"
+      register: _cgw_deps
+
+    - name: Reset unfinished deployment list
+      ansible.builtin.set_fact:
+        _cgw_unfinished: []
+
+    - name: Find unfinished deployments for this NodeSet (no Ready=True yet)
+      when:
+        - cgw_nodeset_name in (item.spec.nodeSets | default([]))
+        - >-
+          (item.status.conditions | default([])
+           | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) == 0
+      ansible.builtin.set_fact:
+        _cgw_unfinished: "{{ _cgw_unfinished + [item] }}"
+      loop: "{{ _cgw_deps.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    # Our own leftovers (failed / interrupted fabric runs) block NodeSet updates.
+    - name: Delete unfinished fabric deployments of this gateway
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: absent
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+        wait: true
+      loop: >-
+        {{ _cgw_unfinished | selectattr('metadata.name', 'match', '^fabric-' ~ cloudgateway_cr_name ~ '-') | list }}
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Wait for other unfinished deployments of this NodeSet
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+      register: _cgw_foreign
+      until: >-
+        (_cgw_foreign.resources | default([]) | length == 0)
+        or ((_cgw_foreign.resources[0].status.conditions | default([])
+             | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+        or ((_cgw_foreign.resources[0].status.conditions | default([])
+             | selectattr('type', 'equalto', 'Ready') | selectattr('reason', 'equalto', 'Error') | list | length) > 0)
+      retries: "{{ cgw_edpm_wait_retries | int }}"
+      delay: "{{ cgw_edpm_wait_delay | int }}"
+      loop: >-
+        {{ _cgw_unfinished | rejectattr('metadata.name', 'match', '^fabric-' ~ cloudgateway_cr_name ~ '-') | list }}
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Patch NetConfig (network fabric)
+      when: cgw_edpm_plan.netconfig_changed | bool
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: present
+        merge_type: merge
+        src: "{{ cgw_edpm_workdir }}/netconfig-patch.json"
+
+    - name: Patch NodeSet (fabric network, FRR / ovn-evpn vars, services)
+      when: cgw_edpm_plan.nodeset_changed | bool
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: present
+        merge_type: merge
+        src: "{{ cgw_edpm_workdir }}/nodeset-patch.json"
+
+    # os-net-config only re-applies an existing node's config when this is true.
+    - name: Enable edpm_network_config_update for the fabric deployment
+      when: not (cgw_edpm_plan.network_config_update | bool)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: patched
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ cgw_nodeset_name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+        definition:
+          spec:
+            nodeTemplate:
+              ansible:
+                ansibleVars:
+                  edpm_network_config_update: true
+
+    - name: Remove a previous attempt with the same name
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: absent
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        name: "{{ cgw_edpm_deploy_name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+        wait: true
+
+    - name: Create OpenStackDataPlaneDeployment (install-certs, configure-network, frr, ovn, neutron-ovn)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: dataplane.openstack.org/v1beta1
+          kind: OpenStackDataPlaneDeployment
+          metadata:
+            name: "{{ cgw_edpm_deploy_name }}"
+            namespace: "{{ cgw_oso_namespace }}"
+            labels:
+              hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+          spec:
+            nodeSets:
+              - "{{ cgw_nodeset_name }}"
+            servicesOverride: "{{ cgw_edpm_services_override }}"
+
+    - name: Wait for the fabric deployment to finish
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        name: "{{ cgw_edpm_deploy_name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+      register: _cgw_dep
+      until: >-
+        (_cgw_dep.resources | default([]) | length > 0)
+        and (
+          ((_cgw_dep.resources[0].status.conditions | default([])
+            | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+          or ((_cgw_dep.resources[0].status.conditions | default([])
+               | selectattr('type', 'equalto', 'Ready') | selectattr('reason', 'equalto', 'Error') | list | length) > 0)
+        )
+      retries: "{{ cgw_edpm_wait_retries | int }}"
+      delay: "{{ cgw_edpm_wait_delay | int }}"
+      failed_when: false
+
+    - name: Evaluate deployment result
+      ansible.builtin.set_fact:
+        cgw_edpm_ready: >-
+          {{
+            (_cgw_dep.resources | default([]) | length > 0)
+            and ((_cgw_dep.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+          }}
+
+    - name: Restore edpm_network_config_update
+      when: not (cgw_edpm_plan.network_config_update | bool)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: patched
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ cgw_nodeset_name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+        definition:
+          spec:
+            nodeTemplate:
+              ansible:
+                ansibleVars:
+                  edpm_network_config_update: false
+
+    - name: Set EDPM failure reason before failing
+      when: not (cgw_edpm_ready | bool)
+      ansible.builtin.set_fact:
+        cloudgateway_fail_reason: EdpmDeploymentFailed
+
+    - name: Fail when the fabric EDPM deployment failed
+      when: not (cgw_edpm_ready | bool)
+      ansible.builtin.fail:
+        msg: >-
+          OpenStackDataPlaneDeployment {{ cgw_edpm_deploy_name }} did not become Ready:
+          {{
+            ((_cgw_dep.resources | default([]) + [{}])[0].status.conditions | default([])
+             | selectattr('type', 'equalto', 'Ready') | map(attribute='message') | list | first)
+            | default('timed out / unknown', true)
+          }}
+
+    - name: Record deployed fabric fingerprint on the NodeSet
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cgw_mgmt_kubeconfig }}"
+        validate_certs: false
+        state: patched
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ cgw_nodeset_name }}"
+        namespace: "{{ cgw_oso_namespace }}"
+        definition:
+          metadata:
+            annotations:
+              hybridsovereign.redhat/fabric-deployed: "{{ cgw_edpm_plan.fingerprint }}"
+
+- name: Set EDPM result facts
+  ansible.builtin.set_fact:
+    cgw_edpm_ready: "{{ cgw_edpm_ready | default(true) }}"
+    cgw_edpm_message: >-
+      EDPM {{ cgw_nodeset_name }} on fabric ({{ cgw_su_compute_interface }}
+      {{ cgw_edpm_plan.node_ips.values() | list | join(',') }}, FRR AS{{ bgw_asn }} -> {{ bgw_loopback }},
+      ovn-evpn, chassis gw)
+      {{ ('deployed by ' ~ cgw_edpm_deploy_name) if (cgw_edpm_needs_deploy | bool) else 'already converged' }}

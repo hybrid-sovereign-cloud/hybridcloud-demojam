@@ -191,11 +191,21 @@
                     interface=cloud.get("interface", "public"),
                     verify=cloud.get("cacert", verify),
                 )
+                mtu = int(os.environ.get("NET_MTU") or 0)
                 net = conn.network.find_network(net_name)
                 created_net = False
+                updated_mtu = False
                 if net is None:
-                    net = conn.network.create_network(name=net_name)
+                    kw = {"name": net_name}
+                    if mtu:
+                        kw["mtu"] = mtu
+                    net = conn.network.create_network(**kw)
                     created_net = True
+                elif mtu and int(net.mtu or 0) != mtu:
+                    # Fabric MTU budget (design/fabric-bgw-plan.md §7): VXLAN over
+                    # WireGuard over wstunnel leaves 1330 for the inner frame.
+                    net = conn.network.update_network(net, mtu=mtu)
+                    updated_mtu = True
                 subnet_ids = []
                 created_subnets = False
                 for idx, cidr in enumerate(prefixes):
@@ -215,15 +225,25 @@
                     "subnet_ids": subnet_ids,
                     "created_net": created_net,
                     "created_subnets": created_subnets,
+                    "updated_mtu": updated_mtu,
+                    "mtu": int(net.mtu or 0),
                 }))
                 PY
-              environment: "{{ np_os_env | combine({'OS_CLOUD': np_os_cloud_name, 'PREFIXES_JSON': (np_spec.prefixes | default([]) | to_json)}) }}"
+              environment: >-
+                {{
+                  np_os_env | combine({
+                    'OS_CLOUD': np_os_cloud_name,
+                    'PREFIXES_JSON': (np_spec.prefixes | default([]) | to_json),
+                    'NET_MTU': (np_oso_network_mtu | string)
+                  })
+                }}
               register: np_sdk_net_raw
               changed_when: >-
                 (np_sdk_net_raw.rc | default(1) | int) == 0
                 and (
                   ((np_sdk_net_raw.stdout | default('{}') | from_json).created_net | default(false))
                   or ((np_sdk_net_raw.stdout | default('{}') | from_json).created_subnets | default(false))
+                  or ((np_sdk_net_raw.stdout | default('{}') | from_json).updated_mtu | default(false))
                 )
               failed_when: >-
                 (np_sdk_net_raw.rc | default(1) | int) != 0
@@ -365,6 +385,17 @@
                 ('re-attached' in (np_router_add_subnet.stdout | default('')))
                 or (np_router_add_subnet.rc | default(1) | int) == 0
               failed_when: (np_router_add_subnet.rc | default(1) | int) != 0
+
+            # The EVPN router only gets a populated HA_Chassis_Group if it was
+            # created after the EDPM chassis became gateway-enabled
+            # (edpm_enable_chassis_gw, CloudGateway landing). Verify on the RHOSO
+            # management cluster and recreate the router once when it is empty.
+            - name: Verify EVPN router HA chassis group (recreate router when empty)
+              when:
+                - fr6_probe_available | default(false)
+                - np_backend_fail_reason | default('') == ''
+                - (np_neutron_router_id | default('')) | length > 0
+              ansible.builtin.include_tasks: rhoso_evpn_ha_check.yml
 
             - name: Set backend-applied facts (FR6 EVPN router Ready)
               when:

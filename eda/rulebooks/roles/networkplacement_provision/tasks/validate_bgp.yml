@@ -4,8 +4,14 @@
 #   np_validated (bool)
 #   np_validated_message (string)
 #
-# Prefer hub RR `show bgp l2vpn evpn summary` when hub RR pods are reachable
-# on the services API. Fall back to TCP/179 connect from the EE to each RR.
+# Border gateway fabrics (spec.borderGateway.loopback): the BGW is a VM, so the
+# probe runs on the spoke side instead:
+#   OpenShift backends: `show bgp neighbor <loopback> json` in an frr-k8s pod
+#   on the spoke must report Established.
+#   CloudOSO: the EVPN router's HA chassis group must be populated
+#   (np_evpn_ha_chassis_ok from backend_rhoso_ovn_evpn.yml).
+# Legacy fabrics (routeReflectors[]): hub RR `show bgp l2vpn evpn summary`,
+# falling back to TCP/179 connect from the EE to each RR.
 
 - name: Collect fabric RR addresses for BGP probe
   ansible.builtin.set_fact:
@@ -18,6 +24,12 @@
         | map(attribute='address') | select('string') | list
       }}
     np_probe_vtep: "{{ np_backend_vtep | default('') }}"
+    np_probe_bgw: >-
+      {{
+        ((hn_fabric_cr | default({})).spec.borderGateway
+         | default((hn_all_fabrics_detail | default({})).spec.borderGateway | default({}), true)).loopback
+        | default('')
+      }}
 
 - name: Default validated=false before probe
   ansible.builtin.set_fact:
@@ -30,10 +42,75 @@
     np_validated: false
     np_validated_message: "Not validated: backend was not applied."
 
+- name: Probe BGW session from the OpenShift spoke (frr-k8s)
+  when:
+    - np_backend_applied | default(false) | bool
+    - np_probe_bgw | length > 0
+    - np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
+    - (np_spoke_kubeconfig_file | default('')) | length > 0
+  block:
+    - name: List frr-k8s pods on the spoke
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        api_version: v1
+        kind: Pod
+        namespace: openshift-frr-k8s
+        label_selectors:
+          - app=frr-k8s
+        field_selectors:
+          - status.phase=Running
+      register: np_spoke_frr_pods
+      failed_when: false
+
+    - name: Show BGW neighbor on the spoke
+      when: (np_spoke_frr_pods.resources | default([])) | length > 0
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ np_spoke_kubeconfig_file }}"
+        validate_certs: false
+        namespace: openshift-frr-k8s
+        pod: "{{ np_spoke_frr_pods.resources[0].metadata.name }}"
+        container: frr
+        command: vtysh -c 'show bgp neighbor {{ np_probe_bgw }} json'
+      register: np_spoke_bgw_nbr
+      failed_when: false
+
+    - name: Evaluate BGW session state
+      ansible.builtin.set_fact:
+        np_bgw_state: >-
+          {{
+            ((np_spoke_bgw_nbr.stdout | default('{}', true) | from_json).get(np_probe_bgw, {})).bgpState | default('unknown')
+            if (np_spoke_bgw_nbr.stdout | default('') | trim | regex_search('^\{'))
+            else 'unknown'
+          }}
+
+    - name: Set validation result from BGW session state
+      ansible.builtin.set_fact:
+        np_validated: "{{ np_bgw_state == 'Established' }}"
+        np_validated_message: >-
+          BGP probe {{ 'PASS' if np_bgw_state == 'Established' else 'FAIL' }}: spoke
+          {{ np_backend_name }} session to border gateway {{ np_probe_bgw }} is {{ np_bgw_state }}.
+
+- name: Validate CloudOSO placement against the BGW fabric
+  when:
+    - np_backend_applied | default(false) | bool
+    - np_probe_bgw | length > 0
+    - np_spec.backend.kind == 'CloudOSO'
+  ansible.builtin.set_fact:
+    np_validated: "{{ np_evpn_ha_chassis_ok | default(false) | bool }}"
+    np_validated_message: >-
+      {{
+        'EVPN router HA chassis group populated on ' ~ np_backend_name ~ ' (gateway chassis bound).'
+        if (np_evpn_ha_chassis_ok | default(false) | bool)
+        else 'Not validated: EVPN router HA chassis group empty or not checked ('
+             ~ (np_evpn_ha_chassis_message | default('no management cluster kubeconfig')) ~ ').'
+      }}
+
 - name: Probe hub RR EVPN neighbor state when RRs known
   when:
     - np_backend_applied | default(false) | bool
     - np_probe_rrs | length > 0
+    - np_probe_bgw | length == 0
   block:
     - name: List hub RR pods
       kubernetes.core.k8s_info:

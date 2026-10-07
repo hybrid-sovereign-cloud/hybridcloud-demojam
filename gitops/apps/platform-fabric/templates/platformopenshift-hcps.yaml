@@ -12,7 +12,7 @@ metadata:
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
-    hybridsovereign.redhat/fabric: acme-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
 spec:
   type: hosted
   hosted:
@@ -23,11 +23,11 @@ spec:
     workerMemory: 16Gi
   networking:
     allocateFromFabric: true
-    fabricRef: acme-fabric
+    fabricRef: platform-fabric
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - acme-fabric
+      - platform-fabric
     # Gateways/links are owned by this chart (EVPN zoning); do not double-create.
     manageGatewayAndLink: false
     tunnelType: none
@@ -47,7 +47,7 @@ metadata:
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
 spec:
   type: hosted
   hosted:
@@ -58,11 +58,11 @@ spec:
     workerMemory: 16Gi
   networking:
     allocateFromFabric: true
-    fabricRef: chad-fabric
+    fabricRef: platform-fabric
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - chad-fabric
+      - platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   toolRbac:
@@ -81,7 +81,7 @@ metadata:
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
-    hybridsovereign.redhat/fabric: chad-fabric
+    hybridsovereign.redhat/fabric: platform-fabric
 spec:
   type: hosted
   hosted:
@@ -92,11 +92,11 @@ spec:
     workerMemory: 16Gi
   networking:
     allocateFromFabric: true
-    fabricRef: chad-fabric
+    fabricRef: platform-fabric
   fabric:
     joinPolicy: ExplicitOnly
     fabricRefs:
-      - chad-fabric
+      - platform-fabric
     manageGatewayAndLink: false
     tunnelType: none
   toolRbac:

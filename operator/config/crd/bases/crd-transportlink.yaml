@@ -42,7 +42,7 @@ spec:
                   type: string
                 tunnelType:
                   type: string
-                  enum: [wireguard, ipsec, macsec, sshtunnel, none]
+                  enum: [wireguard, ipsec, macsec, none]
                 vaultConfigRef:
                   type: string
             status:

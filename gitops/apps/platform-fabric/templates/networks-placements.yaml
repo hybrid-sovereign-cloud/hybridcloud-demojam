@@ -1,4 +1,4 @@
-# Tenant EVPN networks — acme-core on HCP1 only; chad-app on HCP2+HCP3.
+# Tenant VRFs on the single platform fabric — acme-core on HCP1; chad-app on HCP2+HCP3.
 # No CloudOSO / OSO1 placements.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
@@ -13,7 +13,7 @@ metadata:
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   description: Acme core VRF — HCP1 via EVPN IP-VRF (no RHOSO spoke in ZTP)
-  fabricRef: acme-fabric
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
@@ -46,7 +46,7 @@ metadata:
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   description: Chad app VRF — HCP2 + HCP3 only
-  fabricRef: chad-fabric
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement

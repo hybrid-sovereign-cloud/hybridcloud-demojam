@@ -1,0 +1,142 @@
+---
+# One-off ledger migration for the single-platform-fabric consolidation
+# (design/fabric-bgw-plan.md §12). Idempotent; a no-op once nothing is left.
+#
+# For every OTHER fabric-numbering-* ConfigMap in this namespace, each ledger key
+# "<namespace>/<HybridNetwork>" whose HybridNetwork now has
+# spec.fabricRef == this fabric is MOVED into this fabric's ledger with the same
+# VNI (acme-core 51001, payments-vpc 51000, chad-app 52000 in the lab), provided
+# the VNI is inside this fabric's pool and not already used by another key.
+# Moving (not copying) empties the legacy ledgers so the retired HybridFabrics'
+# teardown (blocked while VNIs are allocated) can finish.
+#
+# Expected: hybridfabric_cr_name/namespace, hf_pool_start/end, services creds.
+# Sets: hf_ledger_migration_message
+
+- name: List numbering ConfigMaps
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: ConfigMap
+    namespace: "{{ hybridfabric_cr_namespace }}"
+  register: _hfm_cms
+
+- name: List HybridNetworks (all namespaces)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridNetwork
+  register: _hfm_hns
+
+- name: Plan ledger migration
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import json, os
+    me = os.environ["SELF_CM"]
+    lo, hi = int(os.environ["POOL_START"]), int(os.environ["POOL_END"])
+    fabric = os.environ["FABRIC"]
+    cms = {c["metadata"]["name"]: c for c in json.loads(os.environ["CMS"])
+           if c["metadata"]["name"].startswith("fabric-numbering-")}
+    hn_fabric = {}
+    for h in json.loads(os.environ["HNS"]):
+        key = "%s/%s" % (h["metadata"]["namespace"], h["metadata"]["name"])
+        hn_fabric[key] = (h.get("spec") or {}).get("fabricRef", "")
+    mine = json.loads((cms.get(me, {}).get("data") or {}).get("allocated", "{}") or "{}")
+    used = {int(v) for v in mine.values()}
+    moved, skipped, legacy_out = [], [], {}
+    for name, cm in sorted(cms.items()):
+        if name == me:
+            continue
+        alloc = json.loads((cm.get("data") or {}).get("allocated", "{}") or "{}")
+        keep = {}
+        for key, vni in sorted(alloc.items()):
+            vni = int(vni)
+            if hn_fabric.get(key) != fabric:
+                keep[key] = vni
+                continue
+            if key in mine:
+                if int(mine[key]) != vni:
+                    skipped.append("%s: already %s here, legacy %s kept in %s" % (key, mine[key], vni, name))
+                    keep[key] = vni
+                    continue
+            elif not (lo <= vni <= hi) or vni in used:
+                skipped.append("%s: VNI %s outside pool or in use" % (key, vni))
+                keep[key] = vni
+                continue
+            else:
+                mine[key] = vni
+                used.add(vni)
+            moved.append("%s=%s (from %s)" % (key, vni, name))
+        if keep != alloc:
+            legacy_out[name] = json.dumps(keep, sort_keys=True)
+    print(json.dumps({
+        "needs_write": bool(legacy_out),
+        "allocated": json.dumps(mine, sort_keys=True),
+        "legacy": legacy_out,
+        "moved": moved,
+        "skipped": skipped,
+    }))
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    SELF_CM: "fabric-numbering-{{ hybridfabric_cr_name }}"
+    FABRIC: "{{ hybridfabric_cr_name }}"
+    POOL_START: "{{ hf_pool_start }}"
+    POOL_END: "{{ hf_pool_end }}"
+    CMS: "{{ _hfm_cms.resources | default([]) | to_json }}"
+    HNS: "{{ _hfm_hns.resources | default([]) | to_json }}"
+  register: _hfm_plan
+  changed_when: false
+
+- name: Set migration plan fact
+  ansible.builtin.set_fact:
+    _hfm: "{{ _hfm_plan.stdout | from_json }}"
+
+# Write this fabric's ledger first so a VNI is never absent from both ledgers.
+- name: Add migrated VNIs to this fabric's ledger
+  when: _hfm.needs_write | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: patched
+    api_version: v1
+    kind: ConfigMap
+    name: "fabric-numbering-{{ hybridfabric_cr_name }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"
+    definition:
+      data:
+        allocated: "{{ _hfm.allocated }}"
+
+- name: Remove migrated keys from legacy ledgers
+  when: _hfm.needs_write | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: patched
+    api_version: v1
+    kind: ConfigMap
+    name: "{{ item.key }}"
+    namespace: "{{ hybridfabric_cr_namespace }}"
+    definition:
+      data:
+        allocated: "{{ item.value }}"
+  loop: "{{ _hfm.legacy | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Record migration result
+  ansible.builtin.set_fact:
+    hf_ledger_migration_message: >-
+      {{
+        ('Ledger migration moved: ' ~ (_hfm.moved | join(', ')) ~ '. ') if (_hfm.moved | length > 0) else ''
+      }}{{
+        ('Not migrated: ' ~ (_hfm.skipped | join('; ')) ~ '. ') if (_hfm.skipped | length > 0) else ''
+      }}

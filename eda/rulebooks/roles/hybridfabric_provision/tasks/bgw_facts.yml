@@ -1,0 +1,224 @@
+---
+# Compute every fact the border gateway (BGW) needs from a HybridFabric CR.
+# Shared by deploy_border_gateway.yml and transportlink_provision (include_role
+# tasks_from: bgw_config.yml). design/fabric-bgw-plan.md §4.
+#
+# Required vars: bgw_fabric_cr (HybridFabric object), services_api_host,
+#                services_bearer_token
+# Sets: bgw_* facts (name, namespace, loopback, underlay, wireguard, peers, ...)
+
+- name: Set BGW base facts from HybridFabric.spec.borderGateway
+  ansible.builtin.set_fact:
+    bgw_spec: "{{ bgw_fabric_cr.spec.borderGateway | default({}) }}"
+    bgw_fabric_name: "{{ bgw_fabric_cr.metadata.name }}"
+    bgw_namespace: "{{ bgw_fabric_cr.metadata.namespace | default('sovereign-cloud') }}"
+    bgw_asn: "{{ bgw_fabric_cr.spec.domainAsn | int }}"
+
+- name: Set BGW identity and sizing facts
+  ansible.builtin.set_fact:
+    bgw_name: >-
+      {{ bgw_spec.name | default('fabric-bgw-' ~ (bgw_fabric_name | regex_replace('-fabric$', '')), true) }}
+    bgw_loopback: "{{ bgw_spec.loopback | default('') }}"
+    bgw_underlay_nad: "{{ (bgw_spec.underlay | default({})).nadName | default(bgw_default_underlay_nad, true) }}"
+    bgw_underlay_cidr: >-
+      {{
+        (bgw_spec.underlay | default({})).cidr
+        | default(((bgw_fabric_cr.spec.ipam | default({})).machineNetworkPool | default({})).cidr | default(''), true)
+      }}
+    bgw_underlay_mtu: "{{ (bgw_spec.underlay | default({})).mtu | default(bgw_default_underlay_mtu, true) | int }}"
+    bgw_dhcp_lease: >-
+      {{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).leaseTime | default(bgw_default_dhcp_lease, true) }}
+    bgw_wg_address: "{{ (bgw_spec.wireguard | default({})).address | default(bgw_default_wg_address, true) }}"
+    bgw_wg_listen_port: "{{ (bgw_spec.wireguard | default({})).listenPort | default(bgw_default_wg_listen_port, true) | int }}"
+    bgw_wg_mtu: "{{ (bgw_spec.wireguard | default({})).mtu | default(bgw_default_wg_mtu, true) | int }}"
+    bgw_cpu: "{{ (bgw_spec.vmSize | default({})).cpu | default(bgw_default_cpu, true) | int }}"
+    bgw_memory: "{{ (bgw_spec.vmSize | default({})).memory | default(bgw_default_memory, true) }}"
+    bgw_image: "{{ bgw_spec.image | default(bgw_default_image, true) }}"
+    # Vault layout (design/fabric.md Vault table): fabric/<fabric>/bgw
+    bgw_vault_path: "{{ bgw_spec.vaultCredentialRef | default('fabric/' ~ bgw_fabric_name ~ '/bgw', true) }}"
+    bgw_storage_class: "{{ bgw_spec.storageClass | default(bgw_default_storage_class, true) }}"
+
+- name: Require borderGateway.loopback and an underlay CIDR
+  ansible.builtin.assert:
+    that:
+      - bgw_loopback | length > 0
+      - bgw_underlay_cidr | length > 0
+    fail_msg: >-
+      HybridFabric {{ bgw_fabric_name }}: spec.borderGateway.loopback and
+      spec.borderGateway.underlay.cidr (or spec.ipam.machineNetworkPool.cidr) are required.
+
+- name: Compute underlay / WireGuard addressing (python ipaddress)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os
+    net = ipaddress.ip_network(os.environ["CIDR"], strict=False)
+    addr = os.environ.get("ADDR") or str(net.network_address + 1)
+    start = os.environ.get("DHCP_START") or str(net.network_address + 100)
+    end = os.environ.get("DHCP_END") or str(net.broadcast_address - 5)
+    for a in (addr, start, end):
+        if ipaddress.ip_address(a) not in net:
+            raise SystemExit("%s not in %s" % (a, net))
+    wg = ipaddress.ip_interface(os.environ["WG"])
+    ipaddress.ip_address(os.environ["LOOPBACK"])
+    print(json.dumps({
+        "cidr": str(net),
+        "prefixlen": net.prefixlen,
+        "netmask": str(net.netmask),
+        "address": addr,
+        "dhcp_start": start,
+        "dhcp_end": end,
+        "wg_ip": str(wg.ip),
+        "wg_network": str(wg.network),
+    }))
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    CIDR: "{{ bgw_underlay_cidr }}"
+    ADDR: "{{ (bgw_spec.underlay | default({})).address | default('') }}"
+    DHCP_START: "{{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).start | default('') }}"
+    DHCP_END: "{{ ((bgw_spec.underlay | default({})).dhcpRange | default({})).end | default('') }}"
+    WG: "{{ bgw_wg_address }}"
+    LOOPBACK: "{{ bgw_loopback }}"
+  register: _bgw_net_calc
+  changed_when: false
+
+- name: Set computed addressing facts
+  ansible.builtin.set_fact:
+    bgw_underlay_cidr: "{{ (_bgw_net_calc.stdout | from_json).cidr }}"
+    bgw_underlay_prefixlen: "{{ (_bgw_net_calc.stdout | from_json).prefixlen }}"
+    bgw_underlay_netmask: "{{ (_bgw_net_calc.stdout | from_json).netmask }}"
+    bgw_underlay_address: "{{ (_bgw_net_calc.stdout | from_json).address }}"
+    bgw_dhcp_start: "{{ (_bgw_net_calc.stdout | from_json).dhcp_start }}"
+    bgw_dhcp_end: "{{ (_bgw_net_calc.stdout | from_json).dhcp_end }}"
+    bgw_wg_ip: "{{ (_bgw_net_calc.stdout | from_json).wg_ip }}"
+    bgw_wg_network: "{{ (_bgw_net_calc.stdout | from_json).wg_network }}"
+
+- name: Resolve hub ingress domain when borderGateway.ingressHost is unset
+  when: (bgw_spec.ingressHost | default('')) | length == 0
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: config.openshift.io/v1
+    kind: Ingress
+    name: cluster
+  register: _bgw_ingress_cfg
+
+- name: Set BGW ingress host (passthrough Route for wstunnel)
+  ansible.builtin.set_fact:
+    bgw_ingress_host: >-
+      {{
+        bgw_spec.ingressHost
+        if (bgw_spec.ingressHost | default('')) | length > 0
+        else (bgw_name ~ '.' ~ (_bgw_ingress_cfg.resources | default([{}]))[0].spec.domain | default(''))
+      }}
+
+- name: Ensure BGW WireGuard key pair in Vault (fabric/<fabric>/bgw unless overridden)
+  block:
+    - name: Read (or generate) BGW key pair
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/wg_keypair_ensure.yml"
+      vars:
+        wg_kv_path: "{{ bgw_vault_path }}"
+
+    - name: Keep BGW key material
+      ansible.builtin.set_fact:
+        bgw_wg_private_key: "{{ wg_keypair.wgPrivateKey }}"
+        bgw_wg_public_key: "{{ wg_keypair.wgPublicKey }}"
+        bgw_ssh_public_key: "{{ wg_keypair.sshPublicKey }}"
+      no_log: true
+  rescue:
+    - name: Record unreadable BGW Vault entry
+      ansible.builtin.set_fact:
+        bgw_vault_error: "Vault {{ bgw_vault_path }} unreadable"
+
+- name: Default BGW key facts
+  ansible.builtin.set_fact:
+    bgw_wg_private_key: "{{ bgw_wg_private_key | default('') }}"
+    bgw_wg_public_key: "{{ bgw_wg_public_key | default('') }}"
+    bgw_ssh_public_key: "{{ bgw_ssh_public_key | default('') }}"
+    bgw_vault_error: "{{ bgw_vault_error | default('') }}"
+  no_log: true
+
+# Remote site gateways that tunnel to this BGW: CloudGateway cloud=openstack,
+# transport.type=wireguard on this fabric. Each contributes a WireGuard peer,
+# a BGP listen range and a DHCP option-121 route for its site underlay CIDR.
+- name: List CloudGateways that peer with this BGW
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudGateway
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_gateways
+
+- name: Reset BGW peer accumulators
+  ansible.builtin.set_fact:
+    bgw_peers: []
+    bgw_peer_errors: []
+    _bgw_wg_gateways: >-
+      {{
+        _bgw_gateways.resources | default([])
+        | selectattr('spec.fabricRef', 'defined')
+        | selectattr('spec.fabricRef', 'equalto', bgw_fabric_name)
+        | selectattr('spec.cloud', 'defined')
+        | selectattr('spec.cloud', 'equalto', 'openstack')
+        | selectattr('spec.transport.type', 'defined')
+        | selectattr('spec.transport.type', 'equalto', 'wireguard')
+        | rejectattr('metadata.deletionTimestamp', 'defined')
+        | list
+      }}
+
+- name: Resolve each site gateway peer (public key from its Vault entry)
+  ansible.builtin.include_tasks: bgw_peer_one.yml
+  loop: "{{ _bgw_wg_gateways }}"
+  loop_control:
+    loop_var: bgw_gw
+    label: "{{ bgw_gw.metadata.name }}"
+
+- name: Set derived BGW facts (listen ranges, WireGuard enablement)
+  ansible.builtin.set_fact:
+    bgw_wg_enabled: "{{ (bgw_wg_private_key | length) > 0 }}"
+    bgw_listen_ranges: >-
+      {{
+        ([bgw_underlay_cidr] + (bgw_peers | map(attribute='siteCidr') | list) + [bgw_wg_network])
+        | unique | list
+      }}
+    bgw_endpoint: "{{ bgw_ingress_host }}:443"
+
+# Tenant isolation on the shared BGW (design/fabric.md §8.5.4): the BGW only
+# reflects EVPN routes carrying an RT allocated from THIS fabric's numbering
+# ledger (<domainAsn>:<vni> for every HybridNetwork VNI in fabric-numbering-<fabric>).
+- name: Read the fabric numbering ledger for the RT allow-list
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: ConfigMap
+    name: "fabric-numbering-{{ bgw_fabric_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_ledger
+
+- name: Build the RT allow-list
+  ansible.builtin.set_fact:
+    bgw_rt_filter_enabled: "{{ (bgw_rt_filter | default('allocated')) == 'allocated' }}"
+    bgw_allowed_rts: >-
+      {{
+        (((_bgw_ledger.resources | default([]) + [{}])[0].data | default({})).allocated | default('{}', true) | from_json).values()
+        | map('int') | unique | sort | map('string')
+        | map('regex_replace', '^', (bgw_asn | string) ~ ':')
+        | list
+      }}
+
+- name: Fail when site gateways need WireGuard but the BGW has no key
+  when:
+    - _bgw_wg_gateways | length > 0
+    - not (bgw_wg_enabled | bool)
+  ansible.builtin.fail:
+    msg: >-
+      HybridFabric {{ bgw_fabric_name }} has {{ _bgw_wg_gateways | length }} wireguard site
+      gateway(s) but Vault {{ bgw_vault_path }} did not yield wgPrivateKey
+      ({{ bgw_vault_error | default('not set', true) }}).

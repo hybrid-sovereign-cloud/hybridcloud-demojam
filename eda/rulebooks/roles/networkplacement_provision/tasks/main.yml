@@ -286,6 +286,65 @@
         msg: "NetworkPlacement {{ networkplacement_cr_name }} has invalid CIDR(s) in spec.prefixes: {{ np_prefix_check.stderr | default('') }}"
       when: (np_prefix_check.rc | default(1)) != 0
 
+    # Overlay prefix rules (design/fabric.md §16): prefixes are unique per
+    # HybridNetwork (VRF) only. (a) no overlap with sibling placements of the SAME
+    # HybridNetwork, any backend (CUDN or Neutron); (b) no overlap with the target
+    # cluster's own pod/service (and node/underlay) CIDRs, below; (c) deliberately
+    # NO check against other HybridNetworks - identical prefixes in different VRFs
+    # are allowed.
+    - name: List sibling NetworkPlacements of the same HybridNetwork
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: NetworkPlacement
+        namespace: "{{ networkplacement_cr_namespace }}"
+      register: np_sibling_lookup
+
+    - name: Overlap-check placement prefixes vs sibling placements of the same network
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 <<'PY'
+        import ipaddress, json, os, sys
+        mine = json.loads(os.environ["PREFIXES"])
+        hits = []
+        for sib in json.loads(os.environ["SIBLINGS"]):
+            spec = sib.get("spec") or {}
+            if sib["metadata"]["name"] == os.environ["SELF"]:
+                continue
+            if spec.get("network") != os.environ["NETWORK"] or spec.get("state") == "absent":
+                continue
+            for p in mine:
+                for q in spec.get("prefixes") or []:
+                    if ipaddress.ip_network(p, strict=False).overlaps(ipaddress.ip_network(q, strict=False)):
+                        hits.append("%s overlaps %s of NetworkPlacement %s" % (p, q, sib["metadata"]["name"]))
+        if hits:
+            print("; ".join(hits), file=sys.stderr)
+            sys.exit(1)
+        print("ok")
+        PY
+      environment:
+        PREFIXES: "{{ np_spec.prefixes | default([]) | to_json }}"
+        SIBLINGS: "{{ np_sibling_lookup.resources | default([]) | to_json }}"
+        SELF: "{{ networkplacement_cr_name }}"
+        NETWORK: "{{ np_spec.network }}"
+      register: np_sibling_overlap_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set sibling-overlap failure reason before failing
+      when: (np_sibling_overlap_check.rc | default(0)) != 0
+      ansible.builtin.set_fact:
+        networkplacement_fail_reason: PrefixNetworkOverlap
+
+    - name: Fail when placement prefixes overlap another placement of the same HybridNetwork
+      when: (np_sibling_overlap_check.rc | default(0)) != 0
+      ansible.builtin.fail:
+        msg: >-
+          NetworkPlacement {{ networkplacement_cr_name }} prefixes overlap another placement of
+          HybridNetwork {{ np_spec.network }}: {{ np_sibling_overlap_check.stderr | default('overlap detected') }}
+
     # design/fabric.md §16.5 — reject placement prefixes overlapping cluster networking
     - name: Overlap-check placement prefixes vs PlatformOpenshift.status.networking
       when:
@@ -303,7 +362,9 @@
         prefixes = json.loads(os.environ["PREFIXES"])
         net = json.loads(os.environ["NET_STATUS"])
         cluster_cidrs = []
-        for key in ("clusterNetwork", "serviceNetwork", "machineNetwork", "hybridOverlayReserved"):
+        # OVN-K: a CUDN subnet must not overlap the own pod/service CIDRs of the cluster;
+        # machineNetwork is the node underlay (eth1 connected route), also excluded.
+        for key in ("clusterNetwork", "serviceNetwork", "machineNetwork"):
             val = net.get(key) or []
             if isinstance(val, str):
                 cluster_cidrs.append(val)
