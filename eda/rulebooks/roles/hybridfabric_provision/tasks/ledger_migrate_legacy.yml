@@ -21,7 +21,8 @@
     api_version: v1
     kind: ConfigMap
     namespace: "{{ hybridfabric_cr_namespace }}"
-    label_selector: hybridsovereign.redhat/purpose=fabric-numbering
+    label_selectors:
+      - "hybridsovereign.redhat/purpose=fabric-numbering"
   register: _hfm_cms
 
 - name: List HybridNetworks (all namespaces)
