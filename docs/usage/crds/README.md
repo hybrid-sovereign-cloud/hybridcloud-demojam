@@ -6,9 +6,11 @@ Where CRs live: `entity-<name>` namespaces (tenant) or `sovereign-cloud` / `sove
 ## Order of operations
 
 ```text
-CloudInfrastructure (platform) → Entity → Rbac / Persona → Cloud* → Platform* → Team → Project → Assignment → Plugins
-HybridFabric (platform) → CloudGateway (platform) → HybridNetwork → NetworkPlacement
+CloudInfrastructure (platform) → Entity → Rbac / Persona → Cloud* (cloudRef) → Platform* → Team → Project → Assignment → Plugins
+HybridFabric (platform) → CloudInfrastructure (platform) → Cloud* (tenant) → CloudGateway (platform, cloudRef) → HybridNetwork → NetworkPlacement
 ```
+
+NetworkPlacement backends are CloudOSO, CloudVirt and CloudAWS projects. PlatformOpenshift clusters do not join the fabric ([fabric.md](fabric.md), [design §15](../../../design/fabric.md#15-platformopenshift-and-the-fabric)).
 
 ## Catalog
 
@@ -22,7 +24,7 @@ HybridFabric (platform) → CloudGateway (platform) → HybridNetwork → Networ
 | **CloudVirt** | Tenant project on OpenShift Virtualization | [cloudvirt.md](cloudvirt.md) |
 | **HybridFabric** / **CloudGateway** / **TransportLink** | Platform EVPN fabric and site attachments | [fabric.md](fabric.md) |
 | **HybridNetwork** / **NetworkPlacement** | Tenant VRF and its placements | [fabric.md](fabric.md) |
-| **PlatformOpenshift** | Spoke OpenShift cluster | [platformopenshift.md](platformopenshift.md) |
+| **PlatformOpenshift** | Spoke OpenShift cluster (not a fabric member) | [platformopenshift.md](platformopenshift.md) |
 | **Team** | Team features (Istio/Argo flags) | [team-project-assignment.md](team-project-assignment.md) |
 | **Project** | App project name | [team-project-assignment.md](team-project-assignment.md) |
 | **Assignment** | Team → platform + NS + RBAC | [team-project-assignment.md](team-project-assignment.md) |
@@ -45,6 +47,11 @@ oc describe platformopenshift <name> -n entity-example-corp
 ```
 
 Ready signals: `status.ready=true`, `status.status=ready`, or `status.provisionStatus` / Hive phase **Provisioned**.
+
+## Walkthroughs
+
+- [Workshop](../../workshop/README.md): [Lab 2](../../workshop/lab-02-register-cloud.md) registers CloudInfrastructure and tenant projects; [Lab 6](../../workshop/lab-06-hybrid-fabric.md) builds and verifies the fabric
+- Fabric design and reference implementation: [design/fabric.md](../../../design/fabric.md) · live record [design/fabric-verify.md](../../../design/fabric-verify.md)
 
 ## How-tos for new accounts / clusters
 
