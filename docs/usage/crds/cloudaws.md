@@ -39,6 +39,9 @@ spec:
   credentialsSecretRef:
     name: aws-account-new
   # vaultPath: aws/accounts/workshop-aws   # optional if Secret used
+  # cloudRef:                               # optional: platform-registered AWS account
+  #   kind: CloudInfrastructure
+  #   name: example-aws
 ```
 
 ## Important fields
@@ -49,6 +52,7 @@ spec:
 | `spec.baseDomain` | yes | Parent DNS domain |
 | `spec.credentialsSecretRef.name` | preferred | Secret with `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
 | `spec.vaultPath` | alt | Existing Vault KV for those keys |
+| `spec.cloudRef.name` | optional | [CloudInfrastructure](cloudinfrastructure.md) (type aws) in `sovereign-cloud`; when set, its credentials are used |
 
 ## Status to wait for
 

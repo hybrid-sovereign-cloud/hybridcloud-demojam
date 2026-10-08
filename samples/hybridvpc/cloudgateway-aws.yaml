@@ -1,3 +1,4 @@
+# AWS site attached to a fabric. cloudRef: samples/cloudinfrastructure/example-aws.yaml.
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudGateway
 metadata:
@@ -5,9 +6,9 @@ metadata:
   namespace: sovereign-cloud
 spec:
   enabled: true
-  cloud: aws
-  region: us-east-1
-  domainAsn: 65001
   fabricRef: lab-fabric
+  cloudRef:
+    kind: CloudInfrastructure
+    name: example-aws
   transport:
     type: wireguard

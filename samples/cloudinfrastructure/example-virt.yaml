@@ -1,0 +1,25 @@
+# Sample CloudInfrastructure — OpenShift Virtualization on the hub (platform-owned).
+# The live hub registration is gitops/apps/platform-fabric/templates/cloud-infrastructure.yaml
+# (name hub-virt); this sample shows the same shape under another name.
+# Apply manually to the hub (NOT via ArgoCD):
+#   oc apply -f samples/cloudinfrastructure/example-virt.yaml --context=hub-admin
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: example-virt
+  namespace: sovereign-cloud
+spec:
+  type: openshift
+  displayName: Example OpenShift Virtualization
+  openshift:
+    clusterRef: local
+    bootImage: docker://quay.io/containerdisks/centos-stream:9
+    storageClass: ocs-external-storagecluster-ceph-rbd
+    hostedClusterCidrDefaults:
+      clusterNetworkPool:
+        cidr: 100.64.0.0/11
+        blockPrefixLength: 14
+      serviceNetworkPool:
+        cidr: 100.96.0.0/11
+        blockPrefixLength: 16

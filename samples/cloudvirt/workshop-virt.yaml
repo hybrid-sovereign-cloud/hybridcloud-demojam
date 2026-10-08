@@ -1,6 +1,8 @@
 # Repo-local sample retained for reference. Live CloudVirt is base ZTP:
 #   gitops/apps/platform-smoke/templates/cloudvirt-local.yaml (name: local-virt)
 # Do not apply this file via Argo samples.
+# A CloudVirt is a tenant project on a platform CloudInfrastructure of type
+# openshift (hub-virt on the hub, see gitops/apps/platform-fabric).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
@@ -8,10 +10,17 @@ metadata:
   name: workshop-virt
   namespace: entity-acme-corp
 spec:
-  vaultPath: virt/accounts/example-admin
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt
   baseDomain: virt.example.com
   storageClass: ocs-external-storagecluster-ceph-rbd
-  enableVRF: false
+  # Applied to every VM namespace a NetworkPlacement creates for this project.
+  vmNamespaceQuota:
+    hard:
+      requests.cpu: "16"
+      requests.memory: 64Gi
+      count/virtualmachines.kubevirt.io: "10"
   toolRbac:
     environmentAdminRbac:
       - acme-platform-admins

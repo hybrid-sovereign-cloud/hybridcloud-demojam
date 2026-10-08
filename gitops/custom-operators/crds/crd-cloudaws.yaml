@@ -43,12 +43,28 @@ spec:
               type: object
               required: [account, baseDomain]
               properties:
+                cloudRef:
+                  type: object
+                  description: >-
+                    Platform CloudInfrastructure (type aws) this account project is created on, in the platform
+                    namespace (sovereign-cloud). Supplies the cloud credentials and site settings.
+                  required: [name]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [CloudInfrastructure]
+                      default: CloudInfrastructure
+                    name:
+                      type: string
+                      maxLength: 253
                 account:
                   type: string
                   description: "AWS account ID"
                 vaultPath:
                   type: string
-                  description: "Vault KV path for AWS credentials (optional when credentialsSecretRef is set)"
+                  description: >-
+                    Vault KV path for AWS credentials (optional when credentialsSecretRef is set). Ignored when
+                    cloudRef is set.
                 credentialsSecretRef:
                   type: object
                   description: >-

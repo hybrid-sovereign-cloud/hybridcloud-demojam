@@ -1,3 +1,9 @@
+# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
+# permissive: deprecated fields are still accepted. Tightening markers:
+#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
+#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
+#   TIGHTEN-LATER-REMOVE at end of line               line to delete
+# Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -26,7 +32,10 @@ spec:
       storage: true
       schema:
         openAPIV3Schema:
-          description: Transport tunnel between fabric and cloud gateway.
+          description: >-
+            Transport tunnel between the border gateway and one CloudGateway. Operator-generated, one per
+            CloudGateway; do not create or edit by hand. The transport type is set on
+            CloudGateway.spec.transport.type.
           type: object
           properties:
             apiVersion:
@@ -43,13 +52,17 @@ spec:
                   default: false
                 fabricRef:
                   type: string
+                  description: HybridFabric name; copied from the CloudGateway.
                 cloudGatewayRef:
                   type: string
+                  description: CloudGateway this link belongs to.
                 tunnelType:
                   type: string
-                  enum: [wireguard, ipsec, macsec, none]
-                vaultConfigRef:
-                  type: string
+                  description: Copied from CloudGateway.spec.transport.type.
+                  enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
+                  # >>> TIGHTEN-LATER-ADD
+                  # enum: [none, wireguard]
+                  # <<< TIGHTEN-LATER-ADD
             status:
               type: object
               properties:

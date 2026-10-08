@@ -10,7 +10,9 @@ metadata:
   namespace: entity-acme-corp
 spec:
   project: acme-dev
-  vaultPath: oso/accounts/example-admin
+  cloudRef:
+    kind: CloudInfrastructure
+    name: example-openstack   # samples/cloudinfrastructure/example-openstack.yaml
   baseDomain: lab.example.com
   projectDomain: example_domain
   externalNetwork: ext-net

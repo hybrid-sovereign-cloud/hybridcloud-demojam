@@ -1,5 +1,5 @@
-# Tenant entity with one VRF across two hosted clusters on the platform fabric
-# (design/fabric.md §6).
+# Tenant entity with one VRF (chad-app) for VMs on the hub, on the platform
+# fabric (design/fabric.md §6). Second tenant for the VRF isolation check.
 ---
 apiVersion: v1
 kind: Namespace
@@ -24,7 +24,7 @@ metadata:
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
   description: >-
-    Chad — ZTP tenant for HCP2 ↔ HCP3 EVPN VRF isolation on the shared platform fabric (no RHOSO).
+    Chad — ZTP tenant for EVPN VRF isolation on the shared platform fabric (hub VMs only).
   billingID: CHAD-2026-001
   websiteLink: https://chad.example.com
   namespaceRbac:
@@ -73,10 +73,12 @@ metadata:
     hybridsovereign.redhat/platform-fabric: "true"
     hybridsovereign.redhat/local-cluster: "true"
 spec:
-  vaultPath: virt/accounts/local
+  # Tenant project on the platform CloudInfrastructure hub-virt (platform-fabric).
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt
   baseDomain: cnv.local
   storageClass: ocs-external-storagecluster-ceph-rbd
-  enableVRF: false
   toolRbac:
     environmentAdminRbac:
       - chad-platform-admins

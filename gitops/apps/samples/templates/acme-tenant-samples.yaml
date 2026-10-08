@@ -79,5 +79,5 @@ metadata:
 spec:
   rbac: acme-viewers
   type: auditor
-# HybridFabric / HCP / EVPN zoning is always-on ZTP via hs-platform-fabric
-# (gitops/apps/platform-fabric) — HCP1–3 only, no RHOSO/CloudOSO.
+# HybridFabric, CloudInfrastructure, CloudGateways and the tenant VRF placements
+# are always-on ZTP via hs-platform-fabric (gitops/apps/platform-fabric).

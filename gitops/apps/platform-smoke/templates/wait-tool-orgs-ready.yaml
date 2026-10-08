@@ -109,6 +109,9 @@ spec:
                 fi
               }
 
+              # CloudVirt local-virt references CloudInfrastructure hub-virt, which
+              # hs-platform-fabric creates after this app: requeue and report it, but
+              # do not gate on it (it would deadlock a fresh install).
               echo "ZTP smoke PostSync: requeue tool orgs / CloudVirt if needed..."
               for i in $(seq 1 60); do
                 requeue aaporg acme-automation "$ENT"
@@ -118,8 +121,8 @@ spec:
                 QO=$(oc get quayorg acme-registry -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
                 CV=$(oc get cloudvirt local-virt -n "$ENT" -o jsonpath='{.status.ready}' 2>/dev/null || echo false)
                 echo "  [$i] aapOrg=$AO quayOrg=$QO cloudVirt=$CV"
-                if [ "$AO" = "true" ] && [ "$QO" = "true" ] && [ "$CV" = "true" ]; then
-                  echo "ZTP smoke PostSync: AAPOrg + QuayOrg + CloudVirt ready"
+                if [ "$AO" = "true" ] && [ "$QO" = "true" ]; then
+                  echo "ZTP smoke PostSync: AAPOrg + QuayOrg ready (CloudVirt ready=$CV)"
                   exit 0
                 fi
                 sleep 20

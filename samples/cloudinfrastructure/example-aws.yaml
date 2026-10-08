@@ -1,0 +1,19 @@
+# Sample CloudInfrastructure — AWS account (platform-owned, sovereign-cloud).
+# Apply manually to the hub (NOT via ArgoCD):
+#   oc apply -f samples/cloudinfrastructure/example-aws.yaml --context=hub-admin
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: example-aws
+  namespace: sovereign-cloud
+spec:
+  type: aws
+  displayName: Example AWS account
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+  credentialsRef:
+    vaultPath: aws/accounts/example-admin
+  aws:
+    accountId: "000000000000"
+    region: us-east-1
+    baseDomain: sandbox.example.com

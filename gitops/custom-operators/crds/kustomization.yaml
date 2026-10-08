@@ -6,6 +6,7 @@ resources:
   - crd-assignment.yaml
   - crd-cloudaws.yaml
   - crd-cloudgateway.yaml
+  - crd-cloudinfrastructure.yaml
   - crd-cloudoso.yaml
   - crd-cloudvirt.yaml
   - crd-entity.yaml

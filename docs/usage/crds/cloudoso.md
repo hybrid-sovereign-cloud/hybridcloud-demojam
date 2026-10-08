@@ -1,18 +1,38 @@
 # CloudOSO
 
-Registers a **Red Hat OpenStack Services on OpenShift (RHOSO)** / OpenStack cloud for an entity (project prep, Designate DNS, Vault).
+A tenant **OpenStack project** on a platform-registered OpenStack site ([CloudInfrastructure](cloudinfrastructure.md) of type `openstack`). It creates the Keystone project, an application credential and a per-project clouds.yaml in Vault (`oso/projects/<name>/clouds-config`), plus Designate DNS.
 
 ## Flow
 
 ```text
-Secret (clouds.yaml) in entity NS
-        → CloudOSO (credentialsSecretRef or vaultPath)
+CloudInfrastructure (type openstack, sovereign-cloud, platform admin)
+        → CloudOSO (entity NS, spec.cloudRef)
         → AAP / OSOHelper environmentprep
         → status.slug + domain + VIPs + ready
-        → PlatformOpenshift type=openstack can use it
+        → PlatformOpenshift type=openstack, or NetworkPlacement backend
 ```
 
-## Minimal example (Secret ref — preferred)
+## Minimal example
+
+```yaml
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudOSO
+metadata:
+  name: workshop-oso
+  namespace: entity-example-corp
+spec:
+  cloudRef:
+    kind: CloudInfrastructure
+    name: example-openstack      # in sovereign-cloud
+  project: workshop-oso
+  baseDomain: lab.example.com
+```
+
+The admin credentials, region, external network and site details come from the CloudInfrastructure.
+
+## Legacy example (own credentials, deprecated)
+
+Before CloudInfrastructure, each CloudOSO carried admin credentials. This still works while `spec.cloudRef` is unset, but it is deprecated.
 
 ```yaml
 # 1) Secret — key must be clouds.yaml
@@ -58,14 +78,15 @@ spec:
 
 | Field | Meaning |
 |-------|---------|
+| `spec.cloudRef.name` | CloudInfrastructure (type openstack) in `sovereign-cloud` |
 | `spec.project` | OpenStack project hint |
 | `spec.baseDomain` | DNS base for clusters |
-| `spec.credentialsSecretRef` | Secret with key `clouds.yaml` |
-| `spec.vaultPath` | Alt: Vault path for clouds.yaml |
+| `spec.projectDomain` | Keystone domain |
 | `spec.externalNetwork` | Neutron external net (use internet FIPs when required) |
 | `spec.route53VaultPath` | Optional Route53 helper creds |
-| `spec.designateZoneId` | Designate zone UUID |
-| `spec.enableVRF` / `vrfId` | Future VRF flag |
+| `spec.designateZoneId` / `designateProjectId` | Designate zone |
+| `spec.credentialsSecretRef` / `spec.vaultPath` | Deprecated: own admin credentials, used only without `cloudRef` |
+| `spec.managementClusterKubeconfigRef`, `dataplaneNodeSetRefs`, `netConfigRef`, `enableVRF`, `vrfId` | Deprecated: site settings moved to CloudInfrastructure; removed when validation is tightened |
 
 ## Status to wait for
 

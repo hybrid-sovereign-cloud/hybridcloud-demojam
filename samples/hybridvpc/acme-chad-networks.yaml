@@ -1,4 +1,6 @@
-# Tenant HybridNetwork + NetworkPlacement for Acme and Chad fabrics.
+# Tenant HybridNetworks + NetworkPlacements on the platform fabric.
+# Backends: CloudVirt local-virt (VMs on the hub; the operator creates the
+# vmNamespaces) and CloudOSO oso1 (Neutron network on the OpenStack site).
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridNetwork
@@ -6,21 +8,23 @@ metadata:
   name: acme-core
   namespace: entity-acme-corp
 spec:
-  description: Acme core VRF — HCP1 + OSO1 via EVPN IP-VRF
+  description: Acme core VRF — hub VMs + OSO1 via EVPN IP-VRF
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
 metadata:
-  name: acme-core-hcp1
+  name: acme-core-hub
   namespace: entity-acme-corp
 spec:
   network: acme-core
-  state: present
   backend:
-    kind: PlatformOpenshift
-    name: hcp1
+    kind: CloudVirt
+    name: local-virt
   prefixes:
-    - 10.110.0.0/24
+    - 10.110.2.0/24
+  vmNamespaces:
+    - acme-core-vms
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
@@ -29,7 +33,6 @@ metadata:
   namespace: entity-acme-corp
 spec:
   network: acme-core
-  state: present
   backend:
     kind: CloudOSO
     name: oso1
@@ -42,32 +45,20 @@ metadata:
   name: chad-app
   namespace: entity-chad
 spec:
-  description: Chad app VRF — HCP2 ↔ HCP3
+  description: Chad app VRF — hub VMs (isolated from acme-core)
+  fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
 metadata:
-  name: chad-app-hcp2
+  name: chad-app-hub
   namespace: entity-chad
 spec:
   network: chad-app
-  state: present
   backend:
-    kind: PlatformOpenshift
-    name: hcp2
+    kind: CloudVirt
+    name: local-virt
   prefixes:
-    - 10.120.0.0/24
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: NetworkPlacement
-metadata:
-  name: chad-app-hcp3
-  namespace: entity-chad
-spec:
-  network: chad-app
-  state: present
-  backend:
-    kind: PlatformOpenshift
-    name: hcp3
-  prefixes:
-    - 10.120.1.0/24
+    - 10.120.2.0/24
+  vmNamespaces:
+    - chad-app-vms

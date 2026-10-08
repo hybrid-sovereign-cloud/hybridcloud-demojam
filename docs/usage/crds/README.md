@@ -6,18 +6,22 @@ Where CRs live: `entity-<name>` namespaces (tenant) or `sovereign-cloud` / `sove
 ## Order of operations
 
 ```text
-Entity → Rbac / Persona → Cloud* → Platform* → Team → Project → Assignment → Plugins
+CloudInfrastructure (platform) → Entity → Rbac / Persona → Cloud* → Platform* → Team → Project → Assignment → Plugins
+HybridFabric (platform) → CloudGateway (platform) → HybridNetwork → NetworkPlacement
 ```
 
 ## Catalog
 
 | Kind | Purpose | Guide |
 |------|---------|-------|
+| **CloudInfrastructure** | Platform cloud site (OpenStack, hub virt, AWS) | [cloudinfrastructure.md](cloudinfrastructure.md) |
 | **Entity** | Tenant + `entity-*` namespace | [entity.md](entity.md) |
 | **Rbac** / **Persona** | Groups and people | [rbac-persona.md](rbac-persona.md) |
 | **CloudAWS** | AWS account + DNS slug | [cloudaws.md](cloudaws.md) |
-| **CloudOSO** | RHOSO / OpenStack cloud | [cloudoso.md](cloudoso.md) |
-| **CloudVirt** | CNV / virt cluster target | [cloudvirt.md](cloudvirt.md) |
+| **CloudOSO** | Tenant OpenStack project | [cloudoso.md](cloudoso.md) |
+| **CloudVirt** | Tenant project on OpenShift Virtualization | [cloudvirt.md](cloudvirt.md) |
+| **HybridFabric** / **CloudGateway** / **TransportLink** | Platform EVPN fabric and site attachments | [fabric.md](fabric.md) |
+| **HybridNetwork** / **NetworkPlacement** | Tenant VRF and its placements | [fabric.md](fabric.md) |
 | **PlatformOpenshift** | Spoke OpenShift cluster | [platformopenshift.md](platformopenshift.md) |
 | **Team** | Team features (Istio/Argo flags) | [team-project-assignment.md](team-project-assignment.md) |
 | **Project** | App project name | [team-project-assignment.md](team-project-assignment.md) |
@@ -28,14 +32,15 @@ Entity → Rbac / Persona → Cloud* → Platform* → Team → Project → Assi
 
 Never put keys in CR YAML in Git.
 
-1. Create a Secret in the entity namespace (or seed Vault).
-2. Point the Cloud\* CR at it with `spec.credentialsSecretRef.name`, **or** set `spec.vaultPath` to an existing Vault KV path.
+1. Site admin credentials belong on the platform [CloudInfrastructure](cloudinfrastructure.md) (`spec.credentialsRef`: a Vault path or a Secret in `sovereign-cloud`).
+2. Tenant Cloud\* projects reference it with `spec.cloudRef`. The older per-project `spec.credentialsSecretRef` / `spec.vaultPath` still work while `cloudRef` is unset (deprecated for CloudOSO and CloudVirt).
 3. Operators PushSecret → Vault for Job consumption.
 
 ## Watch status
 
 ```bash
-oc get cloudaws,cloudoso,cloudvirt,platformopenshift -n entity-example-corp
+oc get cloudinfrastructure,hybridfabric,cloudgateway -n sovereign-cloud
+oc get cloudaws,cloudoso,cloudvirt,platformopenshift,hybridnetwork,networkplacement -n entity-example-corp
 oc describe platformopenshift <name> -n entity-example-corp
 ```
 
@@ -46,3 +51,26 @@ Ready signals: `status.ready=true`, `status.status=ready`, or `status.provisionS
 - [Add CloudAWS](../../how-to/add-cloudaws.md)
 - [Add CloudOSO](../../how-to/add-cloudoso.md)
 - [Add CloudVirt](../../how-to/add-cloudvirt.md)
+
+## Tightening validation
+
+The fabric CRDs ship in a permissive form while live objects migrate to the CloudInfrastructure model: deprecated fields are still accepted, and the required fields, immutables and CEL rules for existing kinds are commented out. CloudInfrastructure and the new fields are validated already. Markers in `gitops/custom-operators/crds/crd-*.yaml`:
+
+| Marker | Action |
+|--------|--------|
+| `# >>> TIGHTEN-LATER-ADD` … `# <<< TIGHTEN-LATER-ADD` | Uncomment the lines in between (required fields, immutables, CEL, narrowed enums) |
+| `# >>> TIGHTEN-LATER-DROP` … `# <<< TIGHTEN-LATER-DROP` | Delete the block (deprecated fields) |
+| line ending in `# TIGHTEN-LATER-REMOVE` | Delete the line (old enum, old `required`, lab-specific defaults) |
+
+Apply them only after the live objects are migrated and no PlatformOpenshift-backed placement remains (cutover step "Tighten"):
+
+```bash
+cd gitops/custom-operators/crds
+sed -i \
+  -e '/# TIGHTEN-LATER-REMOVE$/d' \
+  -e '/^ *# >>> TIGHTEN-LATER-DROP$/,/^ *# <<< TIGHTEN-LATER-DROP$/d' \
+  -e '/^ *# >>> TIGHTEN-LATER-ADD$/,/^ *# <<< TIGHTEN-LATER-ADD$/{/TIGHTEN-LATER-ADD$/d;s/^\( *\)# /\1/}' \
+  crd-*.yaml
+```
+
+To keep the deprecated fields for a while, leave out the `-e '…DROP…'` line. Then refresh the copies: `cp crd-*.yaml ../../../operator/config/crd/bases/` and regenerate `operator/primary/helm/templates/crds.yaml` (it is a concatenation of these files).

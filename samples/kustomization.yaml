@@ -28,6 +28,9 @@ resources:
   - cloudaws/ses10-env.yaml
   - cloudaws/ses12-env.yaml
   - cloudaws/ses7-env.yaml
+  - cloudinfrastructure/example-aws.yaml
+  - cloudinfrastructure/example-openstack.yaml
+  - cloudinfrastructure/example-virt.yaml
   - cloudoso/acme-dev-openstack.yaml
   - cloudoso/ses11-env.yaml
   - cloudoso/ses12-env.yaml
@@ -118,8 +121,5 @@ resources:
   - vault/acme-vault.yaml
   - vault/globex-vault.yaml
   - vaultkv/acme-app-secrets.yaml
-  - vaultkv/acme-infra-secrets.yaml
-  - vaultkv/acme-secrets.yaml
   - vaultkv/acme-test-kv.yaml
   - vaultkv/acme-test-reinit.yaml
-  - vaultkv/globex-secrets.yaml
