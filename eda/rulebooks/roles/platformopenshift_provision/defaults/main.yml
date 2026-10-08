@@ -32,8 +32,9 @@ mce_cluster_build_chart_version: "0.2.3"
 eda_dashboard_host: ""
 
 # Default pod/service ranges for hosted clusters without explicit
-# spec.networking (design/fabric.md §16, CG-NAT assumption). CloudVirt
-# spec.hostedClusterCidrDefaults overrides per environment.
+# spec.networking (design/fabric.md §16, CG-NAT assumption). The CloudVirt's
+# CloudInfrastructure (spec.openshift.hostedClusterCidrDefaults) overrides per
+# environment; deprecated: CloudVirt spec.hostedClusterCidrDefaults.
 po_default_cluster_network_pool: {cidr: 100.64.0.0/11, blockPrefixLength: 14}
 po_default_service_network_pool: {cidr: 100.96.0.0/11, blockPrefixLength: 16}
 # Reject pod/service CIDRs that overlap another PlatformOpenshift's.

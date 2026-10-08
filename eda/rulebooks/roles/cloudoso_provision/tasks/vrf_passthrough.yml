@@ -1,7 +1,0 @@
----
-- name: Log CloudOSO VRF passthrough facts
-  ansible.builtin.debug:
-    msg: >-
-      CloudOSO {{ cloudoso_cr_name }} VRF passthrough:
-      enableVRF={{ ep_enable_vrf | default(false) }},
-      vrfId={{ ep_vrf_id | default('') }}

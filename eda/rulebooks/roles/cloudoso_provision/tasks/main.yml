@@ -70,12 +70,12 @@
           Namespace {{ cloudoso_cr_namespace }} is missing label
           hybridsovereign.redhat/entity. Cannot provision CloudOSO.
 
+    - name: Resolve spec.cloudRef (admin credentials and site defaults)
+      ansible.builtin.include_tasks: cloudref.yml
+
     - name: Run OpenStack environment preparation
       ansible.builtin.include_tasks: environmentprep.yml
 
-    - name: Log VRF spec passthrough for future use
-      ansible.builtin.include_tasks: vrf_passthrough.yml
-      when: false
 
     - name: Get reconciliation timestamp
       ansible.builtin.set_fact:
@@ -95,7 +95,10 @@
           lastReconciledAt: "{{ cloudoso_status_time }}"
           message: >-
             OpenStack project {{ oso_project_name }} ({{ oso_project_id }})
-            provisioned by EDA in Keystone domain {{ oso_domain_name }}.
+            provisioned by EDA in Keystone domain {{ oso_domain_name }}
+            {{- (' on CloudInfrastructure ' ~ oso_cloudref_name) if (oso_cloudref_name | default('') | length > 0) else '' }}.
+            {{ ('WARNING: ' ~ oso_cloudref_warning) if (oso_cloudref_warning | default('') | length > 0) else '' }}
+          cloudInfrastructure: "{{ oso_cloudref_name | default('') }}"
           name: "{{ cloudoso_cr_name }}"
           namespace: "{{ cloudoso_cr_namespace }}"
           entity: "{{ entity_name }}"

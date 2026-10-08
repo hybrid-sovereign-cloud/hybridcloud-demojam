@@ -91,7 +91,7 @@
         platform_type: "{{ platformopenshift_cr.resources[0].spec.type | default('') }}"
         platform_spec: "{{ platformopenshift_cr.resources[0].spec }}"
 
-    - name: Allocate / validate fabric-safe cluster CIDRs (avoid HostedCluster IP collisions)
+    - name: Allocate / validate cluster pod/service CIDRs (avoid hub and peer overlaps)
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/platformopenshift_fabric_ipam.yml"
       when: platform_type in ["hosted", "openstack", "aws"]
 
@@ -121,9 +121,14 @@
     - name: Create per-CR cluster viewer RBAC bindings
       ansible.builtin.include_tasks: cluster_viewer_rbac.yml
 
-    - name: Join Hybrid Fabric when spec.fabric is present (design §15.3)
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/platform_fabric_join.yml"
+    # No fabric join (plan decision 6): hosted clusters are not fabric spokes.
+    # A deprecated spec.fabric on a live object is ignored.
+    - name: Note an ignored spec.fabric
       when: platform_spec.fabric is defined
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: PlatformOpenshift {{ platformopenshift_cr_name }} sets the removed spec.fabric;
+          ignored (hosted clusters no longer attach to the HybridFabric).
 
   rescue:
     - name: Mark PlatformOpenshift as failed on services cluster

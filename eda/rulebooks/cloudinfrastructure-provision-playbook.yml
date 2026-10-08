@@ -1,0 +1,7 @@
+---
+- name: CloudInfrastructure Provision Playbook
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - cloudinfrastructure_provision

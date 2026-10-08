@@ -38,7 +38,15 @@
   ansible.builtin.set_fact:
     ep_domain: "{{ ep_slug }}.{{ ep_base_domain }}"
     ep_region: "{{ ep_spec.region | default(default_aws_region) }}"
-    aws_credentials_secret_name: "{{ (ep_spec.credentialsSecretRef | default({})).name | default('') }}"
+    # CloudInfrastructure credentialsRef (cloudRef) wins over the deprecated
+    # CloudAWS credentialsSecretRef / vaultPath.
+    aws_credentials_secret_name: >-
+      {{
+        (aws_cloudinfra_secret | default({})).name | default('', true)
+        if ((aws_cloudinfra_secret | default({})) | length > 0 or ((ep_spec.cloudRef | default({}, true)).name | default('') | length > 0))
+        else ((ep_spec.credentialsSecretRef | default({})).name | default(''))
+      }}
+    aws_credentials_secret_namespace: "{{ (aws_cloudinfra_secret | default({})).namespace | default(cloudaws_cr_namespace, true) }}"
 
 - name: Load AWS credentials from entity-namespace Secret
   when: aws_credentials_secret_name | length > 0
@@ -51,7 +59,7 @@
         api_version: v1
         kind: Secret
         name: "{{ aws_credentials_secret_name }}"
-        namespace: "{{ cloudaws_cr_namespace }}"
+        namespace: "{{ aws_credentials_secret_namespace }}"
       register: aws_creds_secret
       until: >-
         aws_creds_secret.resources | length > 0 and
@@ -81,7 +89,7 @@
         that:
           - ep_vault_path is defined
           - ep_vault_path | length > 0
-        fail_msg: CloudAWS requires spec.credentialsSecretRef.name or spec.vaultPath
+        fail_msg: CloudAWS requires spec.cloudRef (CloudInfrastructure with credentialsRef), or the deprecated spec.credentialsSecretRef.name / spec.vaultPath
 
     - name: Create temporary ExternalSecret for AWS credentials
       kubernetes.core.k8s:

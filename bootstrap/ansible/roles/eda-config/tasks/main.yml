@@ -82,6 +82,8 @@
           - { name: "hybridfabric-delete", file: "hybridfabric-delete.yml" }
           - { name: "cloudgateway-create", file: "cloudgateway-create.yml" }
           - { name: "cloudgateway-delete", file: "cloudgateway-delete.yml" }
+          - { name: "cloudinfrastructure-create", file: "cloudinfrastructure-create.yml" }
+          - { name: "cloudinfrastructure-delete", file: "cloudinfrastructure-delete.yml" }
           - { name: "transportlink-create", file: "transportlink-create.yml" }
           - { name: "transportlink-delete", file: "transportlink-delete.yml" }
           - { name: "hybridnetwork-create", file: "hybridnetwork-create.yml" }

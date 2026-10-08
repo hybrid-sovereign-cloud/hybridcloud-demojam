@@ -1,0 +1,14 @@
+---
+# CloudInfrastructure provision (plan §2.1, §3.2.1). Read-only checks: this role
+# never changes EDPM, CNO or cluster config; it validates and reports.
+
+# RHOSO control plane namespace on the management cluster.
+ci_oso_namespace: openstack
+# NetConfig network whose presence means the site's computes can be fabric VTEPs
+# (written by cloudgateway_provision/openstack_edpm_evpn.yml).
+ci_fabric_network_name: fabric
+# HybridFabric namespace (underlay NAD lookup for type openshift).
+ci_fabric_namespace: sovereign-cloud
+ci_default_underlay_nad: fabric-underlay
+# Fail (not Ready) when the Keystone token cannot be issued with credentialsRef.
+ci_require_openstack_auth: true

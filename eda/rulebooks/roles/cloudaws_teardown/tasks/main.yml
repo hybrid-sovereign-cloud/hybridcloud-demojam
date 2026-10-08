@@ -44,6 +44,20 @@
         ep_account: ""
       when: cloudaws_cr_lookup.resources | length == 0
 
+    - name: Take credentials from the CloudInfrastructure (spec.cloudRef)
+      when: (cloudaws_spec.cloudRef | default({}, true)).name | default('') | length > 0
+      block:
+        - name: Read CloudInfrastructure
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+          vars:
+            ci_ref_name: "{{ cloudaws_spec.cloudRef.name }}"
+            ci_expected_type: aws
+
+        - name: Use its vaultPath
+          when: ((ci_spec.credentialsRef | default({}, true)).vaultPath | default('')) | length > 0
+          ansible.builtin.set_fact:
+            ep_vault_path: "{{ ci_spec.credentialsRef.vaultPath }}"
+
     - name: Tear down Route53 slug zone
       ansible.builtin.include_tasks: delete_route53.yml
       when: cloudaws_domain | length > 0

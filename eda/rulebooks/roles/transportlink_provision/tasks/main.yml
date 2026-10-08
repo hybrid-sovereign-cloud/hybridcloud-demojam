@@ -88,6 +88,21 @@
         tl_fabric: "{{ tl_fabric_lookup.resources[0] }}"
         tl_gateway: "{{ tl_gateway_lookup.resources[0] }}"
 
+    # The transport type lives in one place: CloudGateway.spec.transport.type
+    # (plan §2.1). TransportLink.spec.tunnelType is a copy, read only as fallback.
+    - name: Resolve the gateway's site and transport
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloudgateway_site.yml"
+      vars:
+        rcs_gateway: "{{ tl_gateway }}"
+
+    - name: Set tunnel type from the CloudGateway
+      ansible.builtin.set_fact:
+        tl_tunnel_type: >-
+          {{
+            ((tl_gateway.spec.transport | default({}, true)).type | default('', true))
+            | default(transportlink_spec.tunnelType | default('none', true), true)
+          }}
+
     - name: Set cross-fabric-bind failure reason before failing
       ansible.builtin.set_fact:
         transportlink_fail_reason: CrossFabricBind
@@ -122,7 +137,7 @@
       when: not (tl_gateway.status.ready | default(false) | bool)
 
     - name: Handle tunnelType none (native underlay peering, no tunnel)
-      when: (transportlink_spec.tunnelType | default('none')) == 'none'
+      when: tl_tunnel_type == 'none'
       block:
         - name: Collect fabric peers (border gateway loopback, else legacy RRs)
           ansible.builtin.set_fact:
@@ -152,16 +167,16 @@
             tl_border_endpoint: "{{ tl_fabric_peers | first }}"
             tl_cloud_endpoint: "{{ tl_gateway.status.gatewayAddress | default('') }}"
             tl_message: >-
-              tunnelType=none: cloud={{ tl_gateway.spec.cloud | default('unknown') }} peers natively
+              tunnelType=none: {{ rcs_cloud_type | default('unknown', true) }} site {{ rcs_site_name | default('', true) }} peers natively
               (iBGP AS{{ tl_fabric_asn }}, l2vpn evpn) with {{ tl_fabric_peers | join(',') }}
               over the hub underlay (design/fabric.md §21.3).
 
     - name: Handle tunnelType wireguard (BGW <-> site gateway VM over wstunnel)
-      when: (transportlink_spec.tunnelType | default('none')) == 'wireguard'
+      when: tl_tunnel_type == 'wireguard'
       ansible.builtin.include_tasks: deploy_wireguard.yml
 
     - name: Handle tunneled transport (ipsec/macsec)
-      when: (transportlink_spec.tunnelType | default('none')) in ['ipsec', 'macsec']
+      when: tl_tunnel_type in ['ipsec', 'macsec']
       block:
         - name: Set tunnel-config-unavailable failure reason before validating
           ansible.builtin.set_fact:
@@ -171,7 +186,7 @@
         - name: Fail closed when vaultConfigRef missing for a tunneled TransportLink
           ansible.builtin.fail:
             msg: >-
-              TransportLink {{ transportlink_cr_name }} tunnelType={{ transportlink_spec.tunnelType }}
+              TransportLink {{ transportlink_cr_name }} tunnelType={{ tl_tunnel_type }}
               requires spec.vaultConfigRef (peer keys/PSK); none provided.
           when: (transportlink_spec.vaultConfigRef | default('')) | length == 0
 
@@ -186,7 +201,7 @@
             tl_ready: true
             tl_border_endpoint: "{{ vault_kv_data.borderEndpoint | default(tl_fabric.spec.borderGateway.loopback | default('')) }}"
             tl_cloud_endpoint: "{{ vault_kv_data.cloudEndpoint | default(tl_gateway.status.gatewayAddress | default('')) }}"
-            tl_message: "tunnelType={{ transportlink_spec.tunnelType }}: tunnel config loaded from Vault {{ transportlink_spec.vaultConfigRef }}."
+            tl_message: "tunnelType={{ tl_tunnel_type }}: tunnel config loaded from Vault {{ transportlink_spec.vaultConfigRef }}."
 
     - name: Get timestamp
       ansible.builtin.set_fact:

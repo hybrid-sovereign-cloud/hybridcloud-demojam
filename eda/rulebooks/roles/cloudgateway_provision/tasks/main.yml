@@ -126,10 +126,66 @@
         cgw_peer_count: "{{ 1 if (cgw_bgw_loopback | length > 0) else (cgw_rr_addrs | length) }}"
 
     # ---------------------------------------------------------------
+    # Site: spec.cloudRef -> CloudInfrastructure (plan §2.1). Live objects may
+    # still carry the deprecated spec.cloud/openstackCloudOSORef during the
+    # cutover; those are read only when cloudRef is absent (with a warning).
+    # ---------------------------------------------------------------
+    - name: Resolve the site this gateway lands on (cloudRef, else deprecated fields)
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloudgateway_site.yml"
+      vars:
+        rcs_gateway: "{{ cloudgateway_cr_lookup.resources[0] }}"
+
+    - name: Set site facts
+      ansible.builtin.set_fact:
+        cgw_cloud_type: "{{ rcs_cloud_type }}"
+        cgw_site_name: "{{ rcs_site_name }}"
+        cgw_cloudinfra: "{{ rcs_cloudinfra }}"
+        cgw_site_warning: "{{ rcs_warning }}"
+        cgw_transport_type: "{{ rcs_transport }}"
+
+    - name: Set cloudRef failure reason before failing
+      when: rcs_error | length > 0
+      ansible.builtin.set_fact:
+        cloudgateway_fail_reason: "{{ 'CloudInfrastructureNotFound' if ('not found' in rcs_error) else 'CloudRefInvalid' }}"
+
+    - name: Fail when the site cannot be resolved
+      when: rcs_error | length > 0
+      ansible.builtin.fail:
+        msg: "{{ rcs_error }}"
+
+    - name: Set CloudInfrastructure-not-ready failure reason before failing
+      when:
+        - not (rcs_legacy | bool)
+        - not (cgw_cloudinfra.status.ready | default(false) | bool)
+      ansible.builtin.set_fact:
+        cloudgateway_fail_reason: CloudInfrastructureNotReady
+
+    - name: Require the CloudInfrastructure Ready
+      when:
+        - not (rcs_legacy | bool)
+        - not (cgw_cloudinfra.status.ready | default(false) | bool)
+      ansible.builtin.fail:
+        msg: >-
+          CloudGateway {{ cloudgateway_cr_name }}: CloudInfrastructure {{ cgw_site_name }} is not Ready
+          ({{ cgw_cloudinfra.status.message | default('no status yet') }}).
+
+    - name: Set transport-unsupported failure reason before failing
+      when: cgw_transport_type not in ['none', 'wireguard']
+      ansible.builtin.set_fact:
+        cloudgateway_fail_reason: TransportUnsupported
+
+    - name: Reject transports other than none / wireguard
+      when: cgw_transport_type not in ['none', 'wireguard']
+      ansible.builtin.fail:
+        msg: >-
+          CloudGateway {{ cloudgateway_cr_name }} spec.transport.type={{ cgw_transport_type }} is not
+          supported (none or wireguard).
+
+    # ---------------------------------------------------------------
     # AWS: no EVPN fabric landing (design §8.2 / §15.0)
     # ---------------------------------------------------------------
     - name: Reject AWS cloud gateways
-      when: cloudgateway_spec.cloud == 'aws'
+      when: cgw_cloud_type == 'aws'
       block:
         - ansible.builtin.set_fact:
             cloudgateway_fail_reason: AwsUnsupported
@@ -138,98 +194,26 @@
 
     # ---------------------------------------------------------------
     # OpenStack: RHOSO 18.0 FR6 native OVN BGP-EVPN (fail closed)
+    # NodeSets / NetConfig / management kubeconfig come from the
+    # CloudInfrastructure (rcs_* facts), never from a tenant CloudOSO.
     # ---------------------------------------------------------------
-    - name: Handle cloud=openstack landing zone
-      when: cloudgateway_spec.cloud == 'openstack'
+    - name: Handle an openstack site
+      when: cgw_cloud_type == 'openstack'
       block:
-        - name: Set CloudOSORef-missing failure reason before validating
-          ansible.builtin.set_fact:
-            cloudgateway_fail_reason: CloudOSORefMissing
-          when: (cloudgateway_spec.openstackCloudOSORef | default('')) | length == 0
+        - name: Probe RHOSO FR6 native OVN BGP-EVPN support
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
 
-        - name: Require openstackCloudOSORef
-          ansible.builtin.fail:
-            msg: "CloudGateway {{ cloudgateway_cr_name }} spec.cloud=openstack requires spec.openstackCloudOSORef"
-          when: (cloudgateway_spec.openstackCloudOSORef | default('')) | length == 0
-
-        - name: Read referenced CloudOSO (gateway namespace first)
-          kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            api_version: hybridsovereign.redhat/v1alpha1
-            kind: CloudOSO
-            name: "{{ cloudgateway_spec.openstackCloudOSORef }}"
-            namespace: "{{ cloudgateway_cr_namespace }}"
-          register: cgw_cloudoso_local
-          failed_when: false
-
-        - name: Read referenced CloudOSO in entity namespace
+        # The Neutron evpn extension seen by cloudinfrastructure_provision (admin
+        # credentials) is authoritative when this EE cannot run the CLI probe.
+        - name: Adopt the CloudInfrastructure Neutron evpn capability
           when:
-            - cgw_cloudoso_local.resources | default([]) | length == 0
-            - (cgw_entity | length) > 0
-          kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            api_version: hybridsovereign.redhat/v1alpha1
-            kind: CloudOSO
-            name: "{{ cloudgateway_spec.openstackCloudOSORef }}"
-            namespace: "entity-{{ cgw_entity }}"
-          register: cgw_cloudoso_entity
-          failed_when: false
-
-        - name: Read referenced CloudOSO (cluster-wide fallback)
-          when:
-            - cgw_cloudoso_local.resources | default([]) | length == 0
-            - cgw_cloudoso_entity.resources | default([]) | length == 0
-          kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            api_version: hybridsovereign.redhat/v1alpha1
-            kind: CloudOSO
-            name: "{{ cloudgateway_spec.openstackCloudOSORef }}"
-          register: cgw_cloudoso_wide
-          failed_when: false
-
-        - name: Set resolved CloudOSO fact
+            - not (fr6_probe_available | default(false) | bool)
+            - (cgw_cloudinfra.status.capabilities | default({})).neutronEvpnExtension | default(false) | bool
           ansible.builtin.set_fact:
-            cgw_cloudoso: >-
-              {{
-                (cgw_cloudoso_local.resources | default([]) | first)
-                if (cgw_cloudoso_local.resources | default([]) | length > 0)
-                else (
-                  ((cgw_cloudoso_entity | default({})).get('resources', []) | first)
-                  if ((cgw_cloudoso_entity | default({})).get('resources', []) | length > 0)
-                  else (((cgw_cloudoso_wide | default({})).get('resources', []) | first) | default({}, true))
-                )
-              }}
-
-        - name: Set CloudOSO-not-found failure reason before failing
-          ansible.builtin.set_fact:
-            cloudgateway_fail_reason: CloudOSONotFound
-          when: (cgw_cloudoso | default({})) | length == 0
-
-        - name: "Assert CloudOSO exists (design: landingZoneReady only after asserting CloudOSO exists)"
-          ansible.builtin.fail:
-            msg: "CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }} not found for CloudGateway {{ cloudgateway_cr_name }}"
-          when: (cgw_cloudoso | default({})) | length == 0
-
-        - name: Set CloudOSO-not-ready failure reason before failing
-          ansible.builtin.set_fact:
-            cloudgateway_fail_reason: CloudOSONotReady
-          when:
-            - (cgw_cloudoso | default({})) | length > 0
-            - not (cgw_cloudoso.status.ready | default(false) | bool)
-
-        # CloudOSO may still be provisioning (missing openstack.cloud EE); continue to FR6
-        # probe when the CR exists so we can fail closed with Fr6EvpnUnavailable.
-        - name: Probe RHOSO FR6 even when CloudOSO not Ready yet
-          when: (cgw_cloudoso | default({})) | length > 0
-          block:
-            - name: Probe RHOSO FR6 native OVN BGP-EVPN support
-              ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/openstack_fr6_probe.yml"
+            fr6_probe_available: true
+            fr6_probe_message: >-
+              Neutron evpn extension reported by CloudInfrastructure {{ cgw_site_name }}
+              (status.capabilities.neutronEvpnExtension).
 
         # Legacy RR fabrics only: with a border gateway everything is iBGP in the
         # fabric ASN (per-spoke ASNs retired, design §11).
@@ -239,8 +223,8 @@
             - cgw_bgw_loopback | length == 0
           ansible.builtin.fail:
             msg: >-
-              CloudGateway {{ cloudgateway_cr_name }} cloud=openstack requires
-              spec.domainAsn (spoke ASN) for fabric peering / FR6 OVN BGP-EVPN.
+              CloudGateway {{ cloudgateway_cr_name }} on an openstack site requires
+              spec.domainAsn (spoke ASN) for legacy route-reflector fabrics.
 
         - name: Fail closed when fabric has neither a border gateway nor routeReflectors
           when: (cgw_fabric_peers | default([]) | length) == 0
@@ -254,7 +238,7 @@
         # the RHOSO management cluster. Must complete before NetworkPlacement
         # creates the EVPN router (HA chassis group needs the gateway chassis).
         - name: Land the site gateway and EDPM EVPN (transport wireguard)
-          when: (cloudgateway_spec.transport.type | default('none')) == 'wireguard'
+          when: cgw_transport_type == 'wireguard'
           block:
             - name: Resolve management cluster kubeconfig
               ansible.builtin.include_tasks: openstack_mgmt_kubeconfig.yml
@@ -281,14 +265,14 @@
             cgw_gateway_address: >-
               {{
                 cgw_gateway_address
-                | default(cgw_cloudoso.status.apiVIP | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true), true)
+                | default(cloudgateway_cr_lookup.resources[0].status.gatewayAddress | default(''), true)
               }}
             cloudgateway_fail_reason: "{{ '' if (fr6_probe_available | default(false)) else 'Fr6EvpnDeferred' }}"
             cgw_message: >-
               {{
                 (
-                  'OpenStack FR6 landing Ready on CloudOSO '
-                  ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
+                  'OpenStack FR6 landing Ready on site '
+                  ~ cgw_site_name ~ ': '
                   ~ (fr6_probe_message | default(''))
                   ~ '; fabric peers=' ~ (cgw_fabric_peers | join(','))
                   ~ ' (native OVN BGP-EVPN Type-5). '
@@ -296,8 +280,8 @@
                 )
                 if (fr6_probe_available | default(false))
                 else (
-                  'OpenStack landing Ready (EvpnDeferred) on CloudOSO '
-                  ~ cloudgateway_spec.openstackCloudOSORef ~ ': '
+                  'OpenStack landing Ready (EvpnDeferred) on site '
+                  ~ cgw_site_name ~ ': '
                   ~ (fr6_probe_message | default('FR6 EVPN unavailable'))
                   ~ '; fabric peers=' ~ (cgw_fabric_peers | join(','))
                   ~ ' — Neutron network placement allowed; EVPN Type-5 deferred. '
@@ -308,9 +292,17 @@
     # ---------------------------------------------------------------
     # OpenShift: HCP/Virt hosted landing (tunnelType none prep)
     # ---------------------------------------------------------------
-    - name: Handle cloud=openshift landing zone
-      when: cloudgateway_spec.cloud == 'openshift'
+    - name: Handle an openshift site
+      when: cgw_cloud_type == 'openshift'
       block:
+        # TODO(hub-pass): hub-side CloudVirt EVPN landing (plan §3.2.2 / §4), built live
+        # by the lead. Expected inputs: cgw_cloudinfra (CloudInfrastructure type openshift,
+        # clusterRef local), cgw_fabric (HybridFabric: spec.underlay.hubVtepBlock,
+        # spec.borderGateway.loopback, domainAsn), services_api_host/services_bearer_token.
+        # Expected outputs: cgw_gateway_address, cgw_hub_evpn_ready, cgw_hub_evpn_message.
+        # - name: Hub CNV EVPN landing (CNO check, hub VTEP CR, hub FRRConfiguration)
+        #   ansible.builtin.include_tasks: openshift_hub_evpn.yml
+
         # HCP spokes peer natively over the hub underlay (eth1, DHCP from the BGW);
         # the gateway address is the BGP peer: the border gateway loopback.
         - name: Set gatewayAddress to the fabric BGP peer
@@ -329,7 +321,7 @@
             cgw_transport_ready: true
             cgw_message: >-
               OpenShift/HCP EVPN landing prepared; peer address {{ cgw_gateway_address }}
-              (tunnelType={{ cloudgateway_spec.transport.type | default('none') }}).
+              (transport={{ cgw_transport_type }}).
 
     - name: Get timestamp
       ansible.builtin.set_fact:
@@ -345,13 +337,16 @@
         cr_status_body:
           status: ready
           ready: true
-          message: "{{ cgw_message }}"
+          message: "{{ cgw_message }}{{ (' WARNING: ' ~ cgw_site_warning) if (cgw_site_warning | default('') | length > 0) else '' }}"
           lastReconciledAt: "{{ cloudgateway_status_transition_time }}"
           observedGeneration: "{{ cloudgateway_generation }}"
           landingZoneReady: "{{ cgw_landing_zone_ready | default(false) }}"
           transportReady: "{{ cgw_transport_ready | default(false) }}"
           peerCount: "{{ cgw_peer_count | int }}"
           gatewayAddress: "{{ cgw_gateway_address | default('') }}"
+          # Allocated by the BGW facts when spec.wireguard.address is omitted.
+          wireguardAddress: "{{ cgw_gw_wg_address | default('') }}"
+          cloudInfrastructure: "{{ cgw_site_name | default('') }}"
           conditions:
             - type: Ready
               status: "True"

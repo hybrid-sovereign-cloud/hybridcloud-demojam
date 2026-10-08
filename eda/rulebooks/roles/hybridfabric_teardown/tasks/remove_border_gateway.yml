@@ -95,8 +95,12 @@
           {% endfor %}
           {{ users | length }}
 
-    # HostedCluster VM namespaces carry their own copy of the NAD; those are
-    # removed with the HostedCluster (platformopenshift teardown).
+    # TODO(hub-pass): remove the BGW hub leg (localnet NAD / NNCP mapping and
+    # hub-leg MAC-NAT shim) created by hybridfabric_provision bgw_hub_leg.yml.
+    # Expected inputs: hf_teardown_bgw_name, the deleting HybridFabric spec.underlay.
+
+    # Legacy: HostedCluster VM namespaces may still carry a copy of the NAD from
+    # the removed PlatformOpenshift fabric join; they go with the HostedCluster namespace.
     - name: Delete underlay NAD in the fabric namespace (only when no other fabric uses it)
       when: (hf_teardown_nad_user_count | trim | int) == 0
       kubernetes.core.k8s:

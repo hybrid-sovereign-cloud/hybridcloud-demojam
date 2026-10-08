@@ -2,8 +2,22 @@
 - name: Set environmentprep spec facts
   ansible.builtin.set_fact:
     ep_project: "{{ oso_spec.project | default(entity_name ~ '_' ~ cloudoso_cr_name, true) }}"
-    ep_vault_path: "{{ oso_spec.vaultPath | default('') }}"
-    ep_credentials_secret_name: "{{ (oso_spec.credentialsSecretRef | default({})).name | default('') }}"
+    # Admin credentials: CloudInfrastructure.spec.credentialsRef via cloudRef
+    # (cloudref.yml); the deprecated CloudOSO spec.vaultPath / credentialsSecretRef
+    # only when the CloudOSO has no cloudRef.
+    ep_vault_path: >-
+      {{
+        oso_admin_creds_vault_path | default('', true)
+        if (((oso_admin_creds_vault_path | default('')) | length > 0) or ((oso_admin_creds_secret | default({})) | length > 0))
+        else (oso_spec.vaultPath | default(''))
+      }}
+    ep_credentials_secret_name: >-
+      {{
+        (oso_admin_creds_secret | default({})).name | default('', true)
+        if (((oso_admin_creds_vault_path | default('')) | length > 0) or ((oso_admin_creds_secret | default({})) | length > 0))
+        else ((oso_spec.credentialsSecretRef | default({})).name | default(''))
+      }}
+    ep_credentials_secret_namespace: "{{ (oso_admin_creds_secret | default({})).namespace | default(cloudoso_cr_namespace, true) }}"
     ep_base_domain: "{{ oso_spec.baseDomain | default(lookup('env', 'LAB_DOMAIN') | default('', true)) }}"
     ep_project_domain: "{{ oso_spec.projectDomain | default(default_project_domain) }}"
     ep_entity_name: "{{ entity_name }}"
@@ -11,8 +25,6 @@
     ep_external_network: "{{ oso_spec.externalNetwork | default(default_external_network) }}"
     ep_region_name: "{{ oso_spec.regionName | default(default_region_name) }}"
     ep_landingzone: "{{ oso_spec.landingzone | default('default') }}"
-    ep_enable_vrf: "{{ oso_spec.enableVRF | default(false) | bool }}"
-    ep_vrf_id: "{{ oso_spec.vrfId | default('') }}"
     use_designate_dns: "{{ ((oso_spec.designateZoneId | default('', true)) | length > 0) or ((oso_spec.baseDomain | default('', true)) == (BASE_DOMAIN | default(lookup('env', 'BASE_DOMAIN') | default('', true), true))) }}"
     ep_parent_zone_id: "{{ oso_spec.designateZoneId | default('', true) }}"
     # credentialsSecretRef alone must NOT skip project creation — admin clouds.yaml
@@ -31,7 +43,7 @@
         api_version: v1
         kind: Secret
         name: "{{ ep_credentials_secret_name }}"
-        namespace: "{{ cloudoso_cr_namespace }}"
+        namespace: "{{ ep_credentials_secret_namespace }}"
       register: openstack_entity_secret
       until: >-
         openstack_entity_secret.resources | length > 0 and
@@ -51,7 +63,7 @@
       ansible.builtin.assert:
         that:
           - ep_vault_path | length > 0
-        fail_msg: CloudOSO requires spec.credentialsSecretRef.name or spec.vaultPath
+        fail_msg: CloudOSO requires spec.cloudRef (CloudInfrastructure with credentialsRef), or the deprecated spec.credentialsSecretRef.name / spec.vaultPath
 
     - name: Create temporary ExternalSecret for OpenStack admin credentials
       kubernetes.core.k8s:

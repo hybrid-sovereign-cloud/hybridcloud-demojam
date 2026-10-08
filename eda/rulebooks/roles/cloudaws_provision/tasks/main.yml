@@ -43,9 +43,9 @@
         entity_name: "{{ cloudaws_ns_lookup.resources[0].metadata.labels['hybridsovereign.redhat/entity'] | default('') }}"
         cloudaws_generation: "{{ cloudaws_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
         cloudaws_spec: "{{ cloudaws_cr_lookup.resources[0].spec | default({}) }}"
-        aws_account: "{{ cloudaws_cr_lookup.resources[0].spec.account }}"
+        aws_account: "{{ cloudaws_cr_lookup.resources[0].spec.account | default('', true) }}"
         aws_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath | default('', true) }}"
-        aws_base_domain: "{{ cloudaws_cr_lookup.resources[0].spec.baseDomain }}"
+        aws_base_domain: "{{ cloudaws_cr_lookup.resources[0].spec.baseDomain | default('', true) }}"
         ep_existing_slug: "{{ cloudaws_cr_lookup.resources[0].status.slug | default('') }}"
       when: cloudaws_ns_lookup.resources | length > 0
 
@@ -57,6 +57,50 @@
         fail_msg: >-
           Namespace {{ cloudaws_cr_namespace }} is missing label
           hybridsovereign.redhat/entity. Cannot provision CloudAWS.
+
+    # spec.cloudRef -> CloudInfrastructure (type aws): admin credentials from its
+    # credentialsRef, region/baseDomain defaults from spec.aws; a value set on the
+    # CloudAWS wins. No cloudRef: deprecated spec.vaultPath / credentialsSecretRef.
+    - name: Resolve spec.cloudRef (CloudInfrastructure type aws)
+      when: (cloudaws_spec.cloudRef | default({}, true)).name | default('') | length > 0
+      block:
+        - name: Read CloudInfrastructure
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+          vars:
+            ci_ref_name: "{{ cloudaws_spec.cloudRef.name }}"
+            ci_expected_type: aws
+
+        - name: Require a usable aws CloudInfrastructure
+          ansible.builtin.assert:
+            that:
+              - ci_error | length == 0
+              - ci_ready | bool
+            fail_msg: >-
+              CloudAWS {{ cloudaws_cr_name }}: {{ ci_error if ci_error | length > 0
+              else ('CloudInfrastructure ' ~ cloudaws_spec.cloudRef.name ~ ' is not Ready') }}
+
+        - name: Require the entity to be allowed on this infrastructure
+          ansible.builtin.assert:
+            that: >-
+              (ci_spec.entityRefs | default([]) | length == 0)
+              or (entity_name in (ci_spec.entityRefs | map(attribute='name') | list))
+            fail_msg: "Entity {{ entity_name }} is not in CloudInfrastructure {{ cloudaws_spec.cloudRef.name }} spec.entityRefs."
+
+        - name: Use CloudInfrastructure credentials and defaults
+          vars:
+            _cr: "{{ ci_spec.credentialsRef | default({}, true) }}"
+            _aws: "{{ ci_spec.aws | default({}) }}"
+          ansible.builtin.set_fact:
+            aws_vault_path: "{{ _cr.vaultPath | default('', true) }}"
+            aws_cloudinfra_secret: >-
+              {{
+                {'name': _cr.secretRef.name, 'namespace': ci_obj.metadata.namespace}
+                if ((_cr.secretRef | default({}, true)).name | default('')) | length > 0 else {}
+              }}
+            aws_base_domain: "{{ aws_base_domain | default('', true) | default(_aws.baseDomain | default('', true), true) }}"
+            aws_account: "{{ aws_account | default('', true) | default(_aws.accountId | default('', true), true) }}"
+            cloudaws_spec: >-
+              {{ cloudaws_spec | combine({'region': cloudaws_spec.region | default(_aws.region | default('', true), true)}) }}
 
     - name: Include AWS environment preparation tasks
       ansible.builtin.include_tasks: aws_environmentprep.yml

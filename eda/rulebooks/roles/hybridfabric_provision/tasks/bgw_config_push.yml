@@ -1,0 +1,180 @@
+---
+# Push the rendered BGW config into the running guest and reload only what
+# changed (templates/bgw-push.sh.j2), instead of restarting the VMI.
+#
+# Access path: SSH from this job's pod (AAP runs on the hub) to the BGW's
+# virt-launcher pod IP. The VM's `default` interface is masquerade with no port
+# list, so every TCP port of the pod IP reaches the guest eth0; the BGW nftables
+# accepts tcp/22 on all interfaces. Credentials: Vault <borderGateway
+# vaultCredentialRef> (default fabric/<fabric>/bgw) key sshPrivateKey, matching the
+# sshPublicKey that cloud-init authorised for cloud-user (generated together on a
+# fresh fabric; on a BGW whose public key was seeded by hand the private key has
+# to be added to Vault once). No virtctl, no HCP-worker hop, no console password.
+#
+# When the push is not possible (no key, VMI not Ready, pod IP unreachable, no ssh
+# client and no paramiko in the EE) or fails: bgw_inplace_fallback = restart (default, old
+# behaviour: delete the VMI, the guest re-reads the config disk at boot) or defer
+# (keep the Secret, roll out at the next restart; status says so).
+#
+# Expected: bgw_* facts from bgw_facts.yml + the rendered bgw_*_conf facts,
+#           bgw_config_hash. Sets: bgw_config_applied_inplace, bgw_vmi_restarted,
+#           bgw_apply_note, bgw_push_result.
+
+- name: Reset push facts
+  ansible.builtin.set_fact:
+    _bgw_push_blockers: []
+    bgw_push_result: {}
+    _bgw_push_key: "/tmp/bgw-{{ bgw_name }}-push-key"
+    _bgw_push_script: "/tmp/bgw-{{ bgw_name }}-push.sh"
+
+- name: Read BGW VMI for the push
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_push_vmi
+
+- name: Find the BGW virt-launcher pod
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Pod
+    namespace: "{{ bgw_namespace }}"
+    label_selectors:
+      - "vm.kubevirt.io/name={{ bgw_name }}"
+    field_selectors:
+      - status.phase=Running
+  register: _bgw_push_pod
+
+- name: Collect push blockers
+  vars:
+    _conds: "{{ ((_bgw_push_vmi.resources | default([]) + [{}])[0].status | default({})).conditions | default([]) }}"
+  ansible.builtin.set_fact:
+    _bgw_push_pod_ip: "{{ ((_bgw_push_pod.resources | default([]) + [{}])[0].status | default({})).podIP | default('') }}"
+    _bgw_push_blockers: >-
+      {{
+        ([] if (_conds | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0)
+            else ['VMI not Ready'])
+        + ([] if (_conds | selectattr('type', 'equalto', 'AgentConnected') | selectattr('status', 'equalto', 'True') | list | length > 0)
+            else ['guest agent not connected'])
+        + ([] if (((_bgw_push_pod.resources | default([]) + [{}])[0].status | default({})).podIP | default('')) | length > 0
+            else ['no running virt-launcher pod'])
+        + ([] if (bgw_ssh_private_key | default('')) | length > 0
+            else ['Vault ' ~ bgw_vault_path ~ ' has no sshPrivateKey'])
+      }}
+
+- name: Push config over SSH
+  when: _bgw_push_blockers | length == 0
+  block:
+    - name: Stage SSH key (0600)
+      ansible.builtin.copy:
+        content: "{{ bgw_ssh_private_key | trim }}\n"
+        dest: "{{ _bgw_push_key }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Stage push script (0600; carries wg0.conf)
+      ansible.builtin.copy:
+        content: "{{ lookup('template', 'bgw-push.sh.j2') }}"
+        dest: "{{ _bgw_push_script }}"
+        mode: "0600"
+      no_log: true
+
+    # OpenSSH client when the EE has one, else paramiko (files/bgw_ssh_push.py).
+    - name: Run the push script on the BGW
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ role_path }}/files/bgw_ssh_push.py"
+          - "{{ _bgw_push_pod_ip }}"
+          - "{{ bgw_ssh_user | default('cloud-user') }}"
+          - "{{ _bgw_push_key }}"
+          - "{{ _bgw_push_script }}"
+          - "{{ bgw_push_timeout | default(180) | int }}"
+      register: _bgw_push_run
+      changed_when: _bgw_push_run.rc == 0
+      failed_when: false
+
+    - name: Parse push result
+      ansible.builtin.set_fact:
+        bgw_push_result: >-
+          {{
+            (_bgw_push_run.stdout_lines | default([]) | select('match', '^\{') | list | last | default('{}', true)) | from_json
+          }}
+
+    - name: Record push failure
+      when: not (bgw_push_result.ok | default(false) | bool)
+      ansible.builtin.set_fact:
+        _bgw_push_blockers: >-
+          {{
+            ['push failed (rc ' ~ _bgw_push_run.rc ~ '): '
+             ~ ((bgw_push_result | to_json) if (bgw_push_result | length > 0)
+                else (_bgw_push_run.stderr | default('') | truncate(300)))]
+          }}
+  always:
+    - name: Remove staged key and script
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _bgw_push_key }}"
+        - "{{ _bgw_push_script }}"
+
+- name: Record the in-place rollout
+  when: _bgw_push_blockers | length == 0
+  ansible.builtin.set_fact:
+    bgw_config_applied_inplace: true
+    bgw_apply_note: >-
+      (config applied in place: frr {{ bgw_push_result.frr | default('?') }}, nft {{ bgw_push_result.nft | default('?') }},
+      wg {{ bgw_push_result.wg | default('?') }}, dnsmasq {{ bgw_push_result.dnsmasq | default('?') }})
+
+# Fallback: the pre-restructure behaviour (the guest re-reads the config disk at boot).
+- name: Restart the BGW VMI when the in-place push is not possible
+  when:
+    - _bgw_push_blockers | length > 0
+    - (bgw_inplace_fallback | default('restart')) == 'restart'
+    - (_bgw_push_vmi.resources | default([])) | length > 0
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_push_restart
+
+- name: Record the fallback outcome
+  when: _bgw_push_blockers | length > 0
+  ansible.builtin.set_fact:
+    bgw_vmi_restarted: "{{ _bgw_push_restart is changed }}"
+    bgw_apply_note: >-
+      {{
+        '(config changed; in-place apply unavailable: ' ~ (_bgw_push_blockers | join('; ')) ~ '; VMI restarted)'
+        if (_bgw_push_restart is changed)
+        else '(config staged in Secret ' ~ bgw_name ~ '-config; in-place apply unavailable: '
+             ~ (_bgw_push_blockers | join('; ')) ~ '; applies at the next VMI restart)'
+      }}
+
+- name: Mark the config as applied on the Secret
+  when: (bgw_config_applied_inplace | bool) or (bgw_vmi_restarted | bool)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: patched
+    api_version: v1
+    kind: Secret
+    name: "{{ bgw_name }}-config"
+    namespace: "{{ bgw_namespace }}"
+    definition:
+      metadata:
+        annotations:
+          hybridsovereign.redhat/applied-hash: "{{ bgw_config_hash }}"

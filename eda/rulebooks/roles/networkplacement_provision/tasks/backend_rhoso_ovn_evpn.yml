@@ -4,7 +4,9 @@
 # spec.backend.kind == CloudOSO.
 #
 # Expected vars: np_spec, np_backend_name, np_vni, np_canonical_rt,
-#                np_domain_asn, networkplacement_cr_name/namespace
+#                np_domain_asn, networkplacement_cr_name/namespace,
+#                np_cloudinfra (CloudInfrastructure from the CloudOSO's cloudRef;
+#                region + management kubeconfig), np_gateway
 #
 # Sets facts:
 #   np_backend_applied, np_backend_ready, np_backend_message
@@ -46,10 +48,11 @@
     # Neutron rejects --evpn-vni despite CLI help advertising it).
     - name: Realize Neutron network (and FR6 EVPN router when available)
       block:
-        # Prefer the CloudOSO-provisioned per-project clouds.yaml written to
-        # Vault at oso/projects/<name>/clouds-config (app-cred scoped). Fall
-        # back to credentialsSecretRef in the entity namespace, then optional
-        # spec.vaultPath. Never default to oso/accounts/shc_admin (404).
+        # Source: the CloudOSO-provisioned per-project clouds.yaml in Vault at
+        # oso/projects/<name>/clouds-config (app-cred scoped). A CloudOSO that still
+        # sets the deprecated spec.vaultPath keeps using it (unchanged behaviour),
+        # and the deprecated credentialsSecretRef is the last fallback. Admin
+        # credentials (CloudInfrastructure credentialsRef) are never read here.
         - name: Reset clouds.yaml accumulator
           ansible.builtin.set_fact:
             vault_kv_data: {}
@@ -141,8 +144,14 @@
               environment:
                 CLOUDS_YAML: "{{ vault_kv_data['clouds.yaml'] }}"
                 DEST: "/tmp/np-{{ networkplacement_cr_name }}-clouds.yaml"
-                # Prefer CloudGateway.spec.region when set; else regionOne (RHOSO lab).
-                FORCE_REGION: "{{ (np_gateway.spec.region | default('regionOne')) if (np_gateway is defined) else 'regionOne' }}"
+                # CloudInfrastructure.spec.openstack.region, else the deprecated
+                # CloudGateway.spec.region, else regionOne (RHOSO lab).
+                FORCE_REGION: >-
+                  {{
+                    (((np_cloudinfra | default({})).spec | default({})).openstack | default({})).region
+                    | default(((np_gateway | default({})).spec | default({})).region | default('', true), true)
+                    | default('regionOne', true)
+                  }}
                 FORCE_PROJECT: >-
                   {{
                     np_cloudoso.status.projectName

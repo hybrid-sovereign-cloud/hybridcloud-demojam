@@ -1,4 +1,13 @@
 ---
+# NetworkPlacement teardown. Backends: CloudOSO, CloudAWS, CloudVirt (plan
+# decision 6; the PlatformOpenshift backend is gone, its CUDNs on hosted
+# clusters are removed with the hosted-cluster cutover, plan §5b step 5).
+#   CloudOSO  : Neutron network / EVPN router are left in the tenant project
+#               (unchanged behaviour; the project goes with CloudOSO teardown).
+#   CloudVirt : TODO(hub-pass) backend teardown (CUDN, RouteAdvertisements, the
+#               placement's vmNamespaces).
+# Then the BGW per-site RT policy is re-rendered without this placement (the
+# planner ignores placements that carry a deletionTimestamp) and pushed in place.
 - block:
     - name: Parse event payload
       ansible.builtin.set_fact:
@@ -8,9 +17,87 @@
     - name: Resolve services cluster API connection from Vault
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
 
-    - name: Stub debug teardown for NetworkPlacement
-      ansible.builtin.debug:
-        msg: "Stub teardown NetworkPlacement/{{ networkplacement_cr_name }}"
+    - name: Read NetworkPlacement CR
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: NetworkPlacement
+        name: "{{ networkplacement_cr_name }}"
+        namespace: "{{ networkplacement_cr_namespace }}"
+      register: npt_lookup
+
+    - name: Set placement facts
+      ansible.builtin.set_fact:
+        npt_spec: "{{ (npt_lookup.resources | default([]) + [{}])[0].spec | default({}) }}"
+        npt_status: "{{ (npt_lookup.resources | default([]) + [{}])[0].status | default({}) }}"
+
+    - name: Set backend kind
+      ansible.builtin.set_fact:
+        npt_backend_kind: "{{ (npt_spec.backend | default({})).kind | default('') }}"
+
+    # TODO(hub-pass): hub CNV EVPN backend teardown. Expected inputs: npt_spec
+    # (network, prefixes, vmNamespaces), npt_status (vni, vrfName), the CloudVirt
+    # backend and its CloudInfrastructure, networkplacement_cr_name/namespace,
+    # services_api_host/services_bearer_token. Expected output: npt_backend_message.
+    # - name: Remove the hub CNV EVPN attachment (CUDN, RouteAdvertisements, vmNamespaces)
+    #   when: npt_backend_kind == 'CloudVirt'
+    #   ansible.builtin.include_tasks: "{{ role_path }}/../networkplacement_provision/tasks/backend_cloudvirt_evpn_teardown.yml"
+
+    - name: Describe the backend cleanup
+      ansible.builtin.set_fact:
+        npt_backend_message: >-
+          {{
+            {
+              'CloudOSO': 'Neutron network/router left in the tenant project (removed with the CloudOSO).',
+              'CloudVirt': 'hub CNV attachment teardown pending (hub pass).',
+              'CloudAWS': 'no fabric attachment on AWS.',
+              'PlatformOpenshift': 'deprecated PlatformOpenshift backend: nothing to remove here (hosted-cluster CUDNs go with the hosted-cluster cutover).'
+            }.get(npt_backend_kind, 'no backend cleanup.')
+          }}
+
+    - name: Read the network's HybridNetwork (fabric of this placement)
+      when: (npt_spec.network | default('')) | length > 0
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridNetwork
+        name: "{{ npt_spec.network }}"
+        namespace: "{{ networkplacement_cr_namespace }}"
+      register: npt_hn
+      failed_when: false
+
+    - name: Read the fabric
+      when: ((npt_hn.resources | default([]) + [{}])[0].status | default({})).fabric | default('') | length > 0
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridFabric
+        name: "{{ npt_hn.resources[0].status.fabric }}"
+        namespace: sovereign-cloud
+      register: npt_fabric
+      failed_when: false
+
+    - name: Withdraw this placement's RT from the BGW per-site policy
+      when:
+        - (npt_fabric.resources | default([])) | length > 0
+        - ((npt_fabric.resources[0].spec | default({})).borderGateway | default({})).loopback | default('') | length > 0
+      block:
+        - name: Re-render BGW config
+          ansible.builtin.include_role:
+            name: hybridfabric_provision
+            tasks_from: bgw_config.yml
+          vars:
+            bgw_fabric_cr: "{{ npt_fabric.resources[0] }}"
+      rescue:
+        - name: Record BGW refresh failure (the next HybridFabric reconcile retries)
+          ansible.builtin.set_fact:
+            npt_bgw_warning: "BGW RT policy not refreshed: {{ ansible_failed_result.msg | default('error') }}"
 
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -19,11 +106,12 @@
         cr_plural: networkplacements
         cr_name: "{{ networkplacement_cr_name }}"
         cr_namespace: "{{ networkplacement_cr_namespace }}"
+        patch_ignore_not_found: true
         cr_status_body:
           status: ready
           ready: true
           deletionComplete: true
-          message: "Stub deleted by EDA hybridvpc"
+          message: "NetworkPlacement teardown complete: {{ npt_backend_message }} {{ npt_bgw_warning | default('') }}"
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:
@@ -34,13 +122,14 @@
         cr_plural: networkplacements
         cr_name: "{{ networkplacement_cr_name }}"
         cr_namespace: "{{ networkplacement_cr_namespace }}"
+        patch_ignore_not_found: true
         cr_status_body:
           status: failed
           ready: false
-          message: "{{ ansible_failed_result.msg | default('EDA stub teardown failed') }}"
+          message: "{{ ansible_failed_result.msg | default('EDA teardown failed') }}"
       ignore_errors: true
       when: services_api_host is defined
 
     - name: Re-raise
       ansible.builtin.fail:
-        msg: "NetworkPlacement teardown stub failed"
+        msg: "NetworkPlacement {{ networkplacement_cr_name | default('unknown') }} teardown failed"

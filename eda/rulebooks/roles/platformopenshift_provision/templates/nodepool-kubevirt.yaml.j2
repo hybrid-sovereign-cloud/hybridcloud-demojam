@@ -20,13 +20,5 @@ spec:
         type: Persistent
         persistent:
           size: "32Gi"
-{% if (hc_additional_networks | default([])) | length > 0 %}
-      # Fabric hub underlay (eth1, DHCP from the border gateway) — VTEP for EVPN.
-      attachDefaultNetwork: true
-      additionalNetworks:
-{% for n in hc_additional_networks %}
-        - name: "{{ n.name }}"
-{% endfor %}
-{% endif %}
   release:
     image: "{{ hc_release_image }}"

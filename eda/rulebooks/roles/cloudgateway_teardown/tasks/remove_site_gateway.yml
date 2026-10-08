@@ -4,42 +4,29 @@
 # EDPM (NetConfig `fabric`, NodeSet vars/services) is NOT reverted automatically:
 # rolling computes back is an operator decision (design/fabric.md §21.4).
 
-- name: Read CloudOSO for the management cluster kubeconfig ref
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: hybridsovereign.redhat/v1alpha1
-    kind: CloudOSO
-    name: "{{ cgwt_spec.openstackCloudOSORef }}"
-  register: cgwt_cloudoso
-
+# Site facts from common/tasks/resolve_cloudgateway_site.yml: the management
+# kubeconfig comes from CloudInfrastructure.spec.openstack (deprecated path:
+# gateway / CloudOSO managementClusterKubeconfigRef, else oso/<cloudoso>/mgmt-kubeconfig).
 - name: Resolve management cluster kubeconfig ref
   ansible.builtin.set_fact:
-    cgwt_kube_ref: >-
-      {{
-        cgwt_spec.managementClusterKubeconfigRef
-        | default(((cgwt_cloudoso.resources | default([]) + [{}])[0].spec | default({})).managementClusterKubeconfigRef | default(''), true)
-        | default('oso/' ~ cgwt_spec.openstackCloudOSORef ~ '/mgmt-kubeconfig', true)
-      }}
+    cgwt_kube_ref: "{{ rcs_mgmt_kubeconfig_ref | default('', true) }}"
     cgwt_kubeconfig: "/tmp/cgwt-{{ cloudgateway_cr_name }}-mgmt-kubeconfig"
-    cgwt_vm: "fabric-gw-{{ cgwt_spec.openstackCloudOSORef }}"
+    cgwt_vm: "fabric-gw-{{ rcs_site_name }}"
     cgwt_ns: openstack
 
 - name: Remove site gateway objects on the management cluster
   when: cgwt_kube_ref | length > 0
   block:
-    - name: Read management cluster kubeconfig from Vault
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
-      vars:
-        vault_kv_path: "{{ cgwt_kube_ref }}"
-
     - name: Write management cluster kubeconfig
-      ansible.builtin.copy:
-        content: "{{ vault_kv_data.kubeconfig }}"
-        dest: "{{ cgwt_kubeconfig }}"
-        mode: "0600"
-      no_log: true
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+      vars:
+        ci_kubeconfig_ref: "{{ cgwt_kube_ref }}"
+        ci_kubeconfig_dest: "{{ cgwt_kubeconfig }}"
+
+    - name: Require a readable management cluster kubeconfig
+      ansible.builtin.fail:
+        msg: "CloudGateway {{ cloudgateway_cr_name }} teardown: {{ ci_kubeconfig_error }}"
+      when: not (ci_kubeconfig_ok | bool)
 
     - name: Delete gateway VM, cloud-init Secret, NAD and MAC-NAT shim
       kubernetes.core.k8s:

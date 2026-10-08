@@ -23,12 +23,33 @@
       ansible.builtin.set_fact:
         cgwt_spec: "{{ (cgwt_lookup.resources | default([]) + [{}])[0].spec | default({}) }}"
 
-    - name: Remove RHOSO site gateway (cloud=openstack, transport wireguard)
+    - name: Resolve the site (cloudRef, else deprecated fields)
+      when: (cgwt_lookup.resources | default([])) | length > 0
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloudgateway_site.yml"
+      vars:
+        rcs_gateway: "{{ cgwt_lookup.resources[0] }}"
+
+    - name: Remove RHOSO site gateway (openstack site, transport wireguard)
       when:
-        - (cgwt_spec.cloud | default('')) == 'openstack'
-        - (cgwt_spec.transport.type | default('')) == 'wireguard'
-        - (cgwt_spec.openstackCloudOSORef | default('')) | length > 0
+        - (cgwt_lookup.resources | default([])) | length > 0
+        - rcs_cloud_type | default('') == 'openstack'
+        - rcs_transport | default('none') == 'wireguard'
+        - rcs_site_name | default('') | length > 0
       ansible.builtin.include_tasks: remove_site_gateway.yml
+
+    # TODO(hub-pass): openshift site teardown (hub VTEP / FRRConfiguration owned by this
+    # gateway). Expected inputs: rcs_cloudinfra, cloudgateway_cr_name, services_api_host.
+    # - name: Remove hub CNV EVPN landing
+    #   when: rcs_cloud_type | default('') == 'openshift'
+    #   ansible.builtin.include_tasks: remove_hub_evpn.yml
+
+    - name: Release the gateway's allocated WireGuard address
+      when: (cgwt_spec.fabricRef | default('')) | length > 0
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/fabric_wg_address_release.yml"
+      vars:
+        fwr_fabric_name: "{{ cgwt_spec.fabricRef }}"
+        fwr_fabric_namespace: sovereign-cloud
+        fwr_gateway_name: "{{ cloudgateway_cr_name }}"
 
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -41,7 +62,7 @@
           status: ready
           ready: true
           deletionComplete: true
-          message: "CloudGateway teardown complete (site gateway removed when cloud=openstack/wireguard; EDPM left as-is)."
+          message: "CloudGateway teardown complete (site gateway removed for an openstack site with transport wireguard; EDPM left as-is; WireGuard address released)."
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:

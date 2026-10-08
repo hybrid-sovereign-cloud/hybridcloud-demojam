@@ -1,0 +1,207 @@
+---
+# type openshift (hub CNV, "virt"). Read only:
+#   - target cluster: spec.openshift.clusterRef `local` (default) = the services
+#     cluster (hub); anything else needs credentialsRef with key `kubeconfig`
+#   - CNV: a KubeVirt CR exists and is Available
+#   - HybridFabric underlay NAD(s) present on the hub (noted, not required)
+#   - EVPN capability: CNO has the FRR provider and routeAdvertisements Enabled
+#     (GitOps-owned cluster config, never patched from a job; plan §3.2.2)
+# Sets: ci_credentials_valid, ci_credentials_message, ci_capabilities_out,
+#       ci_site_out, ci_type_message, ci_evpn_reason, ci_evpn_message
+
+- name: Set openshift section facts
+  ansible.builtin.set_fact:
+    ci_ocp: "{{ ci_cr_spec.openshift | default({}) }}"
+    ci_ocp_local: "{{ ((ci_cr_spec.openshift | default({})).clusterRef | default('local', true)) in ['local', 'hub', 'local-cluster'] }}"
+    ci_cluster_kubeconfig: "/tmp/ci-{{ cloudinfrastructure_cr_name }}-cluster-kubeconfig"
+
+# k8s modules take either host/api_key or kubeconfig; build one arg dict.
+- name: Connect to the hub (clusterRef local)
+  when: ci_ocp_local | bool
+  ansible.builtin.set_fact:
+    ci_k8s_auth:
+      host: "{{ services_api_host }}"
+      api_key: "{{ services_bearer_token }}"
+    ci_credentials_valid: true
+    ci_credentials_message: "clusterRef {{ ci_ocp.clusterRef | default('local', true) }}: services cluster connection."
+  no_log: true
+
+- name: Connect to a remote cluster through credentialsRef (kubeconfig)
+  when: not (ci_ocp_local | bool)
+  block:
+    - name: Read cluster kubeconfig
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+      vars:
+        ci_kubeconfig_ref: "{{ ci_cr_spec.credentialsRef | default({}, true) }}"
+        ci_kubeconfig_dest: "{{ ci_cluster_kubeconfig }}"
+
+    - name: Set credentials failure reason before failing
+      when: not (ci_kubeconfig_ok | bool)
+      ansible.builtin.set_fact:
+        cloudinfrastructure_fail_reason: CredentialsUnavailable
+
+    - name: Require a kubeconfig for a non-local clusterRef
+      ansible.builtin.assert:
+        that: ci_kubeconfig_ok | bool
+        fail_msg: >-
+          CloudInfrastructure {{ cloudinfrastructure_cr_name }}: clusterRef {{ ci_ocp.clusterRef }}
+          is not the hub; spec.credentialsRef must hold a kubeconfig ({{ ci_kubeconfig_error }}).
+
+    - name: Use the cluster kubeconfig
+      ansible.builtin.set_fact:
+        ci_k8s_auth:
+          kubeconfig: "{{ ci_cluster_kubeconfig }}"
+        ci_credentials_valid: true
+        ci_credentials_message: "clusterRef {{ ci_ocp.clusterRef }}: kubeconfig from {{ ci_kubeconfig_source }}."
+
+# ------------------------------------------------------------------ CNV
+- name: Read KubeVirt CRs (OpenShift Virtualization)
+  kubernetes.core.k8s_info:
+    host: "{{ ci_k8s_auth.host | default(omit) }}"
+    api_key: "{{ ci_k8s_auth.api_key | default(omit) }}"
+    kubeconfig: "{{ ci_k8s_auth.kubeconfig | default(omit) }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: KubeVirt
+  register: _ci_kubevirt
+  failed_when: false
+
+- name: Evaluate CNV availability
+  ansible.builtin.set_fact:
+    ci_cnv_available: >-
+      {{
+        (_ci_kubevirt.resources | default([])
+         | map(attribute='status') | map('default', {}, true)
+         | map(attribute='conditions') | map('default', [], true)
+         | map('selectattr', 'type', 'equalto', 'Available')
+         | map('selectattr', 'status', 'equalto', 'True')
+         | map('list') | select | list | length) > 0
+      }}
+    ci_cnv_name: >-
+      {{ ((_ci_kubevirt.resources | default([]) + [{'metadata': {}}])[0].metadata.namespace | default('') ~ '/'
+          ~ (_ci_kubevirt.resources | default([]) + [{'metadata': {}}])[0].metadata.name | default('')) }}
+
+- name: Set CNV-missing failure reason before failing
+  when: not (ci_cnv_available | bool)
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CnvNotAvailable
+
+- name: Require OpenShift Virtualization
+  ansible.builtin.assert:
+    that: ci_cnv_available | bool
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }}: no Available KubeVirt CR on cluster
+      {{ ci_ocp.clusterRef | default('local', true) }} (install OpenShift Virtualization).
+      {{ _ci_kubevirt.msg | default('') }}
+
+- name: Check the boot image storage class when set
+  when: (ci_ocp.storageClass | default('', true)) | length > 0
+  kubernetes.core.k8s_info:
+    host: "{{ ci_k8s_auth.host | default(omit) }}"
+    api_key: "{{ ci_k8s_auth.api_key | default(omit) }}"
+    kubeconfig: "{{ ci_k8s_auth.kubeconfig | default(omit) }}"
+    validate_certs: false
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ ci_ocp.storageClass }}"
+  register: _ci_sc
+  failed_when: false
+
+- name: Note a missing storage class
+  when:
+    - (ci_ocp.storageClass | default('', true)) | length > 0
+    - (_ci_sc.resources | default([])) | length == 0
+  ansible.builtin.set_fact:
+    ci_notes: "{{ ci_notes + ['storageClass ' ~ ci_ocp.storageClass ~ ' not found'] }}"
+
+# ------------------------------------------------------------------ fabric underlay NAD (noted only)
+- name: List HybridFabrics (underlay NAD names)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridFabric
+    namespace: "{{ ci_fabric_namespace }}"
+  register: _ci_fabrics
+  failed_when: false
+
+- name: Select the fabric(s) to check
+  ansible.builtin.set_fact:
+    ci_fabric_nads: >-
+      {{
+        _ci_fabrics.resources | default([])
+        | selectattr('metadata.name', 'in',
+            ([ci_ocp.fabricRef] if (ci_ocp.fabricRef | default('', true)) | length > 0
+             else (_ci_fabrics.resources | default([]) | map(attribute='metadata.name') | list)))
+        | map(attribute='spec') | map('default', {}, true)
+        | map(attribute='underlay') | map('default', {}, true)
+        | map(attribute='nadName') | map('default', ci_default_underlay_nad, true)
+        | unique | list
+      }}
+    ci_underlay_nads_found: []
+
+- name: Look up the underlay NAD(s) in the fabric namespace
+  kubernetes.core.k8s_info:
+    host: "{{ ci_k8s_auth.host | default(omit) }}"
+    api_key: "{{ ci_k8s_auth.api_key | default(omit) }}"
+    kubeconfig: "{{ ci_k8s_auth.kubeconfig | default(omit) }}"
+    validate_certs: false
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    name: "{{ item }}"
+    namespace: "{{ ci_fabric_namespace }}"
+  loop: "{{ ci_fabric_nads }}"
+  register: _ci_nads
+  failed_when: false
+
+- name: Record underlay NADs present
+  ansible.builtin.set_fact:
+    ci_underlay_nads_found: >-
+      {{
+        _ci_nads.results | default([])
+        | selectattr('resources', 'defined') | selectattr('resources')
+        | map(attribute='item') | map('regex_replace', '^', ci_fabric_namespace ~ '/') | list
+      }}
+
+# ------------------------------------------------------------------ EVPN capability (CNO, read only)
+- name: Read the cluster network operator config
+  kubernetes.core.k8s_info:
+    host: "{{ ci_k8s_auth.host | default(omit) }}"
+    api_key: "{{ ci_k8s_auth.api_key | default(omit) }}"
+    kubeconfig: "{{ ci_k8s_auth.kubeconfig | default(omit) }}"
+    validate_certs: false
+    api_version: operator.openshift.io/v1
+    kind: Network
+    name: cluster
+  register: _ci_cno
+  failed_when: false
+
+- name: Derive EVPN capability from CNO
+  ansible.builtin.set_fact:
+    ci_cno_frr: >-
+      {{
+        'FRR' in (((_ci_cno.resources | default([]) + [{}])[0].spec | default({})).additionalRoutingCapabilities | default({})).providers | default([])
+      }}
+    ci_cno_ra: >-
+      {{
+        ((((_ci_cno.resources | default([]) + [{}])[0].spec | default({})).defaultNetwork | default({})).ovnKubernetesConfig | default({})).routeAdvertisements | default('')
+      }}
+
+- name: Set openshift result facts
+  ansible.builtin.set_fact:
+    ci_capabilities_out:
+      evpn: "{{ (ci_cno_frr | bool) and ci_cno_ra == 'Enabled' }}"
+    ci_evpn_reason: "{{ 'CnoFrrRouteAdvertisements' if ((ci_cno_frr | bool) and ci_cno_ra == 'Enabled') else 'CnoNotEvpnReady' }}"
+    ci_evpn_message: >-
+      CNO additionalRoutingCapabilities FRR={{ ci_cno_frr }}, routeAdvertisements={{ ci_cno_ra | default('unset', true) }}
+      (GitOps-owned; not changed by EDA).
+    ci_site_out:
+      cluster: "{{ ci_ocp.clusterRef | default('local', true) }}"
+      kubevirt: "{{ ci_cnv_name }}"
+      underlayNads: "{{ ci_underlay_nads_found }}"
+      cnoFrr: "{{ ci_cno_frr | bool }}"
+      routeAdvertisements: "{{ ci_cno_ra | default('', true) }}"
+    ci_type_message: >-
+      CNV {{ ci_cnv_name }} Available on {{ ci_ocp.clusterRef | default('local', true) }};
+      fabric underlay NAD {{ ci_underlay_nads_found | join(', ') | default('not present', true) }}.

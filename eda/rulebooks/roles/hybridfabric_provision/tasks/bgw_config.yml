@@ -1,12 +1,19 @@
 ---
 # Render the BGW dynamic configuration (wg0.conf, frr.conf, dnsmasq, nftables)
-# into Secret <bgw>-config and restart the VMI when it changed, so the guest's
-# fabric-config-sync.service picks it up at boot.
+# into Secret <bgw>-config (the VM's config disk, re-read at every boot) and roll
+# it out WITHOUT restarting the VMI (plan §3.2.5): bgw_config_push.yml copies the
+# changed files over SSH and reloads only what changed (frr-reload, nft -f,
+# wg syncconf, dnsmasq restart). The VMI is restarted only when the push is not
+# possible and bgw_inplace_fallback == restart (the pre-restructure behaviour).
 #
-# Entry point for transportlink_provision (include_role tasks_from) as well as
+# Entry point for transportlink_provision, hybridnetwork_provision and
+# networkplacement_provision (include_role tasks_from) as well as
 # deploy_border_gateway.yml. Required vars: bgw_fabric_cr, services_api_host,
-# services_bearer_token. Optional: bgw_restart_on_change (default role var).
-# Sets: bgw_config_changed, bgw_vmi_restarted, plus all bgw_* facts.
+# services_bearer_token. Optional: bgw_apply_mode (auto | deferred; deferred =
+# only update the Secret, the caller decides; deploy_border_gateway.yml uses it
+# so a VM-spec restart and a config push never both happen).
+# Sets: bgw_config_changed, bgw_rollout_needed, bgw_config_hash, bgw_config_existed, bgw_vmi_restarted,
+#       bgw_config_applied_inplace, bgw_apply_note, plus all bgw_* facts.
 
 - name: Compute BGW facts
   ansible.builtin.include_tasks: bgw_facts.yml
@@ -49,14 +56,24 @@
   register: _bgw_cfg_existing
   no_log: true
 
+# config-hash  = content of the Secret; applied-hash = content the running guest
+# has (set after a successful in-place push or a VMI restart). A Secret written
+# by the pre-restructure code has no applied-hash: it restarted on every change,
+# so its config-hash counts as applied.
 - name: Detect BGW config change
+  vars:
+    _bgw_ann: "{{ ((_bgw_cfg_existing.resources | default([{}]))[0].metadata | default({})).annotations | default({}) }}"
   ansible.builtin.set_fact:
-    bgw_config_changed: >-
-      {{
-        ((_bgw_cfg_existing.resources | default([{}]))[0].metadata.annotations | default({})).get('hybridsovereign.redhat/config-hash', '')
-        != _bgw_cfg_hash
-      }}
     _bgw_cfg_existed: "{{ (_bgw_cfg_existing.resources | default([])) | length > 0 }}"
+    _bgw_prev_cfg_hash: "{{ _bgw_ann.get('hybridsovereign.redhat/config-hash', '') }}"
+    _bgw_prev_applied_hash: >-
+      {{ _bgw_ann.get('hybridsovereign.redhat/applied-hash', _bgw_ann.get('hybridsovereign.redhat/config-hash', '')) }}
+
+- name: Set BGW change facts
+  ansible.builtin.set_fact:
+    bgw_config_changed: "{{ _bgw_prev_cfg_hash != _bgw_cfg_hash }}"
+    bgw_rollout_needed: "{{ (_bgw_cfg_existed | bool) and (_bgw_prev_applied_hash != _bgw_cfg_hash) }}"
+    bgw_config_hash: "{{ _bgw_cfg_hash }}"
 
 - name: Apply BGW config Secret
   when: bgw_config_changed | bool
@@ -78,42 +95,21 @@
           hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
         annotations:
           hybridsovereign.redhat/config-hash: "{{ _bgw_cfg_hash }}"
+          # A brand-new Secret is applied by the VM's first boot.
+          hybridsovereign.redhat/applied-hash: "{{ _bgw_prev_applied_hash if (_bgw_cfg_existed | bool) else _bgw_cfg_hash }}"
           hybridsovereign.redhat/peers: "{{ bgw_peers | map(attribute='name') | join(',') }}"
       data: "{{ _bgw_cfg_data }}"
   no_log: true
 
-- name: Read BGW VMI
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: kubevirt.io/v1
-    kind: VirtualMachineInstance
-    name: "{{ bgw_name }}"
-    namespace: "{{ bgw_namespace }}"
-  register: _bgw_vmi_before
-
-# The Secret disk is built when the VMI starts, so a running VMI only sees the
-# new config after a restart (runStrategy Always recreates it). BGP sessions and
-# the WireGuard tunnel drop for the duration of the reboot (~1-2 min); dnsmasq
-# leases persist on the root disk so HCP worker addresses do not change.
-- name: Restart BGW VMI to roll out changed config
-  when:
-    - bgw_config_changed | bool
-    - _bgw_cfg_existed | bool
-    - (_bgw_vmi_before.resources | default([])) | length > 0
-    - bgw_restart_on_change | default(true) | bool
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: absent
-    api_version: kubevirt.io/v1
-    kind: VirtualMachineInstance
-    name: "{{ bgw_name }}"
-    namespace: "{{ bgw_namespace }}"
-  register: _bgw_vmi_restart
-
-- name: Record BGW restart outcome
+- name: Default rollout outcome facts
   ansible.builtin.set_fact:
-    bgw_vmi_restarted: "{{ _bgw_vmi_restart is changed }}"
+    bgw_config_existed: "{{ _bgw_cfg_existed | bool }}"
+    bgw_vmi_restarted: false
+    bgw_config_applied_inplace: false
+    bgw_apply_note: ""
+
+- name: Roll out changed config in place
+  when:
+    - (bgw_apply_mode | default('auto')) == 'auto'
+    - bgw_rollout_needed | bool
+  ansible.builtin.include_tasks: bgw_config_push.yml

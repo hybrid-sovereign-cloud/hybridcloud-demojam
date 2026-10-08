@@ -42,11 +42,14 @@
     np_validated: false
     np_validated_message: "Not validated: backend was not applied."
 
+# CloudVirt (hub CNV): the hub-pass backend sets np_spoke_kubeconfig_file when the
+# spoke frr-k8s is not the services cluster. TODO(hub-pass): probe the hub frr-k8s
+# with services_api_host/services_bearer_token when np_spoke_kubeconfig_file is unset.
 - name: Probe BGW session from the OpenShift spoke (frr-k8s)
   when:
     - np_backend_applied | default(false) | bool
     - np_probe_bgw | length > 0
-    - np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
+    - np_spec.backend.kind == 'CloudVirt'
     - (np_spoke_kubeconfig_file | default('')) | length > 0
   block:
     - name: List frr-k8s pods on the spoke

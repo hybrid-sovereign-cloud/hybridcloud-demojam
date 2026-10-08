@@ -1,0 +1,66 @@
+---
+# Resolve a CloudInfrastructure (platform-owned "bring-your-own cloud",
+# namespace sovereign-cloud) by name. Used by every role that follows a
+# spec.cloudRef (CloudGateway, CloudOSO, CloudVirt, CloudAWS, NetworkPlacement).
+#
+# Required vars:
+#   ci_ref_name        CloudInfrastructure metadata.name (cloudRef.name)
+# Optional:
+#   ci_ref_namespace   default sovereign-cloud (cloudRef.namespace when set)
+#   ci_expected_type   openstack | openshift | aws; mismatch sets ci_error
+#
+# Sets (never fails; callers decide):
+#   ci_found (bool), ci_obj (dict), ci_spec (dict), ci_type (string),
+#   ci_ready (bool), ci_capabilities (dict), ci_error (string, '' when usable)
+
+- name: Reset CloudInfrastructure facts
+  ansible.builtin.set_fact:
+    ci_found: false
+    ci_obj: {}
+    ci_spec: {}
+    ci_type: ""
+    ci_ready: false
+    ci_capabilities: {}
+    ci_error: ""
+
+- name: Read CloudInfrastructure {{ ci_ref_name | default('') }}
+  when: (ci_ref_name | default('')) | length > 0
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudInfrastructure
+    name: "{{ ci_ref_name }}"
+    namespace: "{{ ci_ref_namespace | default('sovereign-cloud', true) }}"
+  register: _ci_lookup
+  # The CRD may not be installed yet during the additive cutover (plan §5b step 2).
+  failed_when: false
+
+- name: Set CloudInfrastructure facts
+  when: (_ci_lookup.resources | default([])) | length > 0
+  ansible.builtin.set_fact:
+    ci_found: true
+    ci_obj: "{{ _ci_lookup.resources[0] }}"
+    ci_spec: "{{ _ci_lookup.resources[0].spec | default({}) }}"
+    ci_type: "{{ _ci_lookup.resources[0].spec.type | default('') }}"
+    ci_ready: "{{ _ci_lookup.resources[0].status.ready | default(false) | bool }}"
+    ci_capabilities: "{{ _ci_lookup.resources[0].status.capabilities | default({}) }}"
+
+- name: Record CloudInfrastructure resolution error
+  ansible.builtin.set_fact:
+    ci_error: >-
+      {{
+        'cloudRef.name is empty'
+        if (ci_ref_name | default('')) | length == 0
+        else (
+          'CloudInfrastructure ' ~ (ci_ref_namespace | default('sovereign-cloud', true)) ~ '/' ~ ci_ref_name ~ ' not found'
+          ~ ((' (' ~ (_ci_lookup.msg | default('') | truncate(200)) ~ ')') if (_ci_lookup.msg | default('')) | length > 0 else '')
+          if not (ci_found | bool)
+          else (
+            'CloudInfrastructure ' ~ ci_ref_name ~ ' has spec.type=' ~ ci_type ~ ', expected ' ~ ci_expected_type
+            if ((ci_expected_type | default('')) | length > 0 and ci_type != ci_expected_type)
+            else ''
+          )
+        )
+      }}

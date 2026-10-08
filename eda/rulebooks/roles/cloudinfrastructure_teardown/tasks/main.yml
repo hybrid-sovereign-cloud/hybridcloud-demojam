@@ -1,0 +1,99 @@
+---
+# CloudInfrastructure teardown. Nothing is created by provision (read-only
+# checks), so teardown only guards the delete: it refuses while any
+# CloudGateway / CloudOSO / CloudVirt / CloudAWS still has spec.cloudRef to it
+# (including objects that are themselves being deleted). The operator keeps the
+# finalizer until status.deletionComplete is true and relaunches a failed job.
+- block:
+    - name: Parse event payload
+      ansible.builtin.set_fact:
+        cloudinfrastructure_cr_name: "{{ event_payload.regarding.name }}"
+        cloudinfrastructure_cr_namespace: "{{ event_payload.regarding.namespace }}"
+        cloudinfrastructure_fail_reason: ""
+
+    - name: Resolve services cluster API connection from Vault
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_services_cluster_connection.yml"
+
+    - name: List objects that may reference this CloudInfrastructure
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: "{{ item }}"
+      loop: "{{ cit_referencing_kinds }}"
+      register: _cit_refs
+      # A kind whose CRD is not installed cannot reference anything.
+      failed_when: false
+
+    - name: Collect references (spec.cloudRef.name, namespace defaults to sovereign-cloud)
+      ansible.builtin.set_fact:
+        cit_referrers: >-
+          {%- set out = [] -%}
+          {%- for r in _cit_refs.results | default([]) -%}
+          {%-   for o in r.resources | default([]) -%}
+          {%-     set ref = (o.spec | default({})).cloudRef | default({}, true) -%}
+          {%-     if (ref.name | default('')) == cloudinfrastructure_cr_name
+                    and (ref.namespace | default('sovereign-cloud', true)) == cloudinfrastructure_cr_namespace -%}
+          {%-       set _ = out.append(r.item ~ ' ' ~ o.metadata.namespace ~ '/' ~ o.metadata.name
+                                       ~ (' (deleting)' if o.metadata.deletionTimestamp is defined else '')) -%}
+          {%-     endif -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Set in-use failure reason before refusing
+      when: cit_referrers | length > 0
+      ansible.builtin.set_fact:
+        cloudinfrastructure_fail_reason: InUse
+
+    - name: Refuse while still referenced
+      when: cit_referrers | length > 0
+      ansible.builtin.fail:
+        msg: >-
+          CloudInfrastructure {{ cloudinfrastructure_cr_name }} is still referenced by
+          {{ cit_referrers | length }} object(s): {{ cit_referrers | join(', ') }}.
+          Delete them (or move their spec.cloudRef) first; deletion stays blocked until then.
+
+    - name: Mark deletion complete
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      vars:
+        cr_api_version: hybridsovereign.redhat/v1alpha1
+        cr_plural: cloudinfrastructures
+        cr_name: "{{ cloudinfrastructure_cr_name }}"
+        cr_namespace: "{{ cloudinfrastructure_cr_namespace }}"
+        patch_ignore_not_found: true
+        cr_status_body:
+          status: ready
+          ready: true
+          deletionComplete: true
+          message: "CloudInfrastructure teardown complete (no CloudGateway/CloudOSO/CloudVirt/CloudAWS references it)."
+          lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+
+  rescue:
+    - name: Mark teardown refused/failed
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+      vars:
+        cr_api_version: hybridsovereign.redhat/v1alpha1
+        cr_plural: cloudinfrastructures
+        cr_name: "{{ cloudinfrastructure_cr_name }}"
+        cr_namespace: "{{ cloudinfrastructure_cr_namespace }}"
+        patch_ignore_not_found: true
+        cr_status_body:
+          status: failed
+          ready: false
+          deletionComplete: false
+          message: "{{ ansible_failed_result.msg | default('EDA teardown failed') }}"
+          lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+          conditions:
+            - type: Ready
+              status: "False"
+              lastTransitionTime: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+              reason: "{{ cloudinfrastructure_fail_reason if (cloudinfrastructure_fail_reason | default('') | length > 0) else 'EDAFailed' }}"
+              message: "{{ ansible_failed_result.msg | default('EDA teardown failed') }}"
+      ignore_errors: true
+      when: services_api_host is defined
+
+    - name: Re-raise
+      ansible.builtin.fail:
+        msg: "CloudInfrastructure {{ cloudinfrastructure_cr_name | default('unknown') }} teardown refused or failed"

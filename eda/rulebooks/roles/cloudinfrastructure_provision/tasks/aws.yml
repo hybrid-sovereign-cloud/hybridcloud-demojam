@@ -1,0 +1,125 @@
+---
+# type aws: credentials check only (no EVPN landing for AWS, design §15.0).
+# credentialsRef keys: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional
+# ACCOUNT_ID), the layout CloudAWS already uses. When boto3 is available the
+# keys are verified with STS GetCallerIdentity and the account is compared with
+# spec.aws.accountId; without boto3 the keys are only checked for presence.
+# Sets: ci_credentials_valid, ci_credentials_message, ci_capabilities_out,
+#       ci_site_out, ci_type_message, ci_evpn_reason, ci_evpn_message
+
+- name: Set aws section facts
+  ansible.builtin.set_fact:
+    ci_aws: "{{ ci_cr_spec.aws | default({}) }}"
+    ci_aws_file: "/tmp/ci-{{ cloudinfrastructure_cr_name }}-aws.json"
+
+- name: Set credentials-missing failure reason before validating
+  when: (ci_cr_spec.credentialsRef | default({}, true)) | length == 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsMissing
+
+- name: Require spec.credentialsRef
+  ansible.builtin.assert:
+    that: (ci_cr_spec.credentialsRef | default({}, true)) | length > 0
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }} (aws) needs spec.credentialsRef
+      (vaultPath or secretRef with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+
+- name: Read AWS credentials
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_ref_read.yml"
+  vars:
+    cisr_ref: "{{ ci_cr_spec.credentialsRef }}"
+    cisr_what: credentialsRef
+    cisr_namespace: "{{ cloudinfrastructure_cr_namespace }}"
+
+- name: Normalize AWS key names
+  ansible.builtin.set_fact:
+    _ci_aws_keys:
+      access_key: "{{ cisr_data.AWS_ACCESS_KEY_ID | default(cisr_data.aws_access_key_id | default('', true), true) }}"
+      secret_key: "{{ cisr_data.AWS_SECRET_ACCESS_KEY | default(cisr_data.aws_secret_access_key | default('', true), true) }}"
+      account_id: "{{ cisr_data.ACCOUNT_ID | default(cisr_data.account_id | default('', true), true) }}"
+      region: "{{ ci_aws.region | default('us-east-1', true) }}"
+  no_log: true
+
+- name: Set credentials-unreadable failure reason before failing
+  when: (_ci_aws_keys.access_key | length == 0) or (_ci_aws_keys.secret_key | length == 0)
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsUnavailable
+
+- name: Require AWS keys
+  ansible.builtin.assert:
+    that:
+      - _ci_aws_keys.access_key | length > 0
+      - _ci_aws_keys.secret_key | length > 0
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }}: credentialsRef {{ cisr_source | default('', true) }}
+      lacks AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY {{ ('(' ~ cisr_error ~ ')') if cisr_error | length > 0 else '' }}
+  no_log: false
+
+# Keys go through a 0600 file, not the environment of a logged task.
+- name: Stage AWS keys for the STS probe
+  ansible.builtin.copy:
+    content: "{{ _ci_aws_keys | to_json }}"
+    dest: "{{ ci_aws_file }}"
+    mode: "0600"
+  no_log: true
+
+- name: Verify the keys with STS GetCallerIdentity (when boto3 is available)
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import json, os
+    k = json.load(open(os.environ["KEYS_FILE"]))
+    out = {"verified": False, "account": "", "message": ""}
+    try:
+        import boto3
+    except ImportError:
+        out["message"] = "boto3 not in this execution environment; keys present, not verified"
+        print(json.dumps(out)); raise SystemExit(0)
+    try:
+        sts = boto3.client("sts", aws_access_key_id=k["access_key"],
+                           aws_secret_access_key=k["secret_key"], region_name=k["region"])
+        ident = sts.get_caller_identity()
+        out.update(verified=True, account=ident.get("Account", ""),
+                   message="STS GetCallerIdentity ok (%s)" % ident.get("Arn", ""))
+    except Exception as e:
+        out["message"] = "%s: %s" % (type(e).__name__, e)
+    print(json.dumps(out))
+    PY
+  environment:
+    KEYS_FILE: "{{ ci_aws_file }}"
+  register: _ci_aws_sts
+  changed_when: false
+  failed_when: _ci_aws_sts.rc != 0
+
+- name: Record STS result
+  ansible.builtin.set_fact:
+    ci_aws_sts: "{{ _ci_aws_sts.stdout | from_json }}"
+
+- name: Set credentials-invalid failure reason before failing
+  when: >-
+    (ci_aws_sts.verified | bool is false and 'boto3' not in ci_aws_sts.message)
+    or ((ci_aws.accountId | default('', true) | string | length > 0)
+        and (ci_aws_sts.account | default('', true) | length > 0)
+        and (ci_aws_sts.account | string) != (ci_aws.accountId | string))
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsInvalid
+
+- name: Fail on rejected keys or an account mismatch
+  when: cloudinfrastructure_fail_reason == 'CredentialsInvalid'
+  ansible.builtin.fail:
+    msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }}: {{ ci_aws_sts.message }}
+      {{ ('; account ' ~ ci_aws_sts.account ~ ' != spec.aws.accountId ' ~ ci_aws.accountId)
+         if (ci_aws_sts.account | default('', true) | length > 0) else '' }}
+
+- name: Set aws result facts
+  ansible.builtin.set_fact:
+    ci_credentials_valid: "{{ ci_aws_sts.verified | bool }}"
+    ci_credentials_message: "{{ ci_aws_sts.message }} ({{ cisr_source }})"
+    ci_capabilities_out:
+      evpn: false
+    ci_evpn_reason: AwsUnsupported
+    ci_evpn_message: "AWS has no EVPN fabric landing (design §15.0)."
+    ci_site_out:
+      accountId: "{{ ci_aws_sts.account | default(ci_aws.accountId | default('', true), true) | string }}"
+      region: "{{ ci_aws.region | default('', true) }}"
+    ci_type_message: "AWS account {{ ci_aws.accountId | default('?', true) }} {{ ci_aws.region | default('', true) }}: {{ ci_aws_sts.message }}."

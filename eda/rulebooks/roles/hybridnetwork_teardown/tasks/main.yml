@@ -81,6 +81,40 @@
         fn_fabric_namespace: sovereign-cloud
         fn_alloc_key: "{{ hybridnetwork_cr_namespace }}/{{ hybridnetwork_cr_name }}"
 
+    # Mirror of hybridnetwork_provision: drop the released RT from the BGW ledger
+    # allow-list (pushed in place). Failure only warns; the next HybridFabric
+    # reconcile re-renders anyway.
+    - name: Refresh the border gateway RT allow-list after the release
+      when:
+        - hn_teardown_placement_count | int == 0
+        - hn_teardown_cr_lookup.resources | default([]) | length > 0
+        - (hn_teardown_cr_lookup.resources[0].status.fabric | default('')) | length > 0
+      block:
+        - name: Read the fabric
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: HybridFabric
+            name: "{{ hn_teardown_cr_lookup.resources[0].status.fabric }}"
+            namespace: sovereign-cloud
+          register: hn_teardown_fabric
+
+        - name: Re-render BGW config
+          when:
+            - (hn_teardown_fabric.resources | default([])) | length > 0
+            - ((hn_teardown_fabric.resources[0].spec | default({})).borderGateway | default({})).loopback | default('') | length > 0
+          ansible.builtin.include_role:
+            name: hybridfabric_provision
+            tasks_from: bgw_config.yml
+          vars:
+            bgw_fabric_cr: "{{ hn_teardown_fabric.resources[0] }}"
+      rescue:
+        - name: Record BGW refresh failure
+          ansible.builtin.set_fact:
+            hn_teardown_bgw_warning: "BGW RT allow-list not refreshed: {{ ansible_failed_result.msg | default('error') }}"
+
     - name: Mark deletion complete
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:
@@ -93,7 +127,7 @@
           ready: true
           allocated: false
           deletionComplete: true
-          message: "VNI released (0 placements remaining) and HybridNetwork torn down."
+          message: "VNI released (0 placements remaining) and HybridNetwork torn down. {{ hn_teardown_bgw_warning | default('') }}"
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:

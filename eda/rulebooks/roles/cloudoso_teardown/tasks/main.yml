@@ -68,6 +68,37 @@
         ep_external_network: ext-net
       when: cloudoso_cr_lookup.resources | length == 0
 
+    # Admin credentials and site defaults from the CloudInfrastructure when the
+    # CloudOSO has spec.cloudRef (mirror of cloudoso_provision/tasks/cloudref.yml).
+    - name: Resolve spec.cloudRef
+      when:
+        - cloudoso_cr_lookup.resources | length > 0
+        - (oso_spec.cloudRef | default({}, true)).name | default('') | length > 0
+      block:
+        - name: Read CloudInfrastructure
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+          vars:
+            ci_ref_name: "{{ oso_spec.cloudRef.name }}"
+            ci_expected_type: openstack
+
+        - name: Use the CloudInfrastructure credentials and defaults
+          when: ci_found | bool
+          vars:
+            _cr: "{{ ci_spec.credentialsRef | default({}, true) }}"
+            _os: "{{ ci_spec.openstack | default({}) }}"
+          ansible.builtin.set_fact:
+            ep_vault_path: "{{ _cr.vaultPath | default(ep_vault_path, true) }}"
+            ep_admin_secret: >-
+              {{
+                {'name': _cr.secretRef.name, 'namespace': ci_obj.metadata.namespace}
+                if ((_cr.secretRef | default({}, true)).name | default('')) | length > 0 else {}
+              }}
+            ep_base_domain: "{{ oso_spec.baseDomain | default(_os.baseDomain | default(ep_base_domain, true), true) }}"
+            ep_project_domain: "{{ oso_spec.projectDomain | default(_os.projectDomain | default(ep_project_domain, true), true) }}"
+            ep_external_network: "{{ oso_spec.externalNetwork | default(_os.externalNetwork | default(ep_external_network, true), true) }}"
+            ep_route53_vault_path: "{{ oso_spec.route53VaultPath | default(_os.route53VaultPath | default(ep_route53_vault_path, true), true) }}"
+            oso_spec: "{{ oso_spec | combine({'baseDomain': oso_spec.baseDomain | default(_os.baseDomain | default('', true), true)}) }}"
+
     - name: Tear down OpenStack project and floating IPs
       ansible.builtin.include_tasks: delete_openstack.yml
 

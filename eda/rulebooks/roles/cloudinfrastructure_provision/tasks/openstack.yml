@@ -1,0 +1,260 @@
+---
+# type openstack. Reads (never writes): Keystone via credentialsRef (clouds.yaml),
+# NetConfig + OpenStackDataPlaneNodeSets on the management cluster.
+# Sets: ci_credentials_valid, ci_credentials_message, ci_capabilities_out,
+#       ci_site_out, ci_type_message, ci_evpn_reason, ci_evpn_message
+
+- name: Set openstack section facts
+  ansible.builtin.set_fact:
+    ci_os: "{{ ci_cr_spec.openstack | default({}) }}"
+    ci_clouds_file: "/tmp/ci-{{ cloudinfrastructure_cr_name }}-clouds.yaml"
+    ci_kubeconfig_file: "/tmp/ci-{{ cloudinfrastructure_cr_name }}-mgmt-kubeconfig"
+
+- name: Set openstack ref facts
+  ansible.builtin.set_fact:
+    ci_netconfig_name: "{{ ci_os.netConfigRef | default('openstacknetconfig', true) }}"
+    ci_nodeset_names: "{{ ci_os.dataplaneNodeSetRefs | default([], true) }}"
+
+# ------------------------------------------------------------------ credentials
+- name: Set credentials-missing failure reason before validating
+  when: (ci_cr_spec.credentialsRef | default({}, true)) | length == 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsMissing
+
+- name: Require spec.credentialsRef
+  ansible.builtin.assert:
+    that: (ci_cr_spec.credentialsRef | default({}, true)) | length > 0
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }} (openstack) needs spec.credentialsRef
+      (vaultPath or secretRef holding an admin clouds.yaml).
+
+- name: Read admin credentials
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_ref_read.yml"
+  vars:
+    cisr_ref: "{{ ci_cr_spec.credentialsRef }}"
+    cisr_what: credentialsRef
+    cisr_namespace: "{{ cloudinfrastructure_cr_namespace }}"
+
+- name: Set credentials-unreadable failure reason before failing
+  when: (cisr_data['clouds.yaml'] | default('')) | length == 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsUnavailable
+
+- name: Require clouds.yaml in credentialsRef
+  ansible.builtin.assert:
+    that: (cisr_data['clouds.yaml'] | default('')) | length > 0
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }}: credentialsRef
+      {{ cisr_source | default('', true) }} has no key clouds.yaml {{ ('(' ~ cisr_error ~ ')') if cisr_error | length > 0 else '' }}
+
+- name: Write admin clouds.yaml (temp, 0600)
+  ansible.builtin.copy:
+    content: "{{ cisr_data['clouds.yaml'] }}"
+    dest: "{{ ci_clouds_file }}"
+    mode: "0600"
+  no_log: true
+
+- name: Authenticate against Keystone and probe the Neutron evpn extension
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import json, os, sys, yaml
+    out = {"auth": False, "evpnExtension": None, "message": ""}
+    try:
+        import openstack
+    except ImportError as e:
+        out["message"] = "openstacksdk missing in this execution environment: %s" % e
+        print(json.dumps(out)); sys.exit(0)
+    try:
+        cfg = yaml.safe_load(open(os.environ["OS_CLIENT_CONFIG_FILE"])) or {}
+        clouds = cfg.get("clouds") or {}
+        name = "default" if "default" in clouds else next(iter(clouds), None)
+        if not name:
+            out["message"] = "clouds.yaml has no clouds"
+            print(json.dumps(out)); sys.exit(0)
+        cloud = clouds[name]
+        verify = cloud.get("verify", True)
+        if isinstance(verify, str):
+            verify = verify.lower() not in ("0", "false", "no")
+        conn = openstack.connect(
+            auth=dict(cloud.get("auth") or {}),
+            auth_type=cloud.get("auth_type"),
+            region_name=cloud.get("region_name", os.environ.get("REGION") or "regionOne"),
+            identity_api_version="3",
+            interface=cloud.get("interface", "public"),
+            verify=cloud.get("cacert", verify),
+        )
+        conn.authorize()
+        out["auth"] = True
+        out["project"] = conn.current_project_id
+        try:
+            aliases = [getattr(e, "alias", "") or "" for e in conn.network.extensions()]
+            out["evpnExtension"] = "evpn" in aliases
+        except Exception as e:  # network endpoint missing / forbidden
+            out["evpnExtension"] = None
+            out["message"] = "neutron extensions unreadable: %s" % e
+        if os.environ.get("EXT_NET"):
+            out["externalNetworkFound"] = conn.network.find_network(os.environ["EXT_NET"]) is not None
+    except Exception as e:
+        out["message"] = "%s: %s" % (type(e).__name__, e)
+    print(json.dumps(out))
+    PY
+  environment:
+    OS_CLIENT_CONFIG_FILE: "{{ ci_clouds_file }}"
+    PYTHONWARNINGS: "ignore:Unverified HTTPS request"
+    EXT_NET: "{{ ci_os.externalNetwork | default('', true) }}"
+  register: _ci_os_auth
+  changed_when: false
+  failed_when: _ci_os_auth.rc != 0
+
+- name: Record Keystone result
+  ansible.builtin.set_fact:
+    ci_os_auth: "{{ _ci_os_auth.stdout | from_json }}"
+
+- name: Record credential check
+  ansible.builtin.set_fact:
+    ci_credentials_valid: "{{ ci_os_auth.auth | bool }}"
+    ci_credentials_message: >-
+      {{
+        ('Keystone token issued with ' ~ cisr_source ~ '.')
+        if (ci_os_auth.auth | bool)
+        else ('Keystone authentication failed with ' ~ cisr_source ~ ': ' ~ ci_os_auth.message)
+      }}
+
+- name: Set auth failure reason before failing
+  when:
+    - ci_require_openstack_auth | bool
+    - not (ci_os_auth.auth | bool)
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: CredentialsInvalid
+
+- name: Fail when Keystone rejects the credentials
+  when:
+    - ci_require_openstack_auth | bool
+    - not (ci_os_auth.auth | bool)
+  ansible.builtin.fail:
+    msg: "{{ ci_credentials_message }}"
+
+- name: Note a missing external network
+  when: (ci_os_auth.externalNetworkFound | default(true)) is false
+  ansible.builtin.set_fact:
+    ci_notes: "{{ ci_notes + ['external network ' ~ ci_os.externalNetwork ~ ' not found'] }}"
+
+# ------------------------------------------------------------------ management cluster
+- name: Set kubeconfig-ref-missing failure reason before validating
+  when: (ci_os.managementClusterKubeconfigRef | default('', true)) | length == 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: ManagementKubeconfigMissing
+
+- name: Require spec.openstack.managementClusterKubeconfigRef
+  ansible.builtin.assert:
+    that: (ci_os.managementClusterKubeconfigRef | default('', true)) | length > 0
+    fail_msg: >-
+      CloudInfrastructure {{ cloudinfrastructure_cr_name }}: spec.openstack.managementClusterKubeconfigRef
+      is required (RHOSO management cluster, Vault key kubeconfig).
+
+- name: Write the management cluster kubeconfig
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+  vars:
+    ci_kubeconfig_ref: "{{ ci_os.managementClusterKubeconfigRef }}"
+    ci_kubeconfig_dest: "{{ ci_kubeconfig_file }}"
+
+- name: Set kubeconfig-unreadable failure reason before failing
+  when: not (ci_kubeconfig_ok | bool)
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: ManagementKubeconfigUnavailable
+
+- name: Require a readable management cluster kubeconfig
+  ansible.builtin.assert:
+    that: ci_kubeconfig_ok | bool
+    fail_msg: "CloudInfrastructure {{ cloudinfrastructure_cr_name }}: {{ ci_kubeconfig_error }}"
+
+- name: Read NetConfig on the management cluster
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ ci_kubeconfig_file }}"
+    validate_certs: false
+    api_version: network.openstack.org/v1beta1
+    kind: NetConfig
+    name: "{{ ci_netconfig_name }}"
+    namespace: "{{ ci_oso_namespace }}"
+  register: _ci_netconfig
+
+- name: Set NetConfig-missing failure reason before failing
+  when: (_ci_netconfig.resources | default([])) | length == 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: NetConfigNotFound
+
+- name: Require the NetConfig
+  ansible.builtin.assert:
+    that: (_ci_netconfig.resources | default([])) | length > 0
+    fail_msg: "NetConfig {{ ci_oso_namespace }}/{{ ci_netconfig_name }} not found on the management cluster"
+
+- name: List NodeSets on the management cluster
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ ci_kubeconfig_file }}"
+    validate_certs: false
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    namespace: "{{ ci_oso_namespace }}"
+  register: _ci_nodesets
+
+- name: Record found NodeSets
+  ansible.builtin.set_fact:
+    ci_nodeset_found: "{{ _ci_nodesets.resources | default([]) | map(attribute='metadata.name') | list }}"
+    ci_nodeset_status: []
+
+- name: Record Ready state of each referenced NodeSet
+  vars:
+    _ci_ns_obj: "{{ _ci_nodesets.resources | default([]) | selectattr('metadata.name', 'equalto', item) | list | first | default({}, true) }}"
+    _ci_ns_ready: >-
+      {{
+        ((_ci_ns_obj.status | default({})).conditions | default([])
+         | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list + ['Unknown'])
+        | first
+      }}
+  ansible.builtin.set_fact:
+    ci_nodeset_status: "{{ ci_nodeset_status + [item ~ '=' ~ (_ci_ns_ready if (_ci_ns_obj | length > 0) else 'NotFound')] }}"
+  loop: "{{ ci_nodeset_names }}"
+
+- name: Set NodeSet-missing failure reason before failing
+  when: ci_nodeset_names | difference(ci_nodeset_found) | length > 0
+  ansible.builtin.set_fact:
+    cloudinfrastructure_fail_reason: NodeSetNotFound
+
+- name: Require every referenced NodeSet
+  ansible.builtin.assert:
+    that: ci_nodeset_names | difference(ci_nodeset_found) | length == 0
+    fail_msg: >-
+      OpenStackDataPlaneNodeSet(s) {{ ci_nodeset_names | difference(ci_nodeset_found) | join(', ') }}
+      not found in {{ ci_oso_namespace }} (spec.openstack.dataplaneNodeSetRefs).
+
+- name: Note an empty NodeSet list
+  when: ci_nodeset_names | length == 0
+  ansible.builtin.set_fact:
+    ci_notes: "{{ ci_notes + ['no dataplaneNodeSetRefs: a CloudGateway cannot land EDPM EVPN on this site'] }}"
+
+- name: Derive EVPN capability from the NetConfig
+  ansible.builtin.set_fact:
+    ci_netconfig_networks: "{{ _ci_netconfig.resources[0].spec.networks | default([]) | map(attribute='name') | list }}"
+
+- name: Set openstack result facts
+  ansible.builtin.set_fact:
+    ci_capabilities_out: >-
+      {{
+        {'evpn': ci_fabric_network_name in ci_netconfig_networks}
+        | combine({'neutronEvpnExtension': ci_os_auth.evpnExtension} if (ci_os_auth.evpnExtension is not none) else {})
+      }}
+    ci_evpn_reason: "{{ 'FabricNetworkPresent' if (ci_fabric_network_name in ci_netconfig_networks) else 'FabricNetworkMissing' }}"
+    ci_evpn_message: >-
+      NetConfig {{ ci_netconfig_name }} networks: {{ ci_netconfig_networks | join(', ') }}
+      ({{ 'has' if (ci_fabric_network_name in ci_netconfig_networks) else 'no' }} `{{ ci_fabric_network_name }}`;
+      a CloudGateway with transport wireguard adds it).
+      Neutron evpn extension: {{ ci_os_auth.evpnExtension | default('unknown', true) }}.
+    ci_site_out:
+      managementKubeconfigSource: "{{ ci_kubeconfig_source }}"
+      netConfig: "{{ ci_netconfig_name }}"
+      netConfigNetworks: "{{ ci_netconfig_networks }}"
+      nodeSets: "{{ ci_nodeset_status }}"
+      keystoneProject: "{{ ci_os_auth.project | default('') }}"
+    ci_type_message: >-
+      Keystone ok, NetConfig {{ ci_netconfig_name }} and {{ ci_nodeset_names | length }} NodeSet(s)
+      [{{ ci_nodeset_status | join(', ') }}] present on the management cluster.
