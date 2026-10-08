@@ -16,7 +16,7 @@ Child Applications — ZTP wave order (parent sync waits for prior wave Healthy)
  40  hs-operators        — Deployments + image-wait (needs CRDs + image)
  42  hs-platform-configs — ZTP prereq: RbacConfig/AAPConfig/QuayConfig (+ secret/ready hooks)
  46  hs-platform-smoke   — always-on ACME Entity + local CloudVirt + dummy tool CRs
- 48  hs-platform-fabric  — HybridFabric + HCP1–3 + EVPN zoning (no RHOSO/CloudOSO)
+ 48  hs-platform-fabric  — HybridFabric + CloudInfrastructure + CloudGateways + tenant VRFs/placements (hub CloudVirt + RHOSO)
  50  hs-ui
  60  hs-samples          — gated by provision.samples (default: true; seed-once, no selfHeal)
 
@@ -597,6 +597,11 @@ spec:
     repoURL: {{ $repo | quote }}
     targetRevision: {{ $rev | quote }}
     path: gitops/custom-operators
+    {{- with .Values.customOperators.image }}
+    kustomize:
+      images:
+        - {{ printf "%s=%s" $.Values.customOperators.defaultImage . | quote }}
+    {{- end }}
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-cloud
