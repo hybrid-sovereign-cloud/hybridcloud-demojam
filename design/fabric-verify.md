@@ -19,7 +19,7 @@ Lab captures of the reference implementation in `fabric.md` §21 (cutover: §22,
 | Type-5 from RHOSO | `10.110.1.x/32` (incl. `10.110.1.63`), next hop compute01 VTEP `192.168.80.100`, RT `65010:51001` |
 | Data path | pod and VM on the hub `acme-core` UDN (10.110.2.0/24) ↔ RHOSO VM `10.110.1.63`: **ping OK** |
 | MTU | DF ping with 1272-byte payload (1300 on the wire) **passes**; 1400 is refused locally with `mtu=1300` |
-| Isolation (`chad-app`, 10.120.2.0/24) | procedure in `docs/workshop/lab-06-hybrid-fabric.md` Step 6.3; not part of this capture |
+| Isolation (`chad-app`, 10.120.2.0/24) | **PASS** 2026-10-08 01:50Z: a pod on the hub `chad-app` CUDN reaches its gateway 10.120.2.1 but gets no reply from 10.110.1.63 or 10.110.2.4 (procedure: `docs/workshop/lab-06-hybrid-fabric.md` Step 6.3) |
 
 ### Topology (as built)
 

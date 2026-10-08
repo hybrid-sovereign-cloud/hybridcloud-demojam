@@ -58,11 +58,11 @@ spec:
     name: hub-virt
   transport:
     type: none
-  # If the hub hypervisor filters source MACs on the node NIC (plan §4 step 2),
-  # enable the shim for the border gateway's hub leg:
-  # macNatShim:
-  #   enabled: true
-  #   interface: enp2s0
+  # The lab hypervisor drops frames whose source MAC is not the node NIC's
+  # (verified 2026-10-08): keep the netdev MAC shim on the hub nodes' uplink.
+  macNatShim:
+    enabled: true
+    interface: enp2s0
 ---
 # TransportLink: kept for the WireGuard site until the operator generates links
 # from CloudGateways (TransportLink is operator-generated in the new API).
