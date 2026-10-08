@@ -18,7 +18,7 @@ spec:
   displayName: OpenStack site oso1
   # Admin clouds.yaml (key clouds.yaml), seeded by gitops/infrastructure/security.
   credentialsRef:
-    vaultPath: oso/accounts/example-admin
+    vaultPath: oso/oso1/admin-clouds
   entityRefs:
     - name: acme-corp
   openstack:
