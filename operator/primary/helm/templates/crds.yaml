@@ -3,6 +3,7 @@
 # operator/config/crd/bases is a plain mirror of the same files.
 {{- if .Values.installCRDs }}
 ---
+# Source: gitops/custom-operators/crds/crd-aapconfig.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -136,6 +137,7 @@ spec:
                         type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
+# Source: gitops/custom-operators/crds/crd-aaporg.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -309,6 +311,7 @@ spec:
                   description: Entity this org belongs to.
               x-kubernetes-preserve-unknown-fields: true
 ---
+# Source: gitops/custom-operators/crds/crd-assignment.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -500,6 +503,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-cloudaws.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -688,11 +692,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-cloudgateway.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -942,6 +944,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-cloudinfrastructure.yaml
 # CloudInfrastructure: platform-owned registration of a cloud site (bring-your-own
 # cloud). Lives in sovereign-cloud. Tenant cloud projects (CloudOSO, CloudVirt,
 # CloudAWS) and CloudGateways reference it by name through spec.cloudRef.
@@ -1283,11 +1286,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-cloudoso.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1519,11 +1520,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-cloudvirt.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1705,6 +1704,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-entity.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1920,11 +1920,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-hybridfabric.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -2303,11 +2301,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-hybridnetwork.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -2484,6 +2480,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-iaac.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -2607,11 +2604,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-networkplacement.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -2823,6 +2818,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-openstackmigration.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -3077,6 +3073,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-persona.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -3215,11 +3212,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-platformopenshift.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3632,6 +3627,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-project.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -3784,6 +3780,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-quayconfig.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -3911,6 +3908,7 @@ spec:
                         type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
+# Source: gitops/custom-operators/crds/crd-quayorg.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4081,6 +4079,7 @@ spec:
                   description: Entity this org belongs to.
               x-kubernetes-preserve-unknown-fields: true
 ---
+# Source: gitops/custom-operators/crds/crd-rbacconfig.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4205,6 +4204,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-rbac.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4353,6 +4353,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-team.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4522,11 +4523,9 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-transportlink.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -4661,6 +4660,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-uihealthchecker.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4794,6 +4794,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-vaultkv.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4976,6 +4977,7 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
+# Source: gitops/custom-operators/crds/crd-vault.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -5123,3 +5125,4 @@ spec:
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+{{- end }}

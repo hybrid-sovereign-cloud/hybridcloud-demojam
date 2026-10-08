@@ -1,8 +1,5 @@
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
-#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
-#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
-#   TIGHTEN-LATER-REMOVE at end of line               line to delete
 # Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
