@@ -33,23 +33,28 @@
       No management cluster kubeconfig for CloudOSO {{ np_backend_name }}
       (CloudInfrastructure spec.openstack.managementClusterKubeconfigRef); HA chassis group not verified.
 
-- name: Debug HA check inputs (temporary)
-  ansible.builtin.debug:
-    msg: "mgmt_ref_len={{ np_mgmt_kubeconfig_ref | string | length }} ref_type={{ np_mgmt_kubeconfig_ref | type_debug }} router_id_len={{ np_neutron_router_id | default('') | length }}"
+# The kubeconfig include sits outside the block on purpose: nested includes under
+# a block with `when` made the included tasks skip in the AAP execution environment.
+- name: Write management cluster kubeconfig
+  when: np_mgmt_kubeconfig_ref | length > 0
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+  vars:
+    ci_kubeconfig_ref: "{{ np_mgmt_kubeconfig_ref }}"
+    ci_kubeconfig_dest: "{{ np_mgmt_kubeconfig_file }}"
+
+- name: Record unreadable management cluster kubeconfig
+  when:
+    - np_mgmt_kubeconfig_ref | length > 0
+    - not (ci_kubeconfig_ok | default(false) | bool)
+  ansible.builtin.set_fact:
+    np_evpn_ha_chassis_ok: false
+    np_evpn_ha_chassis_message: "HA chassis group not verified: {{ ci_kubeconfig_error | default('management cluster kubeconfig unreadable') }}"
 
 - name: Check and repair HA chassis group
-  when: np_mgmt_kubeconfig_ref | length > 0
+  when:
+    - np_mgmt_kubeconfig_ref | length > 0
+    - ci_kubeconfig_ok | default(false) | bool
   block:
-    - name: Write management cluster kubeconfig
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
-      vars:
-        ci_kubeconfig_ref: "{{ np_mgmt_kubeconfig_ref }}"
-        ci_kubeconfig_dest: "{{ np_mgmt_kubeconfig_file }}"
-
-    - name: Require a readable management cluster kubeconfig
-      ansible.builtin.fail:
-        msg: "{{ ci_kubeconfig_error }}"
-      when: not (ci_kubeconfig_ok | bool)
 
     - name: Read HA chassis of evpn-hcg-<router id>
       kubernetes.core.k8s_exec:

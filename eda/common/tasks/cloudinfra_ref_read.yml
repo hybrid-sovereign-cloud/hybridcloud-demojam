@@ -37,23 +37,46 @@
       }}
   no_log: true
 
-- name: Read {{ cisr_what | default('secret') }} from Vault
+# The Vault read is inlined on purpose: an include_tasks nested under a block
+# with `when` made every following task skip in the AAP execution environment
+# (observed 2026-10-08 on the networkplacement HA chassis check).
+- name: Validate Vault admin token is available on the job
   when: _cisr_vault_path | length > 0
-  block:
-    - name: Vault KV read
-      ansible.builtin.include_tasks: vault_kv_read.yml
-      vars:
-        vault_kv_path: "{{ _cisr_vault_path }}"
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'VAULT_TOKEN') | length > 0
+    fail_msg: >-
+      VAULT_TOKEN is not set. Attach sovereign-vault-admin-credential to the job template.
 
-    - name: Keep Vault data
-      ansible.builtin.set_fact:
-        cisr_data: "{{ vault_kv_data | default({}) }}"
-        cisr_source: "vault:{{ _cisr_vault_path }}"
-      no_log: true
-  rescue:
-    - name: Record unreadable Vault path
-      ansible.builtin.set_fact:
-        cisr_error: "{{ cisr_what | default('secret') }}: Vault path {{ _cisr_vault_path }} unreadable"
+- name: Read {{ cisr_what | default('secret') }} from Vault KV
+  when: _cisr_vault_path | length > 0
+  ansible.builtin.uri:
+    url: >-
+      {{ lookup('env', 'VAULT_ADDR') | default('', true) }}/v1/{{ vault_kv_mount | default('hybridsovereign') }}/data/{{ _cisr_vault_path }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+    validate_certs: false
+    status_code: [200, 403, 404]
+  register: _cisr_vault
+  no_log: true
+
+- name: Keep Vault data
+  when:
+    - _cisr_vault_path | length > 0
+    - (_cisr_vault.status | default(0) | int) == 200
+  ansible.builtin.set_fact:
+    cisr_data: "{{ _cisr_vault.json.data.data | default({}) }}"
+    cisr_source: "vault:{{ _cisr_vault_path }}"
+  no_log: true
+
+- name: Record unreadable Vault path
+  when:
+    - _cisr_vault_path | length > 0
+    - (_cisr_vault.status | default(0) | int) != 200
+  ansible.builtin.set_fact:
+    cisr_error: "{{ cisr_what | default('secret') }}: Vault path {{ _cisr_vault_path }} unreadable (HTTP {{ _cisr_vault.status | default('?') }})"
+    cisr_source: "vault:{{ _cisr_vault_path }}"
 
 - name: Read {{ cisr_what | default('secret') }} from a Kubernetes Secret
   when:
