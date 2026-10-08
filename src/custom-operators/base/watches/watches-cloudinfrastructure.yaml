@@ -1,0 +1,11 @@
+---
+- version: v1alpha1
+  group: hybridsovereign.redhat
+  kind: CloudInfrastructure
+  role: kind_reconcile
+  snakeCaseParameters: false
+  watchAnnotationsChanges: true
+  reconcilePeriod: 120s
+  finalizer:
+    name: cloudinfrastructure.hybridsovereign.redhat/finalizer
+    role: kind_reconcile

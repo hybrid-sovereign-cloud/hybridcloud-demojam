@@ -37,3 +37,17 @@ cgw_edpm_max_failures: 0
 # Size siteUnderlay.cidr and these offsets for the total number of computes.
 cgw_fabric_alloc_start_offset: 100
 cgw_fabric_alloc_end_offset: 150
+
+# Hub CNV EVPN landing (cloud=openshift, CloudInfrastructure clusterRef local;
+# plan §3.2.2 / §4). Objects: common/tasks/hub_evpn_names.yml.
+cgw_hub_underlay_image: registry.redhat.io/ubi9/ubi:latest
+# Node bridge that carries physnet (OVN-K maps physnet to br-ex by default).
+cgw_hub_bridge: br-ex
+# Default for CloudGateway spec.macNatShim.interface on the hub. Empty = the
+# DaemonSet discovers the node bridge's uplink (first non-patch OVS port of
+# br-ex: enp2s0 on the RHDP hub).
+cgw_hub_macnat_default_interface: ""
+# The DaemonSet re-applies address/routes/shim on this period.
+cgw_hub_reapply_seconds: 120
+cgw_hub_wait_retries: 30
+cgw_hub_wait_delay: 10

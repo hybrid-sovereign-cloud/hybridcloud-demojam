@@ -1,0 +1,402 @@
+---
+# Hub CNV EVPN backend for a CloudVirt NetworkPlacement (plan §2.2, §3.2.4, §4
+# step 6; handover/hub-build/30-acme-core-cudn.yaml). Hub-side objects:
+#   ClusterUserDefinedNetwork <network>  Layer2, role Primary, subnets = placement
+#       prefixes, mtu = overlay MTU, ipam Persistent (VM IPs survive restart and live
+#       migration), transport EVPN on VTEP <fabric>-vtep, ipVRF {vni, RT} from the
+#       HybridNetwork, macVRF {L2VNI = fabric_l2vni_offset + vni, <asn>:<L2VNI>}
+#       (OVN-K 4.22 requires a macVRF on Layer2 EVPN; common/vars/fabric_evpn.yml).
+#   Namespaces spec.vmNamespaces (default <cloudvirt>-<network>), created by this
+#       role with the primary-UDN label and the network/entity/owner labels before
+#       any pod can start (a primary UDN only applies to a namespace labelled at
+#       creation). An existing namespace is refused unless this entity owns it for
+#       this network; a namespace joins one network only.
+#   ResourceQuota <cloudvirt>-vm-quota per namespace from CloudVirt
+#       spec.vmNamespaceQuota.hard (optional).
+#   RouteAdvertisements advertise-<network>-evpn selecting that CUDN.
+# The hub VTEP, FRRConfiguration and node legs come from the openshift
+# CloudGateway (cloudgateway_provision openshift_hub_evpn.yml), which must be Ready.
+#
+# Expected: np_spec, np_backend_obj, np_backend_name, np_cloudinfra, np_gateway,
+#   np_vni, np_canonical_rt, np_domain_asn, hn_all_fabrics_detail,
+#   np_entity, np_overlay_mtu (main.yml), networkplacement_cr_name/namespace,
+#   services_api_host/services_bearer_token.
+# Sets: np_backend_applied, np_backend_ready, np_backend_message,
+#   np_backend_fail_reason, np_backend_vtep, np_vm_namespaces, np_backend_ids,
+#   np_l2vni.
+
+- name: Set fabric-missing failure reason before failing
+  when: (hn_all_fabrics_detail.metadata | default({})).name | default('') | length == 0
+  ansible.builtin.set_fact:
+    networkplacement_fail_reason: FabricNotFound
+
+- name: Require the network's HybridFabric
+  when: (hn_all_fabrics_detail.metadata | default({})).name | default('') | length == 0
+  ansible.builtin.fail:
+    msg: >-
+      NetworkPlacement {{ networkplacement_cr_name }}: HybridFabric {{ hn_selected_fabric_name | default('?', true) }}
+      of HybridNetwork {{ np_spec.network }} not found in sovereign-cloud.
+
+- name: Resolve hub EVPN names from the fabric
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/hub_evpn_names.yml"
+  vars:
+    hen_fabric: "{{ hn_all_fabrics_detail }}"
+
+- name: Set CloudVirt backend facts
+  vars:
+    _pool: "{{ (hn_all_fabrics_detail.spec | default({})).vniPool | default({}, true) }}"
+  ansible.builtin.set_fact:
+    np_network: "{{ np_spec.network }}"
+    np_l2vni: "{{ (hen_l2vni_offset | int) + (np_vni | int) }}"
+    np_l2_rt: "{{ np_domain_asn | int }}:{{ (hen_l2vni_offset | int) + (np_vni | int) }}"
+    np_pool_start: "{{ _pool.start | default(0) | int }}"
+    np_pool_end: "{{ _pool.end | default(0) | int }}"
+    np_vm_namespaces: >-
+      {{
+        np_spec.vmNamespaces
+        if (np_spec.vmNamespaces | default([]) | length > 0)
+        else [np_backend_name ~ '-' ~ np_spec.network]
+      }}
+    np_vm_quota: "{{ ((np_backend_obj.spec | default({})).vmNamespaceQuota | default({}, true)).hard | default({}, true) }}"
+    np_cudn_name: "{{ np_spec.network }}"
+    np_ra_name: "advertise-{{ np_spec.network }}-evpn"
+    np_owner: "{{ networkplacement_cr_name }}"
+
+- name: Collect CloudVirt backend configuration errors
+  ansible.builtin.set_fact:
+    _np_hub_errors: >-
+      {{
+        ([hen_error] if (hen_error | length > 0) else [])
+        + (['backend CloudVirt ' ~ np_backend_name ~ ' not found or has no spec.cloudRef (CloudInfrastructure of type openshift): '
+            ~ (np_cloudinfra_error | default('', true))]
+           if (np_cloudinfra | default({}) | length == 0) else [])
+        + (['L2VNI ' ~ np_l2vni ~ ' (' ~ hen_l2vni_offset ~ ' + VNI ' ~ np_vni ~ ') lies inside the fabric vniPool '
+            ~ np_pool_start ~ '-' ~ np_pool_end]
+           if ((np_l2vni | int) >= (np_pool_start | int) and (np_l2vni | int) <= (np_pool_end | int)) else [])
+        + (['L2VNI ' ~ np_l2vni ~ ' exceeds 16777215'] if (np_l2vni | int) > 16777215 else [])
+        + (['domainAsn ' ~ np_domain_asn ~ ' is a 4-byte ASN; RT ' ~ np_l2_rt ~ ' cannot carry an L2VNI above 65535']
+           if ((np_domain_asn | int) > 65535 and (np_l2vni | int) > 65535) else [])
+        + (['spec.prefixes is empty (the Layer2 CUDN needs at least one subnet)']
+           if (np_spec.prefixes | default([]) | length == 0) else [])
+        + (np_vm_namespaces | reject('match', '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
+           | map('regex_replace', '^(.*)$', 'namespace name \\1 is not a DNS label') | list)
+      }}
+
+- name: Set configuration failure reason before failing
+  when: _np_hub_errors | length > 0
+  ansible.builtin.set_fact:
+    networkplacement_fail_reason: CloudVirtBackendInvalid
+
+- name: Refuse an invalid CloudVirt placement
+  when: _np_hub_errors | length > 0
+  ansible.builtin.fail:
+    msg: "NetworkPlacement {{ networkplacement_cr_name }} (CloudVirt): {{ _np_hub_errors | join('; ') }}."
+
+- name: Read the hub VTEP CR (created by the openshift CloudGateway)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: VTEP
+    name: "{{ hen_vtep_name }}"
+  register: _np_hub_vtep
+  failed_when: false
+
+- name: Set VTEP-missing failure reason before failing
+  when: (_np_hub_vtep.resources | default([])) | length == 0
+  ansible.builtin.set_fact:
+    networkplacement_fail_reason: EvpnPrepPending
+
+- name: Require the hub VTEP
+  when: (_np_hub_vtep.resources | default([])) | length == 0
+  ansible.builtin.fail:
+    msg: >-
+      PendingPrereq: VTEP {{ hen_vtep_name }} not found on the hub; CloudGateway
+      {{ np_cloud_gateway_ref | default('?', true) }} (openshift) creates it.
+
+# ------------------------------------------------------------------ ownership checks
+- name: Read the target namespaces
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+  loop: "{{ np_vm_namespaces }}"
+  register: _np_hub_ns
+
+- name: Read the CUDN
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: ClusterUserDefinedNetwork
+    name: "{{ np_cudn_name }}"
+  register: _np_hub_cudn
+
+- name: Write the desired CUDN manifest (integer VNIs; avoid Jinja stringification)
+  ansible.builtin.copy:
+    dest: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+    mode: "0600"
+    content: |
+      {
+        "apiVersion": "k8s.ovn.org/v1",
+        "kind": "ClusterUserDefinedNetwork",
+        "metadata": {
+          "name": {{ np_cudn_name | to_json }},
+          "labels": {
+            "hybridsovereign.redhat/network": {{ np_network | to_json }},
+            "hybridsovereign.redhat/fabric": {{ hen_fabric_name | to_json }},
+            "hybridsovereign.redhat/entity": {{ np_entity | to_json }},
+            "hybridsovereign.redhat/networkplacement": {{ np_owner | to_json }},
+            "advertise": "true"
+          }
+        },
+        "spec": {
+          "namespaceSelector": {
+            "matchLabels": {
+              "hybridsovereign.redhat/hybridnetwork": {{ np_network | to_json }},
+              "hybridsovereign.redhat/entity": {{ np_entity | to_json }}
+            }
+          },
+          "network": {
+            "topology": "Layer2",
+            "layer2": {
+              "role": "Primary",
+              "subnets": {{ np_spec.prefixes | to_json }},
+              "mtu": {{ np_overlay_mtu | int }},
+              "ipam": {"lifecycle": "Persistent"}
+            },
+            "transport": "EVPN",
+            "evpn": {
+              "vtep": {{ hen_vtep_name | to_json }},
+              "ipVRF": {"vni": {{ np_vni | int }}, "routeTarget": {{ np_canonical_rt | to_json }}},
+              "macVRF": {"vni": {{ np_l2vni | int }}, "routeTarget": {{ np_l2_rt | to_json }}}
+            }
+          }
+        }
+      }
+
+- name: Check namespace and CUDN ownership (inputs as files)
+  block:
+    - name: Stage namespace and CUDN lookups
+      ansible.builtin.copy:
+        content: "{{ item.data | to_json }}"
+        dest: "/tmp/np-{{ networkplacement_cr_name }}-{{ item.name }}.json"
+        mode: "0600"
+      loop:
+        - name: ns
+          data: >-
+            {%- set out = [] -%}
+            {%- for r in _np_hub_ns.results | default([]) -%}
+            {%-   set _ = out.append({'item': r.item, 'resources': r.resources | default([])}) -%}
+            {%- endfor -%}
+            {{ out }}
+        - name: cudn-have
+          data: "{{ _np_hub_cudn.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Run the ownership check
+      ansible.builtin.command:
+        argv: [python3, "{{ role_path }}/files/cloudvirt_ownership.py"]
+      environment:
+        ENTITY: "{{ np_entity }}"
+        NETWORK: "{{ np_network }}"
+        CLOUDVIRT: "{{ np_backend_name }}"
+        OWNER: "{{ np_owner }}"
+        NS_FILE: "/tmp/np-{{ networkplacement_cr_name }}-ns.json"
+        CUDN_FILE: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+        CUDN_HAVE: "/tmp/np-{{ networkplacement_cr_name }}-cudn-have.json"
+      register: _np_hub_owner
+      changed_when: false
+  always:
+    - name: Remove staged lookups
+      ansible.builtin.file:
+        path: "/tmp/np-{{ networkplacement_cr_name }}-{{ item }}.json"
+        state: absent
+      loop: [ns, cudn-have]
+
+- name: Keep the ownership result
+  ansible.builtin.set_fact:
+    _np_hub_check: "{{ _np_hub_owner.stdout | from_json }}"
+
+- name: Set ownership failure reason before failing
+  when: _np_hub_check.errors | length > 0
+  ansible.builtin.set_fact:
+    networkplacement_fail_reason: "{{ 'CudnImmutable' if _np_hub_check.cudn == 'drift' else 'HubObjectConflict' }}"
+
+- name: Refuse foreign namespaces / CUDN or an immutable-field change
+  when: _np_hub_check.errors | length > 0
+  block:
+    - name: Remove the staged CUDN manifest
+      ansible.builtin.file:
+        path: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+        state: absent
+
+    - name: Fail with the conflicts
+      ansible.builtin.fail:
+        msg: "NetworkPlacement {{ networkplacement_cr_name }} (CloudVirt): {{ _np_hub_check.errors | join('; ') }}."
+
+# ------------------------------------------------------------------ apply
+# CUDN first, then the namespaces: a pod in a namespace labelled for a primary UDN
+# is rejected until the UDN exists, so no VM can start on the default network.
+- name: Apply the CUDN, namespaces, quotas and RouteAdvertisements
+  block:
+    - name: Apply ClusterUserDefinedNetwork (Layer2, EVPN)
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        src: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+      register: _np_cudn_apply
+
+    - name: Create the VM namespaces labelled for the network
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ item }}"
+            labels: >-
+              {{
+                {
+                  'k8s.ovn.org/primary-user-defined-network': '',
+                  'hybridsovereign.redhat/hybridnetwork': np_network,
+                  'hybridsovereign.redhat/entity': np_entity,
+                  'hybridsovereign.redhat/cloudvirt': np_backend_name,
+                  'hybridsovereign.redhat/networkplacement': np_owner,
+                  'hybridsovereign.redhat/fabric': hen_fabric_name
+                }
+                | combine({'mutatevirtualmachines.kubemacpool.io': 'ignore'} if (np_hub_kubemacpool_ignore | bool) else {})
+              }}
+            annotations:
+              hybridsovereign.redhat/networkplacement: "{{ networkplacement_cr_namespace }}/{{ networkplacement_cr_name }}"
+      loop: "{{ np_vm_namespaces }}"
+
+    - name: Apply the CloudVirt VM namespace quota
+      when: np_vm_quota | length > 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ResourceQuota
+          metadata:
+            name: "{{ np_backend_name }}-vm-quota"
+            namespace: "{{ item }}"
+            labels:
+              hybridsovereign.redhat/cloudvirt: "{{ np_backend_name }}"
+          spec:
+            hard: "{{ np_vm_quota }}"
+      loop: "{{ np_vm_namespaces }}"
+
+    - name: Apply RouteAdvertisements for the CUDN
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: k8s.ovn.org/v1
+          kind: RouteAdvertisements
+          metadata:
+            name: "{{ np_ra_name }}"
+            labels:
+              hybridsovereign.redhat/network: "{{ np_network }}"
+              hybridsovereign.redhat/entity: "{{ np_entity }}"
+              hybridsovereign.redhat/networkplacement: "{{ np_owner }}"
+          spec:
+            # OVN-K 4.22 rejects the object without these two (explicitly empty).
+            frrConfigurationSelector: {}
+            nodeSelector: {}
+            networkSelectors:
+              - networkSelectionType: ClusterUserDefinedNetworks
+                clusterUserDefinedNetworkSelector:
+                  networkSelector:
+                    matchLabels:
+                      hybridsovereign.redhat/network: "{{ np_network }}"
+            advertisements: [PodNetwork]
+      register: _np_ra_apply
+  always:
+    - name: Remove the staged CUDN manifest
+      ansible.builtin.file:
+        path: "/tmp/np-{{ networkplacement_cr_name }}-cudn.json"
+        state: absent
+
+# ------------------------------------------------------------------ readiness
+- name: Wait for the CUDN to be created
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: ClusterUserDefinedNetwork
+    name: "{{ np_cudn_name }}"
+  register: _np_cudn_state
+  until: >-
+    (_np_cudn_state.resources | default([]) | length > 0)
+    and ((_np_cudn_state.resources[0].status.conditions | default([])
+          | selectattr('type', 'in', ['NetworkCreated', 'NetworkReady'])
+          | selectattr('status', 'equalto', 'True') | list | length) > 0)
+  retries: "{{ np_hub_wait_retries | int }}"
+  delay: "{{ np_hub_wait_delay | int }}"
+  failed_when: false
+
+- name: Read RouteAdvertisements status
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: RouteAdvertisements
+    name: "{{ np_ra_name }}"
+  register: _np_ra_state
+  until: >-
+    (_np_ra_state.resources | default([]) | length > 0)
+    and (((_np_ra_state.resources[0].status | default({})).status | default('')) == 'Accepted'
+         or ((_np_ra_state.resources[0].status.conditions | default([])
+              | selectattr('type', 'equalto', 'Accepted') | selectattr('status', 'equalto', 'True') | list | length) > 0))
+  retries: "{{ np_hub_wait_retries | int }}"
+  delay: "{{ np_hub_wait_delay | int }}"
+  failed_when: false
+
+- name: Set CloudVirt backend result facts
+  vars:
+    _cudn_conds: "{{ ((_np_cudn_state.resources | default([]) + [{}])[0].status | default({})).conditions | default([]) }}"
+    _cudn_ok: >-
+      {{ (_cudn_conds | selectattr('type', 'in', ['NetworkCreated', 'NetworkReady']) | selectattr('status', 'equalto', 'True') | list | length) > 0 }}
+    _ra_st: "{{ (_np_ra_state.resources | default([]) + [{}])[0].status | default({}) }}"
+    _ra_ok: >-
+      {{
+        (_ra_st.status | default('')) == 'Accepted'
+        or ((_ra_st.conditions | default([]) | selectattr('type', 'equalto', 'Accepted') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+      }}
+  ansible.builtin.set_fact:
+    np_backend_applied: true
+    np_backend_ready: "{{ (_cudn_ok | bool) and (_ra_ok | bool) }}"
+    np_backend_fail_reason: "{{ '' if ((_cudn_ok | bool) and (_ra_ok | bool)) else 'EvpnPrepPending' }}"
+    np_backend_vtep: "{{ hen_vtep_name }}"
+    np_backend_ids:
+      cudn: "{{ np_cudn_name }}"
+      routeAdvertisements: "{{ np_ra_name }}"
+      vtep: "{{ hen_vtep_name }}"
+      l2vni: "{{ np_l2vni | string }}"
+      macVrfRt: "{{ np_l2_rt }}"
+    np_backend_message: >-
+      Hub CNV EVPN applied for HybridNetwork {{ np_network }}: CUDN {{ np_cudn_name }} Layer2
+      {{ np_spec.prefixes | join(',') }} mtu {{ np_overlay_mtu }} (ipVRF {{ np_vni }}/{{ np_canonical_rt }},
+      macVRF {{ np_l2vni }}/{{ np_l2_rt }}, VTEP {{ hen_vtep_name }})
+      {{ 'created' if (_cudn_ok | bool) else 'NOT created yet' }}; RouteAdvertisements {{ np_ra_name }}
+      {{ 'Accepted' if (_ra_ok | bool) else 'NOT Accepted yet' }}; namespaces
+      {{ np_vm_namespaces | join(',') }}{{ (' (adopted ' ~ (_np_hub_check.adopt | join(',')) ~ ')') if (_np_hub_check.adopt | length > 0) else '' }}.

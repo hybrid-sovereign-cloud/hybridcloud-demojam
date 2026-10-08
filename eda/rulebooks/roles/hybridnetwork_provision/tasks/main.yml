@@ -167,7 +167,8 @@
         hn_canonical_rt: "{{ hn_domain_asn }}:{{ fn_vni }}"
 
     # Shared BGW reflects only ledger RTs (design §8.5.4): re-render its config so
-    # the new RT is allowed. Restarts the BGW VMI (all tenants' sessions flap ~1-2 min).
+    # the new RT is allowed. Pushed into the running BGW (bgw_config_push.yml); the
+    # VMI restarts only when the in-place push is unavailable (bgw_inplace_fallback).
     - name: Refresh the border gateway RT allow-list for a newly allocated VNI
       when:
         - not (fn_reused | default(false) | bool)

@@ -9,7 +9,9 @@ metadata:
   name: ses8-env
   namespace: entity-acme-corp
 spec:
-  vaultPath: oso/accounts/example-admin
+  cloudRef:
+    kind: CloudInfrastructure
+    name: example-openstack   # samples/cloudinfrastructure/example-openstack.yaml
   baseDomain: lab.example.com
   projectDomain: example_domain
   externalNetwork: ext-net

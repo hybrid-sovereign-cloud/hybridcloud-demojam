@@ -1,0 +1,27 @@
+# Sample CloudInfrastructure — OpenStack site (platform-owned, sovereign-cloud).
+# Tenant CloudOSO projects and the site's CloudGateway reference it via spec.cloudRef.
+# Apply manually to the hub (NOT via ArgoCD):
+#   oc apply -f samples/cloudinfrastructure/example-openstack.yaml --context=hub-admin
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: example-openstack
+  namespace: sovereign-cloud
+spec:
+  type: openstack
+  displayName: Example OpenStack site
+  # Admin clouds.yaml (key clouds.yaml).
+  credentialsRef:
+    vaultPath: oso/accounts/example-admin
+  openstack:
+    region: regionOne
+    # Needed only when the site attaches to a HybridFabric (CloudGateway).
+    managementClusterKubeconfigRef: oso/example-openstack/mgmt-kubeconfig
+    netConfigRef: openstacknetconfig
+    dataplaneNodeSetRefs:
+      - openstack-compute01
+    externalNetwork: ext-net
+    baseDomain: lab.example.com
+    projectDomain: example_domain
+    route53VaultPath: oso/accounts/route53-openstack

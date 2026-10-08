@@ -1,0 +1,58 @@
+---
+# Delete path: wait a bounded time for the tracked AAP teardown job inside this
+# finalizer run, then re-read the CR and release the finalizer if EDA reported
+# status.deletionComplete meanwhile.
+#
+# Why: a finalizer run must fail to keep the finalizer, and every failure grows
+# ansible-operator's per-CR backoff (5ms doubling, capped at 1000s). Status-only
+# patches from EDA (deletionComplete) do not trigger a reconcile (generation /
+# annotation predicates only). Returning "still running" right away failed the
+# run ~15 times during a few-minute teardown, so a CR could sit up to ~17 min
+# with deletionComplete=true before the next pass; longer after the VNI-blocked
+# teardown loop of 2026-10-07.
+#
+# Vars: hs_wait_job_id (AAP job id), hs_wait_poll (false = only re-read the CR).
+- name: Wait for AAP teardown job to finish (bounded)
+  when: hs_wait_poll | default(true) | bool
+  ansible.builtin.uri:
+    url: "{{ aap_host }}/api/controller/v2/jobs/{{ hs_wait_job_id }}/"
+    method: GET
+    user: "{{ lookup('env', 'AAP_USER') | default('admin', true) }}"
+    password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 404]
+  register: hs_wait_job
+  until: >-
+    (hs_wait_job.status | default(0) | int) == 404
+    or (hs_wait_job.json.status | default('missing')) not in ['new', 'pending', 'waiting', 'running']
+  retries: "{{ [((teardown_wait_seconds | int) / (teardown_poll_seconds | int)) | int, 1] | max }}"
+  delay: "{{ teardown_poll_seconds | int }}"
+  # Exhausted retries mark the task failed; ignored failures do not count as a
+  # failed finalizer run, and the caller decides what to do next.
+  ignore_errors: true
+  no_log: true
+
+- name: Record teardown job state after the wait
+  ansible.builtin.set_fact:
+    hs_wait_job_status: >-
+      {{
+        (hs_wait_job.json.status | default('missing'))
+        if (hs_wait_job.status | default(0) | int) == 200
+        else ('missing' if (hs_wait_job.status | default(0) | int) == 404 else aap_job_status | default('unknown'))
+      }}
+
+- name: Re-read CR after teardown wait
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+  register: hs_wait_live
+  failed_when: false
+
+- name: Release finalizer when EDA reported deletionComplete during the wait
+  when: >-
+    ((hs_wait_live.resources | default([{}]))[0] | default({}, true)).status.deletionComplete
+    | default(false) | bool
+  ansible.builtin.include_tasks: release_finalizer.yml

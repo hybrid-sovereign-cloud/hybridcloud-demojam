@@ -1,0 +1,23 @@
+---
+# Release a CloudGateway's WireGuard tunnel address from the fabric ledger
+# (ConfigMap fabric-numbering-<fabric>, key wgAddresses). Idempotent; a missing
+# ledger or entry is not an error.
+#
+# Required vars: fwr_fabric_name, fwr_fabric_namespace, fwr_gateway_name
+# Sets: fwr_result
+
+- name: Release WireGuard address of {{ fwr_gateway_name }}
+  ansible.builtin.command:
+    argv: [python3, "{{ role_path }}/../../../common/files/fabric_wg_ledger.py", release]
+  environment:
+    CR_API_HOST: "{{ services_api_host | trim }}"
+    CR_TOKEN: "{{ services_bearer_token | trim }}"
+    CM_NAMESPACE: "{{ fwr_fabric_namespace }}"
+    CM_NAME: "fabric-numbering-{{ fwr_fabric_name }}"
+    RELEASE_NAME: "{{ fwr_gateway_name }}"
+  register: _fwr_cmd
+  changed_when: (_fwr_cmd.stdout | default('{}', true) | from_json).changed | default(false)
+
+- name: Record release result
+  ansible.builtin.set_fact:
+    fwr_result: "{{ _fwr_cmd.stdout | default('{}', true) | from_json }}"

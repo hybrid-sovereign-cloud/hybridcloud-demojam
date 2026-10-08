@@ -11,17 +11,20 @@ Hands-on lab: from zero cloud registration to a usable spoke and Assignment.
 |-----|------|-----|
 | 0 | Guardrails + Day-0 secrets (if fresh hub) | [lab-00](lab-00-guardrails.md) |
 | 1 | Confirm platform healthy | [lab-01](lab-01-verify-platform.md) |
-| 2 | Add CloudOSO **or** CloudAWS **or** CloudVirt | [lab-02](lab-02-register-cloud.md) |
-| 3 | Provision PlatformOpenshift | [lab-03](lab-03-provision-platform.md) |
+| 2 | Register cloud infrastructure (platform admin), then a CloudOSO **or** CloudAWS **or** CloudVirt project on it | [lab-02](lab-02-register-cloud.md) |
+| 3 | Provision PlatformOpenshift (no fabric attach) | [lab-03](lab-03-provision-platform.md) |
 | 4 | Entity Team + Assignment cycle | [lab-04](lab-04-assignment.md) |
 | 5 | (Optional) UI path | [lab-05](lab-05-ui.md) |
-| 6 | Hybrid Fabric EVPN (Acme + Chad, UI dropdowns) | [lab-06](lab-06-hybrid-fabric.md) |
+| 6 | Hybrid Fabric EVPN: hub VMs ↔ OpenStack VMs in one tenant VRF, second VRF isolated | [lab-06](lab-06-hybrid-fabric.md) |
 
 ## Mental model (keep this visible)
 
 ```text
-Secret → Cloud* → ready → PlatformOpenshift → Provisioned → Assignment → spoke access
+CloudInfrastructure (platform) → Cloud* project (cloudRef) → ready → PlatformOpenshift → Provisioned → Assignment → spoke access
+HybridFabric (platform) → CloudGateway per site (platform) → HybridNetwork → NetworkPlacement on a Cloud* project (tenant)
 ```
+
+Clusters (PlatformOpenshift) do not join the hybrid fabric; tenant networks are placed on cloud projects (Lab 0 explains why).
 
 Operators launch **AAP jobs** directly. No Kafka / EDA path.
 
@@ -29,11 +32,12 @@ Operators launch **AAP jobs** directly. No Kafka / EDA path.
 
 1. No secrets in Git.  
 2. Never delete `sovereign-*` namespaces.  
-3. Prefer Git for platform; `oc apply` OK for **lab tenant CRs** (Cloud\*, Platform\*, Assignment).  
-4. Clean up Platforms before Cloud\* deletes.
+3. Prefer Git for platform objects (CloudInfrastructure, HybridFabric, CloudGateway); `oc apply` OK for **lab tenant CRs** (Cloud\*, Platform\*, Assignment, HybridNetwork, NetworkPlacement).  
+4. Clean up Platforms and NetworkPlacements before Cloud\* deletes; Cloud\* projects before their CloudInfrastructure.
 
 ## After the workshop
 
 - How-tos: [add CloudAWS](../how-to/add-cloudaws.md) · [CloudOSO](../how-to/add-cloudoso.md) · [CloudVirt](../how-to/add-cloudvirt.md)  
-- CRDs: [usage/crds](../usage/crds/README.md)  
+- CRDs: [usage/crds](../usage/crds/README.md) · [CloudInfrastructure](../usage/crds/cloudinfrastructure.md) · [fabric kinds](../usage/crds/fabric.md)  
+- Fabric design: [design/fabric.md](../../design/fabric.md) · live record [fabric-verify.md](../../design/fabric-verify.md)  
 - Flow: [flow.md](../flow.md)

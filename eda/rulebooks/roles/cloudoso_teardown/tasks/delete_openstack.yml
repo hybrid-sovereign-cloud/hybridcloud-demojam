@@ -1,5 +1,6 @@
 ---
 - name: Create temporary ExternalSecret for OpenStack admin credentials
+  when: (ep_admin_secret | default({})) | length == 0
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"
@@ -32,8 +33,8 @@
     validate_certs: false
     api_version: v1
     kind: Secret
-    name: "eda-cloudoso-teardown-{{ cloudoso_cr_name }}-os-creds"
-    namespace: "{{ eda_central_work_namespace }}"
+    name: "{{ ep_admin_secret.name | default('eda-cloudoso-teardown-' ~ cloudoso_cr_name ~ '-os-creds', true) }}"
+    namespace: "{{ ep_admin_secret.namespace | default(eda_central_work_namespace, true) }}"
   register: os_admin_secret
   until: os_admin_secret.resources | length > 0
   retries: 20
@@ -83,6 +84,7 @@
   no_log: true
 
 - name: Remove temporary OpenStack credentials secret
+  when: (ep_admin_secret | default({})) | length == 0
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"
     api_key: "{{ services_bearer_token }}"

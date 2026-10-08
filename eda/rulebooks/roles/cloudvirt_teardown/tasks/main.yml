@@ -23,7 +23,9 @@
           status: deleted
           ready: false
           deletionComplete: true
-          message: CloudVirt teardown stub complete
+          # Nothing to remove here: VM namespaces belong to NetworkPlacements
+          # (vmNamespaces) and are removed by networkplacement_teardown (hub pass).
+          message: CloudVirt teardown complete (VM namespaces are owned by NetworkPlacements)
 
     - name: CloudVirt teardown complete
       ansible.builtin.debug:

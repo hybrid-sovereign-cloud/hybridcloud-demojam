@@ -20,7 +20,7 @@ export interface CloudVirtSelectProps {
 
 /**
  * Single-select dropdown of Ready `CloudVirt` CRs — fabric-capable HCP/CNV backend.
- * Writes Gateway / placement backend name (design/fabric.md §18.2 / §18.5).
+ * Writes a NetworkPlacement backend name.
  */
 export function CloudVirtSelect({
   id = 'cloudvirt-select',

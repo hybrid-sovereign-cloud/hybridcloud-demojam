@@ -1,0 +1,128 @@
+#!/bin/bash
+# In-place BGW config rollout (plan §3.2.5). Rendered by EDA hybridfabric_provision
+# (bgw_config_push.yml), piped over SSH into `sudo bash -s` on {{ bgw_name }}; never
+# stored on disk outside a 0600 temp file on the job pod. Self-contained, so it
+# also works on guests whose first-boot scripts predate it.
+# Same files as the config disk (Secret {{ bgw_name }}-config); only what changed
+# is reloaded: nft -f (atomic), wg syncconf + routes (sessions kept),
+# dnsmasq restart (leases kept), frr-reload (sessions kept unless peer-groups change).
+# Prints one JSON line; exit 0 when everything applied, 2 otherwise.
+set -u
+umask 077
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+fail=0
+NFT=skipped; DNSMASQ=skipped; WG=skipped; FRR=skipped
+
+printf '%s' '{{ bgw_fabric_nft | b64encode }}' | base64 -d > "$T/fabric.nft"
+printf '%s' '{{ bgw_dnsmasq_conf | b64encode }}' | base64 -d > "$T/dnsmasq.conf"
+printf '%s' '{{ bgw_frr_conf | b64encode }}' | base64 -d > "$T/frr.conf"
+{% if bgw_wg_enabled | bool %}
+printf '%s' '{{ bgw_wg0_conf | b64encode }}' | base64 -d > "$T/wg0.conf"
+{% endif %}
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+printf '%s' '{{ bgw_hubleg_nm | b64encode }}' | base64 -d > "$T/hubleg.nmconnection"
+HUBLEG=skipped
+{% endif %}
+
+same() { [ -f "$2" ] && cmp -s "$1" "$2"; }
+oneline() { head -c 300 "$1" 2>/dev/null | tr '\n"\\' '   '; }
+
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+# ---- hub leg (eth2): NM profile first, so the new nft rules have an interface.
+# Guests created before the hub leg never ran its cloud-init part.
+if same "$T/hubleg.nmconnection" /etc/NetworkManager/system-connections/hubleg.nmconnection \
+   && nmcli -t -f NAME con show --active | grep -qx hubleg; then
+  HUBLEG=unchanged
+else
+  install -m 0600 -o root -g root "$T/hubleg.nmconnection" /etc/NetworkManager/system-connections/hubleg.nmconnection
+  nmcli -t -f NAME,DEVICE con show | awk -F: '$2=="eth2" && $1!="hubleg"{print $1}' | while read -r c; do nmcli con delete "$c" >/dev/null 2>&1; done
+  if nmcli con reload 2>"$T/nm.err" && nmcli con up hubleg >>"$T/nm.err" 2>&1; then
+    HUBLEG=up
+  else
+    HUBLEG="failed: $(oneline "$T/nm.err")"; fail=1
+  fi
+fi
+
+{% endif %}
+# ---- nftables: validate, then load atomically (the file starts with flush ruleset)
+if same "$T/fabric.nft" /etc/sysconfig/nftables.conf; then
+  NFT=unchanged
+elif nft -c -f "$T/fabric.nft" >"$T/nft.err" 2>&1; then
+  if install -m 0600 -o root -g root "$T/fabric.nft" /etc/sysconfig/nftables.conf \
+     && nft -f /etc/sysconfig/nftables.conf >"$T/nft.err" 2>&1; then
+    NFT=reloaded
+  else
+    NFT="failed: $(oneline "$T/nft.err")"; fail=1
+  fi
+else
+  NFT="invalid: $(oneline "$T/nft.err")"; fail=1
+fi
+
+# ---- WireGuard: peers via wg syncconf (no tunnel flap); interface changes restart wg0
+if [ -f "$T/wg0.conf" ]; then
+  allowed() { grep -E '^AllowedIPs' "$1" 2>/dev/null | sed 's/^AllowedIPs *= *//' | tr ',' '\n' | tr -d ' ' | sort -u; }
+  ifsect() { sed -n '/^\[Interface\]/,/^\[Peer\]/p' "$1" 2>/dev/null | grep -E '^(Address|MTU|ListenPort|PrivateKey)'; }
+  if same "$T/wg0.conf" /etc/wireguard/wg0.conf && ip link show wg0 >/dev/null 2>&1; then
+    WG=unchanged
+  else
+    allowed /etc/wireguard/wg0.conf > "$T/allowed.old"
+    allowed "$T/wg0.conf" > "$T/allowed.new"
+    if ip link show wg0 >/dev/null 2>&1 && [ "$(ifsect /etc/wireguard/wg0.conf)" = "$(ifsect "$T/wg0.conf")" ]; then
+      install -m 0600 -o root -g root "$T/wg0.conf" /etc/wireguard/wg0.conf
+      if wg syncconf wg0 <(wg-quick strip wg0) 2>"$T/wg.err"; then
+        # wg-quick adds a route per AllowedIPs entry at `up`; syncconf does not.
+        comm -13 "$T/allowed.old" "$T/allowed.new" | while read -r p; do [ -n "$p" ] && ip route replace "$p" dev wg0; done
+        comm -23 "$T/allowed.old" "$T/allowed.new" | while read -r p; do [ -n "$p" ] && ip route del "$p" dev wg0 2>/dev/null; done
+        WG=synced
+      else
+        WG="failed: $(oneline "$T/wg.err")"; fail=1
+      fi
+    else
+      install -m 0600 -o root -g root "$T/wg0.conf" /etc/wireguard/wg0.conf
+      systemctl enable wg-quick@wg0 >/dev/null 2>&1
+      if systemctl restart wg-quick@wg0 2>"$T/wg.err"; then WG=restarted; else WG="failed: $(oneline "$T/wg.err")"; fail=1; fi
+    fi
+  fi
+fi
+
+# ---- dnsmasq: test the new file, restart (leases persist on disk), roll back on error
+if same "$T/dnsmasq.conf" /etc/dnsmasq.d/fabric.conf; then
+  DNSMASQ=unchanged
+else
+  cp -p /etc/dnsmasq.d/fabric.conf "$T/dnsmasq.prev" 2>/dev/null || true
+  install -m 0644 -o root -g root "$T/dnsmasq.conf" /etc/dnsmasq.d/fabric.conf
+  if dnsmasq --test >"$T/dns.err" 2>&1 && systemctl restart dnsmasq 2>>"$T/dns.err"; then
+    DNSMASQ=restarted
+  else
+    DNSMASQ="failed: $(oneline "$T/dns.err")"; fail=1
+    if [ -f "$T/dnsmasq.prev" ]; then install -m 0644 "$T/dnsmasq.prev" /etc/dnsmasq.d/fabric.conf; systemctl restart dnsmasq || true; fi
+  fi
+fi
+
+# ---- FRR: dry-run check, then frr-reload (diff-based; established sessions stay up)
+if same "$T/frr.conf" /etc/frr/frr.conf; then
+  FRR=unchanged
+elif vtysh --dryrun -f "$T/frr.conf" >"$T/frr.err" 2>&1; then
+  cp -p /etc/frr/frr.conf "$T/frr.prev"
+  install -m 0640 -o frr -g frr "$T/frr.conf" /etc/frr/frr.conf
+  if systemctl reload frr >"$T/frr.err" 2>&1; then
+    FRR=reloaded
+  else
+    FRR="failed: $(oneline "$T/frr.err")"; fail=1
+    install -m 0640 -o frr -g frr "$T/frr.prev" /etc/frr/frr.conf
+    systemctl reload frr >/dev/null 2>&1 || true
+  fi
+else
+  FRR="invalid: $(oneline "$T/frr.err")"; fail=1
+fi
+
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+printf '{"ok": %s, "nft": "%s", "wg": "%s", "dnsmasq": "%s", "frr": "%s", "hubleg": "%s"}\n' \
+  "$([ $fail -eq 0 ] && echo true || echo false)" "$NFT" "$WG" "$DNSMASQ" "$FRR" "$HUBLEG"
+{% else %}
+printf '{"ok": %s, "nft": "%s", "wg": "%s", "dnsmasq": "%s", "frr": "%s"}\n' \
+  "$([ $fail -eq 0 ] && echo true || echo false)" "$NFT" "$WG" "$DNSMASQ" "$FRR"
+{% endif %}
+[ $fail -eq 0 ] || exit 2
+exit 0

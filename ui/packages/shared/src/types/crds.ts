@@ -106,79 +106,148 @@ export interface PlatformOpenshiftOpenstackSpec {
   externalNetwork?: string;
 }
 
-/** How this PlatformOpenshift attaches to entity-visible HybridFabric(s) — see design/fabric.md §15/§18.
- *  Hidden / rejected entirely when `spec.type === 'aws'` — AWS has no fabric attachment (§15.0). */
-export type JoinPolicy = 'None' | 'AutoWhenFabricReady' | 'ExplicitOnly';
-
-export interface PlatformOpenshiftFabricSpec {
-  /** None = never auto-join; AutoWhenFabricReady = default; ExplicitOnly = only fabricRefs[] */
-  joinPolicy?: JoinPolicy;
-  /** Used when joinPolicy=ExplicitOnly — each must be in the Entity's HybridFabric.entityRefs */
-  fabricRefs?: string[];
-  /** Optional — which fabric to prefer when the Entity is tagged on more than one */
-  preferredFabricRef?: string;
-  /** Idempotently create/update CloudGateway + TransportLink for this cluster */
-  manageGatewayAndLink?: boolean;
+export interface PlatformOpenshiftAwsSpec {
+  environment: string;
+  region?: string;
+  clusterType?: 'standalone' | 'ha';
+  controlPlaneCount?: number;
+  workerCount?: number;
+  controllerFlavor?: string;
+  workerFlavor?: string;
 }
 
+export interface PlatformOpenshiftHostedSpec {
+  /** CloudVirt CR name providing the virt environment */
+  environment: string;
+  releaseImage?: string;
+  nodePoolReplicas?: number;
+  workerCores?: number;
+  workerMemory?: string;
+}
+
+/**
+ * Cluster address plan. Explicit CIDRs are used as given; omitted ones are allocated from the
+ * CloudInfrastructure's hostedClusterCidrDefaults (CG-NAT). Clusters do not join a HybridFabric.
+ */
 export interface PlatformOpenshiftNetworkingSpec {
-  /** false = use platform default IPAM pools or explicit CIDRs below; true = allocate from fabric */
-  allocateFromFabric?: boolean;
-  /** Optional — IPAM fabric to allocate cluster/service CIDRs from (defaults to preferredFabricRef) */
-  fabricRef?: string;
   clusterNetwork?: string[];
   serviceNetwork?: string[];
+  allowConflict?: boolean;
 }
 
 export interface PlatformOpenshiftSpec {
-  type: 'openstack' | 'aws' | 'hosted' | 'vmware';
+  type: 'openstack' | 'aws' | 'hosted';
   openstack?: PlatformOpenshiftOpenstackSpec;
+  aws?: PlatformOpenshiftAwsSpec;
+  hosted?: PlatformOpenshiftHostedSpec;
   cloudRef?: string;
-  /** Fabric join policy — omitted / ignored for type=aws */
-  fabric?: PlatformOpenshiftFabricSpec;
-  /** IPAM / cluster networking — allocateFromFabric + fabricRef only meaningful for hosted/openstack */
   networking?: PlatformOpenshiftNetworkingSpec;
 }
 
-/** Per-fabric join status recorded by the fabric-join reconcile loop (design/fabric.md §15.2). */
-export interface FabricMembership {
-  fabric: string;
-  phase?: 'Pending' | 'Joined' | 'Degraded' | 'Skipped';
-  cloudGatewayRef?: string;
-  transportLinkRef?: string;
-  evpnPrepReady?: boolean;
-  message?: string;
-}
-
-/** Observed cluster CIDR plan (design/fabric.md §16) */
+/** Observed cluster CIDR plan; used for hub-overlap checks. */
 export interface PlatformOpenshiftNetworkingStatus {
   clusterNetwork?: string[];
   serviceNetwork?: string[];
   machineNetwork?: string[];
-  underlay?: { nadName?: string; cidr?: string };
   legacyClusterCidrs?: boolean;
   ipamCondition?: 'DefaultRange' | 'LegacyClusterCidrs' | string;
   conflictCheck?: 'passed' | 'failed' | string;
   conflictMessage?: string;
-  fabricRef?: string;
 }
 
 export interface PlatformOpenshiftStatus extends OperatorStatus {
-  fabricMembership?: FabricMembership[];
   networking?: PlatformOpenshiftNetworkingStatus;
 }
 
 export type PlatformOpenshift = K8sResource<PlatformOpenshiftSpec, PlatformOpenshiftStatus>;
 
-/** CloudOSO — OpenStack environment */
-export interface CloudOSOSpec {
-  project?: string;
+/** CloudInfrastructure — platform-owned cloud site (sovereign-cloud, shortName cinfra) */
+export type CloudInfrastructureType = 'openstack' | 'openshift' | 'aws';
+
+/** Exactly one of vaultPath or secretRef. */
+export interface CloudInfrastructureCredentialsRef {
   vaultPath?: string;
-  credentialsSecretRef?: { name: string };
+  secretRef?: { name: string };
+}
+
+export interface CidrPool {
+  cidr?: string;
+  blockPrefixLength?: number;
+}
+
+export interface CloudInfrastructureOpenstackSpec {
+  region?: string;
+  managementClusterKubeconfigRef?: string;
+  netConfigRef?: string;
+  /** Ordered: rolled out one NodeSet at a time */
+  dataplaneNodeSetRefs?: string[];
+  externalNetwork?: string;
   baseDomain?: string;
   projectDomain?: string;
+  designate?: { zoneId?: string; projectId?: string };
+  route53VaultPath?: string;
+}
+
+export interface CloudInfrastructureOpenshiftSpec {
+  clusterRef?: string;
+  bootImage?: string;
+  storageClass?: string;
+  hostedClusterCidrDefaults?: {
+    clusterNetworkPool?: CidrPool;
+    serviceNetworkPool?: CidrPool;
+  };
+}
+
+export interface CloudInfrastructureAwsSpec {
+  accountId: string;
+  region: string;
+  baseDomain?: string;
+}
+
+export interface CloudInfrastructureSpec {
+  /** Immutable; selects the typed section */
+  type: CloudInfrastructureType;
+  displayName?: string;
+  credentialsRef?: CloudInfrastructureCredentialsRef;
+  /** Entities allowed to reference this site; empty means every Entity */
+  entityRefs?: Array<{ name: string }>;
+  openstack?: CloudInfrastructureOpenstackSpec;
+  openshift?: CloudInfrastructureOpenshiftSpec;
+  aws?: CloudInfrastructureAwsSpec;
+}
+
+export interface CloudInfrastructureStatus extends OperatorStatus {
+  /** Known keys: evpn, virtualization, frrK8s, dataplane, openstackApi */
+  capabilities?: Record<string, boolean>;
+  site?: {
+    endpoint?: string;
+    region?: string;
+    version?: string;
+    dataplaneNodeSets?: Array<{ name?: string; ready?: boolean }>;
+  };
+}
+
+export type CloudInfrastructure = K8sResource<CloudInfrastructureSpec, CloudInfrastructureStatus>;
+
+/** Reference from a tenant cloud project or CloudGateway to a CloudInfrastructure in sovereign-cloud. */
+export interface CloudInfrastructureRef {
+  kind?: 'CloudInfrastructure';
+  name: string;
+}
+
+/** CloudOSO — tenant OpenStack project on a CloudInfrastructure (type openstack) */
+export interface CloudOSOSpec {
+  cloudRef?: CloudInfrastructureRef;
+  project?: string;
+  baseDomain?: string;
+  /** Unset falls back to the CloudInfrastructure value */
+  projectDomain?: string;
+  /** Unset falls back to the CloudInfrastructure value */
   externalNetwork?: string;
   route53VaultPath?: string;
+  landingzone?: string;
+  designateZoneId?: string;
+  designateProjectId?: string;
 }
 
 export type CloudOSO = K8sResource<CloudOSOSpec>;
@@ -191,16 +260,19 @@ export interface CloudAWSToolRbac {
 }
 
 export interface CloudAWSSpec {
+  cloudRef?: CloudInfrastructureRef;
   account?: string;
+  /** Ignored when cloudRef is set */
   vaultPath?: string;
   credentialsSecretRef?: { name: string };
   baseDomain?: string;
+  landingzone?: string;
   toolRbac?: CloudAWSToolRbac;
 }
 
 export type CloudAWS = K8sResource<CloudAWSSpec>;
 
-/** CloudVirt — OpenShift Virtualization (CNV) environment */
+/** CloudVirt — tenant project on a CloudInfrastructure (type openshift) */
 export interface CloudVirtToolRbac {
   environmentAdminRbac?: string[];
   environmentPoweruserRbac?: string[];
@@ -208,12 +280,12 @@ export interface CloudVirtToolRbac {
 }
 
 export interface CloudVirtSpec {
-  vaultPath?: string;
+  cloudRef?: CloudInfrastructureRef;
+  /** ResourceQuota spec.hard applied to every VM namespace a NetworkPlacement creates */
+  vmNamespaceQuota?: { hard?: Record<string, string | number> };
   baseDomain?: string;
   storageClass?: string;
   networkAttachment?: string;
-  enableVRF?: boolean;
-  vrfId?: string;
   toolRbac?: CloudVirtToolRbac;
 }
 
@@ -316,73 +388,149 @@ export interface VaultKVSpec {
 
 export type VaultKV = K8sResource<VaultKVSpec>;
 
-/** HybridFabric — platform EVPN fabric */
+/** Transport between a site and the border gateway */
+export type FabricTransportType = 'none' | 'wireguard';
+
+/** HybridFabric — platform EVPN fabric (one per hub) */
 export interface HybridFabricSpec {
   enabled?: boolean;
   domainAsn?: number;
-  /** Entities that may attach to / use this fabric — tagged via EntityMultiSelect (§18.3). */
+  /** Entities that may place HybridNetworks on this fabric — tagged via EntityMultiSelect. */
   entityRefs?: Array<{ name: string }>;
-  routeReflectors?: Array<{ name: string; address: string }>;
   vniPool?: { start: number; end: number };
   underlay?: {
+    /** How the border gateway's underlay NIC attaches on the hub */
+    type?: 'ovn-layer2' | 'localnet';
+    /** localnet only — OVN bridge mapping name */
+    physicalNetworkName?: string;
     nadName?: string;
     cidr?: string;
+    /** ovn-layer2 only */
     gatewayAddress?: string;
+    /** localnet only — CIDR inside cidr for hub node VTEPs and the gateway's hub leg */
+    hubVtepBlock?: string;
+    /** localnet only — border gateway address with prefix length */
+    hubLegAddress?: string;
+    /** ovn-layer2 only */
     dhcpRange?: { start?: string; end?: string; leaseTime?: string };
     mtu?: number;
   };
-  borderGateway?: { name?: string; loopback?: string; vaultCredentialRef?: string };
+  borderGateway?: {
+    name?: string;
+    loopback?: string;
+    vaultCredentialRef?: string;
+    wireguard?: { address?: string; listenPort?: number; mtu?: number };
+    ingressHost?: string;
+    vmSize?: { cpu?: number; memory?: string };
+    image?: string;
+    storageClass?: string;
+  };
+  bgp?: { authentication?: { secretRef?: { name: string } } };
   transportDefaults?: {
     mtu?: number;
-    innerMssClamp?: number;
-    defaultTunnelType?: 'wireguard' | 'ipsec' | 'macsec' | 'none';
+    defaultTunnelType?: FabricTransportType;
   };
 }
-export type HybridFabric = K8sResource<HybridFabricSpec>;
 
-/** CloudGateway — cloud landing zone */
+export interface HybridFabricStatus extends OperatorStatus {
+  bgwEndpoint?: string;
+  bgwAddress?: string;
+  bgwPeerCount?: number;
+  peers?: Array<{ address?: string; site?: string; state?: string; prefixesReceived?: number }>;
+  allocatedVniCount?: number;
+  availableVniCount?: number;
+}
+export type HybridFabric = K8sResource<HybridFabricSpec, HybridFabricStatus>;
+
+/** CloudGateway — one per site attached to the fabric (sovereign-cloud) */
 export interface CloudGatewaySpec {
   enabled?: boolean;
-  cloud?: 'aws' | 'openstack' | 'openshift';
-  region?: string;
-  domainAsn?: number;
   fabricRef?: string;
-  landingZoneTemplate?: string;
-  transport?: { type?: string; vaultPeerConfigRef?: string };
-  awsAccountId?: string;
-  openstackCloudOSORef?: string;
-  /** hosted/openstack PlatformOpenshift backend for cloud=openshift — never an AWS PlatformOpenshift (§15.0) */
-  platformOpenshiftRef?: string;
+  /** CloudInfrastructure in sovereign-cloud; its type selects the gateway flavour */
+  cloudRef?: CloudInfrastructureRef;
+  /** Unset type falls back to the fabric's transportDefaults.defaultTunnelType */
+  transport?: { type?: FabricTransportType; vaultPeerConfigRef?: string };
+  /** Site gateway tunnel address; allocated when omitted */
+  wireguard?: { address?: string };
+  /** OpenStack sites only */
+  siteUnderlay?: {
+    interface?: string;
+    computeInterface?: string;
+    nodeSetInterfaces?: Record<string, string>;
+    cidr?: string;
+    gatewayAddress?: string;
+    mtu?: number;
+  };
+  /** Test environments only (hypervisor source-MAC filtering) */
+  macNatShim?: { enabled?: boolean; interface?: string };
 }
-export type CloudGateway = K8sResource<CloudGatewaySpec>;
 
-/** TransportLink — fabric↔gateway tunnel */
+export interface CloudGatewayStatus extends OperatorStatus {
+  landingZoneReady?: boolean;
+  gatewayAddress?: string;
+  transportReady?: boolean;
+  peerCount?: number;
+  peerState?: string;
+  vtep?: string;
+  importedRts?: string[];
+  edpmNodeSets?: Array<{
+    name?: string;
+    fingerprint?: string;
+    deployment?: string;
+    state?: 'Converged' | 'Ready' | 'Failed' | 'NotAttempted';
+  }>;
+}
+export type CloudGateway = K8sResource<CloudGatewaySpec, CloudGatewayStatus>;
+
+/** TransportLink — border gateway ↔ CloudGateway tunnel (operator-generated, one per CloudGateway) */
 export interface TransportLinkSpec {
   enabled?: boolean;
   fabricRef?: string;
   cloudGatewayRef?: string;
-  tunnelType?: 'wireguard' | 'ipsec' | 'macsec' | 'none';
-  vaultConfigRef?: string;
+  /** Copied from CloudGateway.spec.transport.type */
+  tunnelType?: FabricTransportType;
 }
 export type TransportLink = K8sResource<TransportLinkSpec>;
 
-/** HybridNetwork — tenant network identity */
+/** HybridNetwork — tenant network identity (VRF: VNI + RT) */
 export interface HybridNetworkSpec {
   description?: string;
-  /** Disambiguates fabric when Entity is tagged on >1 Ready HybridFabric (design §19.6) */
+  /** Disambiguates fabric when Entity is tagged on >1 Ready HybridFabric */
   fabricRef?: string;
+  /** Overlay MTU (CUDN mtu, Neutron network MTU); defaults from the fabric transport MTU */
+  overlayMtu?: number;
   networkViewerRbac?: string[];
 }
-export type HybridNetwork = K8sResource<HybridNetworkSpec>;
 
-/** NetworkPlacement — backend attachment */
+export interface HybridNetworkStatus extends OperatorStatus {
+  overlayMtu?: number;
+  placements?: Array<{
+    name?: string;
+    backendKind?: string;
+    backendName?: string;
+    prefixes?: string[];
+    ready?: boolean;
+  }>;
+}
+export type HybridNetwork = K8sResource<HybridNetworkSpec, HybridNetworkStatus>;
+
+/** NetworkPlacement backends (decision 6: no PlatformOpenshift attachment) */
+export type NetworkPlacementBackendKind = 'CloudOSO' | 'CloudAWS' | 'CloudVirt';
+
+/** NetworkPlacement — places a HybridNetwork on one tenant cloud project */
 export interface NetworkPlacementSpec {
   network: string;
-  backend: { kind: 'CloudAWS' | 'CloudOSO' | 'CloudVirt' | 'PlatformOpenshift'; name: string };
+  backend: { kind: NetworkPlacementBackendKind; name: string };
   prefixes?: string[];
-  state?: 'present' | 'absent';
+  /** Backend kind CloudVirt only — hub namespaces the operator creates (DNS labels) */
+  vmNamespaces?: string[];
 }
-export type NetworkPlacement = K8sResource<NetworkPlacementSpec>;
+
+export interface NetworkPlacementStatus extends OperatorStatus {
+  vmNamespaces?: string[];
+  backendIds?: Record<string, string>;
+}
+export type NetworkPlacement = K8sResource<NetworkPlacementSpec, NetworkPlacementStatus>;
 
 /** UIHealthChecker — URL probe target (dashboard pod HTTP check) */
 export interface UIHealthCheckerSpec {
@@ -415,6 +563,7 @@ export type HybridSovereignKind =
   | 'QuayConfig'
   | 'Vault'
   | 'VaultKV'
+  | 'CloudInfrastructure'
   | 'HybridFabric'
   | 'CloudGateway'
   | 'TransportLink'
@@ -442,6 +591,7 @@ export const KIND_PLURALS: Record<HybridSovereignKind, string> = {
   QuayConfig: 'quayconfigs',
   Vault: 'vaults',
   VaultKV: 'vaultkvs',
+  CloudInfrastructure: 'cloudinfrastructures',
   HybridFabric: 'hybridfabrics',
   CloudGateway: 'cloudgateways',
   TransportLink: 'transportlinks',
@@ -489,6 +639,7 @@ export type HybridSovereignResource =
   | QuayConfig
   | Vault
   | VaultKV
+  | CloudInfrastructure
   | HybridFabric
   | CloudGateway
   | TransportLink

@@ -582,6 +582,122 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: hybridsovereign-cloudinfrastructure-operator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: CloudInfrastructure
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridsovereign-cloudinfrastructure-operator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hybridsovereign-cloudinfrastructure-operator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hybridsovereign-entity-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watches-cloudinfrastructure
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+data:
+  watches.yaml: |
+    ---
+    - version: v1alpha1
+      group: hybridsovereign.redhat
+      kind: CloudInfrastructure
+      role: kind_reconcile
+      snakeCaseParameters: false
+      watchAnnotationsChanges: true
+      reconcilePeriod: 120s
+      finalizer:
+        name: cloudinfrastructure.hybridsovereign.redhat/finalizer
+        role: kind_reconcile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hybridsovereign-cloudinfrastructure-operator
+  namespace: sovereign-cloud
+  labels:
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/operator-kind: CloudInfrastructure
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      hybridsovereign.redhat/operator-kind: CloudInfrastructure
+  template:
+    metadata:
+      annotations:
+        hybridsovereign.redhat/watches-epoch: "20261001-ztp-retry-120s"
+      labels:
+        hybridsovereign.redhat/operator-kind: CloudInfrastructure
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      serviceAccountName: hybridsovereign-cloudinfrastructure-operator
+      containers:
+        - name: operator
+          image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
+          imagePullPolicy: Always
+          env:
+            - name: MAX_CONCURRENT_RECONCILES
+              value: "2"
+            - name: OPERATOR_KIND
+              value: CloudInfrastructure
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: host
+                  optional: true
+            - name: AAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: username
+                  optional: true
+            - name: AAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-operator-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: watches
+              mountPath: /opt/ansible/watches.yaml
+              subPath: watches.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 2Gi
+      volumes:
+        - name: watches
+          configMap:
+            name: watches-cloudinfrastructure
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: hybridsovereign-transportlink-operator
   namespace: sovereign-cloud
   labels:

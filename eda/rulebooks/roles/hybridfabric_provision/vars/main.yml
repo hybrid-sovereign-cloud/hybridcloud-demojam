@@ -20,7 +20,7 @@ bgw_underlay_mac: "02:fa:b0:64:00:01"
 bgw_default_underlay_nad: fabric-underlay
 bgw_default_underlay_mtu: 1400
 bgw_default_dhcp_lease: 10m
-bgw_default_wg_address: 10.254.254.1/24
+bgw_default_wg_address: "{{ fabric_bgw_default_wg_address }}"  # common/vars/fabric_evpn.yml
 bgw_default_wg_listen_port: 51820
 bgw_default_wg_mtu: 1380
 # wstunnel server port inside the VM (Service 443 -> this port; Route passthrough).
@@ -32,11 +32,38 @@ bgw_kubemacpool_ignore: true
 bgw_required: true
 bgw_wait_retries: 60
 bgw_wait_delay: 10
-# Restart the BGW VMI when its rendered config (peers, listen ranges, DHCP
-# routes) changes; the guest re-reads the config Secret disk at boot.
+# Restart the BGW VMI when its VM spec changes (boot-hash annotation).
 bgw_restart_on_change: true
+# Also restart when only the cloud-init userdata changed. Off: the guest runs
+# cloud-init per-instance modules once per root disk, so a reboot applies nothing.
+bgw_restart_on_cloudinit_change: false
+# Config-only changes (wg0/frr/dnsmasq/nft) are pushed into the running guest over
+# SSH (tasks/bgw_config_push.yml). When that is not possible:
+#   restart - restart the VMI (guest re-reads the config disk at boot; old behaviour)
+#   defer   - keep the new config in Secret <bgw>-config until the next restart
+bgw_inplace_fallback: restart
+bgw_ssh_user: cloud-user
+bgw_push_timeout: 180
+# Generate an SSH pair in Vault for the push when the BGW entry has neither key.
+bgw_ssh_generate: true
 # RT allow-list on the BGW (design/fabric.md §8.5.4):
 #   allocated - reflect only EVPN routes with an RT from this fabric's ledger
-#               (a new VNI re-renders the config and restarts the BGW VMI)
 #   off       - reflect everything (pre-consolidation behaviour)
 bgw_rt_filter: allocated
+# Per-site RT policy (plan §3.2.5): one FRR peer-group per site with route-maps
+# limited to the RTs placed on that site (NetworkPlacements), on top of the ledger
+# allow-list.
+#   per-site - HUB / SITE-<gateway> / TUNNEL peer-groups (default)
+#   fabric   - one SPOKES peer-group, ledger allow-list only (pre-restructure)
+bgw_rt_policy: per-site
+# WireGuard tunnel addresses for wireguard CloudGateways without
+# spec.wireguard.address: allocated from the BGW tunnel subnet starting at this
+# host offset, recorded in fabric-numbering-<fabric> key wgAddresses.
+bgw_wg_allocate: true
+bgw_wg_alloc_start_offset: 10
+# BGW hub leg (HybridFabric.spec.underlay.type localnet, plan §3.2.5 / §4): third
+# NIC `hubleg` (guest eth2) on the localnet NAD spec.underlay.nadName, address
+# spec.underlay.hubLegAddress, MAC fabric_bgw_hub_leg_mac (common/vars/fabric_evpn.yml,
+# shared with the hub MAC-NAT shim). MTU is the node bridge's (br-ex 1500), not
+# spec.underlay.mtu (that one is the OVN-K layer2 leg's).
+bgw_hub_leg_default_mtu: 1500

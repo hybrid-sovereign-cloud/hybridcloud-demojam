@@ -20,7 +20,7 @@ export interface CloudOSOSelectProps {
 
 /**
  * Single-select dropdown of Ready `CloudOSO` CRs — fabric-capable OpenStack backend.
- * Writes Gateway / placement backend name (design/fabric.md §18.2 / §18.5).
+ * Writes a NetworkPlacement backend name.
  */
 export function CloudOSOSelect({
   id = 'cloudoso-select',

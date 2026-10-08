@@ -7,6 +7,9 @@ metadata:
     app: "{{ bgw_name }}"
     hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
     hybridsovereign.redhat/border-gateway: "true"
+  annotations:
+    # VM spec hash: deploy_border_gateway.yml restarts the VMI only when it changes.
+    hybridsovereign.redhat/boot-hash: "{{ bgw_boot_hash | default('') }}"
 spec:
   runStrategy: Always
   dataVolumeTemplates:
@@ -59,12 +62,24 @@ spec:
             bridge: {}
             model: virtio
             macAddress: "{{ bgw_underlay_mac }}"
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+          # Hub leg (underlay type localnet): guest eth2, hubLegAddress.
+          - name: hubleg
+            bridge: {}
+            model: virtio
+            macAddress: "{{ bgw_hub_leg_mac }}"
+{% endif %}
       networks:
       - name: default
         pod: {}
       - name: underlay
         multus:
           networkName: "{{ bgw_namespace }}/{{ bgw_underlay_nad }}"
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+      - name: hubleg
+        multus:
+          networkName: "{{ bgw_namespace }}/{{ bgw_hub_leg_nad }}"
+{% endif %}
       volumes:
       - name: rootdisk
         dataVolume:

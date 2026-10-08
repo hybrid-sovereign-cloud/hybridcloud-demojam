@@ -1,0 +1,92 @@
+---
+# CloudOSO.spec.cloudRef -> CloudInfrastructure (type openstack, sovereign-cloud).
+# The tenant object keeps project-level fields only (plan §2.2): the admin
+# credentials come from CloudInfrastructure.spec.credentialsRef and the site
+# defaults (baseDomain, projectDomain, externalNetwork, designate, route53VaultPath,
+# region) from CloudInfrastructure.spec.openstack; a value set on the CloudOSO wins.
+# No cloudRef: the deprecated spec.vaultPath / credentialsSecretRef path is used
+# unchanged, with a warning.
+#
+# Expected: oso_spec, entity_name, cloudoso_cr_name, services_api_host/token.
+# Sets: oso_spec (merged), oso_cloudinfra, oso_cloudref_warning,
+#       oso_admin_creds_vault_path, oso_admin_creds_secret ({name, namespace})
+
+- name: Read cloudRef
+  ansible.builtin.set_fact:
+    oso_cloudref_name: "{{ (oso_spec.cloudRef | default({}, true)).name | default('', true) }}"
+    oso_cloudinfra: {}
+    oso_cloudref_warning: ""
+    oso_admin_creds_vault_path: ""
+    oso_admin_creds_secret: {}
+
+- name: Warn about a CloudOSO without cloudRef
+  when: oso_cloudref_name | length == 0
+  ansible.builtin.set_fact:
+    oso_cloudref_warning: >-
+      CloudOSO {{ cloudoso_cr_name }} has no spec.cloudRef; using the deprecated
+      spec.vaultPath/credentialsSecretRef admin credentials.
+
+- name: Resolve the CloudInfrastructure
+  when: oso_cloudref_name | length > 0
+  block:
+    - name: Read CloudInfrastructure
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+      vars:
+        ci_ref_name: "{{ oso_cloudref_name }}"
+        ci_expected_type: openstack
+
+    - name: Require a usable openstack CloudInfrastructure
+      ansible.builtin.assert:
+        that:
+          - ci_error | length == 0
+          - ci_ready | bool
+        fail_msg: >-
+          CloudOSO {{ cloudoso_cr_name }}: {{ ci_error if ci_error | length > 0
+          else ('CloudInfrastructure ' ~ oso_cloudref_name ~ ' is not Ready') }}
+
+    - name: Require the entity to be allowed on this infrastructure
+      ansible.builtin.assert:
+        that: >-
+          (ci_spec.entityRefs | default([]) | length == 0)
+          or (entity_name in (ci_spec.entityRefs | map(attribute='name') | list))
+        fail_msg: >-
+          Entity {{ entity_name }} is not in CloudInfrastructure {{ oso_cloudref_name }}
+          spec.entityRefs.
+
+    - name: Merge site defaults under the CloudOSO's own fields
+      vars:
+        _os: "{{ ci_spec.openstack | default({}) }}"
+        _defaults: >-
+          {{
+            {
+              'baseDomain': _os.baseDomain | default(''),
+              'projectDomain': _os.projectDomain | default(''),
+              'externalNetwork': _os.externalNetwork | default(''),
+              'route53VaultPath': _os.route53VaultPath | default(''),
+              'designateZoneId': (_os.designate | default({})).zoneId | default(''),
+              'designateProjectId': (_os.designate | default({})).projectId | default(''),
+              'regionName': _os.region | default('')
+            } | dict2items | rejectattr('value', 'equalto', '') | items2dict
+          }}
+      ansible.builtin.set_fact:
+        oso_cloudinfra: "{{ ci_obj }}"
+        oso_spec: >-
+          {{ _defaults | combine(oso_spec | dict2items | rejectattr('value', 'equalto', '') | rejectattr('value', 'none') | items2dict) }}
+
+    - name: Take admin credentials from credentialsRef
+      vars:
+        _cr: "{{ ci_spec.credentialsRef | default({}, true) }}"
+      ansible.builtin.set_fact:
+        oso_admin_creds_vault_path: "{{ _cr.vaultPath | default('', true) }}"
+        oso_admin_creds_secret: >-
+          {{
+            {'name': _cr.secretRef.name, 'namespace': ci_obj.metadata.namespace}
+            if ((_cr.secretRef | default({}, true)).name | default('')) | length > 0 else {}
+          }}
+
+    - name: Require admin credentials on the CloudInfrastructure
+      ansible.builtin.assert:
+        that: (oso_admin_creds_vault_path | length > 0) or (oso_admin_creds_secret | length > 0)
+        fail_msg: >-
+          CloudInfrastructure {{ oso_cloudref_name }} has no spec.credentialsRef
+          (vaultPath or secretRef with clouds.yaml).

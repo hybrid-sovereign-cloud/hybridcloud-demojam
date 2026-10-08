@@ -1,0 +1,28 @@
+---
+# Fabric-wide EVPN numbering conventions, shared by hybridfabric_provision (BGW
+# RT allow-list / per-site route-maps), cloudgateway_* (hub objects) and
+# networkplacement_* (hub CUDN). Load with
+#   ansible.builtin.include_vars: "{{ role_path }}/../../../common/vars/fabric_evpn.yml"
+#
+# L2VNI (macVRF) of a HybridNetwork = fabric_l2vni_offset + its VNI (ipVRF / L3VNI),
+# route target <domainAsn>:<L2VNI>. Deterministic, never stored in the ledger.
+# OVN-K 4.22 requires a macVRF on every Layer2 CUDN with transport EVPN. The
+# vniPool must stay below the offset (checked where the L2VNI is used), and a
+# 4-byte domainAsn (> 65535) cannot carry an L2VNI > 65535 in an RT, so hub
+# Layer2 attachments need a 2-byte fabric ASN.
+fabric_l2vni_offset: 100000
+
+# Hub-side objects of the openshift (hub CNV) CloudGateway path, all named from
+# the fabric (one platform fabric per hub). See common/tasks/hub_evpn_names.yml.
+fabric_hub_frr_namespace: openshift-frr-k8s
+
+# Fixed MAC of the border gateway's hub leg (guest eth2, underlay type localnet),
+# like bgw_underlay_mac for eth1. One fabric per hub, so a constant is enough:
+# the BGW NIC (hybridfabric_provision) and the hub MAC-NAT shim (cloudgateway
+# openshift path, env BGW_MAC) both read it from here.
+fabric_bgw_hub_leg_mac: "02:fa:b0:00:65:01"
+
+# BGW WireGuard tunnel address when HybridFabric.spec.borderGateway.wireguard.address
+# is unset (hybridfabric_provision bgw_default_wg_address reads this). Hub nodes
+# route its network via the hub leg.
+fabric_bgw_default_wg_address: 10.254.254.1/24

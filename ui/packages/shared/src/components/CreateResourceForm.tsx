@@ -20,23 +20,29 @@ import { PageHeader } from './PageHeader';
 import { RbacMultiSelect } from './RbacMultiSelect';
 import { EntityMultiSelect } from './EntityMultiSelect';
 import { FabricSelect } from './FabricSelect';
-import { FabricMultiSelect } from './FabricMultiSelect';
-import { JoinPolicySelect } from './JoinPolicySelect';
-import type { JoinPolicy } from '../types';
-import { PlatformOpenshiftSelect, filterFabricCapablePlatformOpenshifts } from './PlatformOpenshiftSelect';
-import { CloudOSOSelect } from './CloudOSOSelect';
 import { CloudGatewaySelect } from './CloudGatewaySelect';
+import { CloudInfrastructureSelect } from './CloudInfrastructureSelect';
 import { BackendSelect, buildBackendOptions, type BackendSelectValue } from './BackendSelect';
+import type { CloudInfrastructure, CloudInfrastructureType } from '../types';
+import { useTranslation } from '../i18n';
 import {
+  CLOUD_INFRASTRUCTURE_TYPES,
+  DEFAULT_CLOUD_INFRA_OPENSHIFT,
+  DEFAULT_CLOUD_INFRA_OPENSTACK,
+  DEFAULT_FABRIC_BORDER_GATEWAY,
   DEFAULT_FABRIC_DOMAIN_ASN,
   DEFAULT_FABRIC_UNDERLAY,
-  DEFAULT_FABRIC_ROUTE_REFLECTORS,
   DEFAULT_FABRIC_TRANSPORT,
   DEFAULT_FABRIC_VNI,
-  formatRouteReflectors,
-  parseRouteReflectors,
+  FABRIC_TUNNEL_TYPES,
+  cloudInfrastructureNeedsCredentials,
+  parseCidrList,
   type FabricTunnelType,
+  type FabricUnderlayType,
 } from '../forms/hybridFabricDefaults';
+
+/** Kubernetes namespace name (DNS label), as NetworkPlacement.spec.vmNamespaces requires. */
+const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
 export type SelfServiceFormType =
   | 'team'
@@ -57,6 +63,7 @@ export type SelfServiceFormType =
   | 'hybridnetwork'
   | 'networkplacement'
   | 'hybridfabric'
+  | 'cloudinfrastructure'
   | 'cloudgateway'
   | 'transportlink'
   | 'uihealthchecker';
@@ -88,6 +95,7 @@ const FORM_TITLES: Record<SelfServiceFormType, string> = {
   hybridnetwork: 'Create Hybrid Network',
   networkplacement: 'Create Network Placement',
   hybridfabric: 'Create Hybrid Fabric',
+  cloudinfrastructure: 'Create Cloud Infrastructure',
   cloudgateway: 'Create Cloud Gateway',
   transportlink: 'Create Transport Link',
   uihealthchecker: 'Create UI Health Checker',
@@ -112,6 +120,7 @@ const FORM_KINDS: Record<SelfServiceFormType, HybridSovereignKind> = {
   hybridnetwork: 'HybridNetwork',
   networkplacement: 'NetworkPlacement',
   hybridfabric: 'HybridFabric',
+  cloudinfrastructure: 'CloudInfrastructure',
   cloudgateway: 'CloudGateway',
   transportlink: 'TransportLink',
   uihealthchecker: 'UIHealthChecker',
@@ -205,7 +214,6 @@ export function CreateResourceForm({
   const [fabricRef, setFabricRef] = useState('lab-fabric');
   /** Optional HybridNetwork.spec.fabricRef when Entity has multiple fabrics (§19.6) */
   const [networkFabricRef, setNetworkFabricRef] = useState('');
-  const [cloudProvider, setCloudProvider] = useState('aws');
   const [region, setRegion] = useState('us-east-1');
   const [gatewayRef, setGatewayRef] = useState('');
   const [healthUrl, setHealthUrl] = useState('https://');
@@ -219,19 +227,18 @@ export function CreateResourceForm({
   const [assignViewer, setAssignViewer] = useState<string[]>([]);
   const [assignOps, setAssignOps] = useState<string[]>([]);
   const [osoProject, setOsoProject] = useState('');
-  const [vaultPath, setVaultPath] = useState('oso/accounts/shc_admin');
   const [baseDomain, setBaseDomain] = useState('');
-  const [projectDomain, setProjectDomain] = useState('shc_domain');
-  const [externalNetwork, setExternalNetwork] = useState('ext-net');
-  const [route53VaultPath, setRoute53VaultPath] = useState('oso/accounts/route53-openstack');
+  // CloudOSO: unset values fall back to the CloudInfrastructure (prefilled from it when readable).
+  const [projectDomain, setProjectDomain] = useState('');
+  const [externalNetwork, setExternalNetwork] = useState('');
+  const [osoDesignate, setOsoDesignate] = useState<{ zoneId?: string; projectId?: string }>({});
+  const [route53VaultPath, setRoute53VaultPath] = useState('');
   const [landingzone, setLandingzone] = useState('default');
   const [awsAccount, setAwsAccount] = useState('');
   const [awsVaultPath, setAwsVaultPath] = useState('');
   const [awsBaseDomain, setAwsBaseDomain] = useState('');
   const [awsAccessKeyId, setAwsAccessKeyId] = useState('');
   const [awsSecretAccessKey, setAwsSecretAccessKey] = useState('');
-  const [cloudsYaml, setCloudsYaml] = useState('');
-  const [virtVaultPath, setVirtVaultPath] = useState('');
   const [virtBaseDomain, setVirtBaseDomain] = useState('');
   const [virtStorageClass, setVirtStorageClass] = useState('ocs-storagecluster-ceph-rbd');
   const [platformType, setPlatformType] = useState('openstack');
@@ -239,6 +246,9 @@ export function CreateResourceForm({
   const [cpCount, setCpCount] = useState('3');
   const [workerCount, setWorkerCount] = useState('3');
   const [nodePoolReplicas, setNodePoolReplicas] = useState('2');
+  // PlatformOpenshift explicit address plan; omitted CIDRs are allocated from the CloudInfrastructure.
+  const [poClusterNetwork, setPoClusterNetwork] = useState('');
+  const [poServiceNetwork, setPoServiceNetwork] = useState('');
   const [rbacMulti, setRbacMulti] = useState<string[]>([]);
   const [rbacOperator, setRbacOperator] = useState<string[]>([]);
   const [rbacViewer, setRbacViewer] = useState<string[]>([]);
@@ -252,26 +262,61 @@ export function CreateResourceForm({
     DEFAULT_FABRIC_TRANSPORT.defaultTunnelType,
   );
   const [fabricMtu, setFabricMtu] = useState(String(DEFAULT_FABRIC_TRANSPORT.mtu));
-  const [fabricMssClamp, setFabricMssClamp] = useState(String(DEFAULT_FABRIC_TRANSPORT.innerMssClamp));
-  const [fabricRrText, setFabricRrText] = useState(formatRouteReflectors(DEFAULT_FABRIC_ROUTE_REFLECTORS));
+  const [fabricUnderlayType, setFabricUnderlayType] = useState<FabricUnderlayType>(DEFAULT_FABRIC_UNDERLAY.type);
+  const [fabricUnderlayPhysnet, setFabricUnderlayPhysnet] = useState(DEFAULT_FABRIC_UNDERLAY.physicalNetworkName);
   const [fabricUnderlayNad, setFabricUnderlayNad] = useState(DEFAULT_FABRIC_UNDERLAY.nadName);
   const [fabricUnderlayCidr, setFabricUnderlayCidr] = useState(DEFAULT_FABRIC_UNDERLAY.cidr);
-  const [fabricUnderlayGateway, setFabricUnderlayGateway] = useState(DEFAULT_FABRIC_UNDERLAY.gatewayAddress);
+  const [fabricHubVtepBlock, setFabricHubVtepBlock] = useState(DEFAULT_FABRIC_UNDERLAY.hubVtepBlock);
+  const [fabricHubLegAddress, setFabricHubLegAddress] = useState(DEFAULT_FABRIC_UNDERLAY.hubLegAddress);
+  const [fabricUnderlayGateway, setFabricUnderlayGateway] = useState('');
   const [fabricUnderlayMtu, setFabricUnderlayMtu] = useState(String(DEFAULT_FABRIC_UNDERLAY.mtu));
-  const [fabricBgwName, setFabricBgwName] = useState('');
-  const [fabricBgwLoopback, setFabricBgwLoopback] = useState('');
+  const [fabricBgwName, setFabricBgwName] = useState(DEFAULT_FABRIC_BORDER_GATEWAY.name);
+  const [fabricBgwLoopback, setFabricBgwLoopback] = useState(DEFAULT_FABRIC_BORDER_GATEWAY.loopback);
   const [fabricBgwVaultRef, setFabricBgwVaultRef] = useState('');
-  // PlatformOpenshift — fabric attach (§18.4); hidden/ignored when platformType === 'aws'
-  const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>('AutoWhenFabricReady');
-  const [fabricRefsExplicit, setFabricRefsExplicit] = useState<string[]>([]);
-  const [preferredFabricRef, setPreferredFabricRef] = useState('');
-  const [ipamFabricRef, setIpamFabricRef] = useState('');
-  const [manageGatewayAndLink, setManageGatewayAndLink] = useState(true);
-  // CloudGateway — backend picked from PlatformOpenshiftSelect / CloudOSOSelect by cloud type (§18.5)
-  const [gatewayBackendName, setGatewayBackendName] = useState('');
+  const [fabricBgwWgAddress, setFabricBgwWgAddress] = useState(DEFAULT_FABRIC_BORDER_GATEWAY.wireguardAddress);
+  const [fabricBgwWgPort, setFabricBgwWgPort] = useState(String(DEFAULT_FABRIC_BORDER_GATEWAY.wireguardListenPort));
+  // Tenant cloud projects and CloudGateway — spec.cloudRef.name (CloudInfrastructure in sovereign-cloud)
+  const [cloudRefName, setCloudRefName] = useState('');
+  /** Type of the selected CloudInfrastructure when the list is readable ('' = unknown). */
+  const [cloudRefType, setCloudRefType] = useState<CloudInfrastructureType | ''>('');
+  // CloudGateway — transport ('' = fabric transportDefaults.defaultTunnelType) + OpenStack site underlay
+  const [gatewayTransport, setGatewayTransport] = useState<FabricTunnelType | ''>('');
+  const [gatewayWgAddress, setGatewayWgAddress] = useState('');
+  const [siteUnderlayInterface, setSiteUnderlayInterface] = useState('');
+  const [siteComputeInterface, setSiteComputeInterface] = useState('');
+  const [siteUnderlayCidr, setSiteUnderlayCidr] = useState('');
+  const [siteUnderlayGateway, setSiteUnderlayGateway] = useState('');
+  // NetworkPlacement (CloudVirt) — hub namespaces the operator creates; empty = <cloudvirt>-<network>
+  const [vmNamespaces, setVmNamespaces] = useState('');
+  // HybridNetwork — optional overlay MTU (defaults from the fabric transport MTU)
+  const [overlayMtu, setOverlayMtu] = useState('');
+  // CloudInfrastructure
+  const [cinfraType, setCinfraType] = useState<CloudInfrastructureType>('openstack');
+  const [cinfraCredMode, setCinfraCredMode] = useState<'vault' | 'secret'>('vault');
+  const [cinfraCredVaultPath, setCinfraCredVaultPath] = useState('');
+  const [cinfraCredSecret, setCinfraCredSecret] = useState('');
+  const [cinfraEntityRefs, setCinfraEntityRefs] = useState<string[]>([]);
+  const [cinfraRegion, setCinfraRegion] = useState(DEFAULT_CLOUD_INFRA_OPENSTACK.region);
+  const [cinfraMgmtKubeconfig, setCinfraMgmtKubeconfig] = useState('');
+  const [cinfraNetConfig, setCinfraNetConfig] = useState(DEFAULT_CLOUD_INFRA_OPENSTACK.netConfigRef);
+  const [cinfraNodeSets, setCinfraNodeSets] = useState('');
+  const [cinfraExternalNetwork, setCinfraExternalNetwork] = useState(DEFAULT_CLOUD_INFRA_OPENSTACK.externalNetwork);
+  const [cinfraBaseDomain, setCinfraBaseDomain] = useState('');
+  const [cinfraProjectDomain, setCinfraProjectDomain] = useState(DEFAULT_CLOUD_INFRA_OPENSTACK.projectDomain);
+  const [cinfraDesignateZone, setCinfraDesignateZone] = useState('');
+  const [cinfraDesignateProject, setCinfraDesignateProject] = useState('');
+  const [cinfraClusterRef, setCinfraClusterRef] = useState(DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterRef);
+  const [cinfraBootImage, setCinfraBootImage] = useState(DEFAULT_CLOUD_INFRA_OPENSHIFT.bootImage);
+  const [cinfraStorageClass, setCinfraStorageClass] = useState('');
+  const [cinfraPodPool, setCinfraPodPool] = useState(DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterNetworkPool.cidr);
+  const [cinfraPodBlock, setCinfraPodBlock] = useState(String(DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterNetworkPool.blockPrefixLength));
+  const [cinfraSvcPool, setCinfraSvcPool] = useState(DEFAULT_CLOUD_INFRA_OPENSHIFT.serviceNetworkPool.cidr);
+  const [cinfraSvcBlock, setCinfraSvcBlock] = useState(String(DEFAULT_CLOUD_INFRA_OPENSHIFT.serviceNetworkPool.blockPrefixLength));
+  const [cinfraAwsAccount, setCinfraAwsAccount] = useState('');
 
+  const { t } = useTranslation();
   const type = formType;
-  const title = FORM_TITLES[type] ?? 'Create Resource';
+  const title = t(`form.titles.${type}`, { defaultValue: FORM_TITLES[type] ?? 'Create Resource' });
   const kind = FORM_KINDS[type];
   const [entityName, setEntityName] = useState('');
   const entityNs =
@@ -285,7 +330,7 @@ export function CreateResourceForm({
 
   const entities = useK8sResourceList<K8sResource>('Entity', {
     namespace: 'sovereign-cloud',
-    enabled: (type === 'persona' && !namespace) || type === 'hybridfabric',
+    enabled: (type === 'persona' && !namespace) || type === 'hybridfabric' || type === 'cloudinfrastructure',
   });
 
   const teams = useK8sResourceList<K8sResource>('Team', { namespace: entityNs, enabled: type === 'assignment' });
@@ -323,26 +368,14 @@ export function CreateResourceForm({
   const aapConfigs = useK8sResourceList<K8sResource>('AAPConfig', { enabled: type === 'aaporg' });
   const quayConfigs = useK8sResourceList<K8sResource>('QuayConfig', { enabled: type === 'quayorg' });
   const hybridNetworks = useK8sResourceList<K8sResource>('HybridNetwork', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
-  // BackendSelect (§18.6) — CloudOSO / CloudVirt / PlatformOpenshift(hosted|openstack) only, never CloudAWS/AWS-PO.
+  // BackendSelect — CloudOSO / CloudVirt projects in the entity namespace.
   const cloudososForPlacement = useK8sResourceList<K8sResource>('CloudOSO', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
   const cloudvirtsForPlacement = useK8sResourceList<K8sResource>('CloudVirt', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
-  const platformsForPlacement = useK8sResourceList<K8sResource>('PlatformOpenshift', { namespace: entityNs, enabled: type === 'networkplacement' && !!entityNs });
   const fabrics = useK8sResourceList<K8sResource>('HybridFabric', {
     namespace: 'sovereign-cloud',
-    enabled:
-      type === 'cloudgateway' ||
-      type === 'transportlink' ||
-      type === 'platformopenshift' ||
-      type === 'hybridnetwork',
+    enabled: type === 'cloudgateway' || type === 'transportlink' || type === 'hybridnetwork',
   });
   const gateways = useK8sResourceList<K8sResource>('CloudGateway', { namespace: 'sovereign-cloud', enabled: type === 'transportlink' });
-  // CloudGateway backend (§18.5) — cluster-wide (all entity namespaces), filtered to entities tagged on selected fabric.
-  const platformsForGateway = useK8sResourceList<K8sResource>('PlatformOpenshift', {
-    enabled: type === 'cloudgateway' && cloudProvider === 'openshift',
-  });
-  const cloudososForGateway = useK8sResourceList<K8sResource>('CloudOSO', {
-    enabled: type === 'cloudgateway' && cloudProvider === 'openstack',
-  });
 
 
   const names = (items: K8sResource[] | undefined | null) =>
@@ -354,7 +387,7 @@ export function CreateResourceForm({
   const firstName = (items: K8sResource[] | undefined | null): string | undefined =>
     names(items)[0]?.value;
 
-  /** Options with a Ready badge — used by EntityMultiSelect / FabricSelect / FabricMultiSelect. */
+  /** Options with a Ready badge — used by EntityMultiSelect / FabricSelect. */
   const namesWithReady = (items: K8sResource[] | undefined | null) =>
     (items ?? [])
       .filter((i): i is K8sResource => typeof i?.metadata?.name === 'string' && i.metadata.name.length > 0)
@@ -372,7 +405,7 @@ export function CreateResourceForm({
       | { entityRefs?: Array<{ name: string }> }
       | undefined)?.entityRefs?.map((r) => r.name) ?? [];
 
-  /** FabricSelect / FabricMultiSelect options — disabled (greyed) when this Entity isn't tagged (§18.4). */
+  /** FabricSelect options — disabled (greyed) when this Entity is not tagged on the fabric. */
   const fabricOptionsForEntity = fabrics.items.map((f) => ({
     value: f.metadata.name,
     label: f.metadata.name,
@@ -389,32 +422,6 @@ export function CreateResourceForm({
       }))
     : [{ value: 'lab-fabric', label: 'lab-fabric' }];
 
-  const entityNameFromNamespace = (ns: string | undefined): string => (ns ?? '').replace(/^entity-/, '');
-
-  /** PlatformOpenshiftSelect options for CloudGateway backend — hosted/openstack only, entity-tagged on selected fabric. */
-  const gatewayPlatformOptions = filterFabricCapablePlatformOpenshifts(platformsForGateway.items)
-    .filter((p) => {
-      const tagged = entityRefsOfFabric(fabricRef);
-      return !tagged.length || tagged.includes(entityNameFromNamespace(p.metadata.namespace));
-    })
-    .map((p) => ({
-      value: p.metadata.name,
-      label: `${p.metadata.name} (${p.metadata.namespace})`,
-      ready: (p.status as { ready?: boolean } | undefined)?.ready,
-    }));
-
-  /** CloudOSOSelect options for CloudGateway backend — entity-tagged on selected fabric. */
-  const gatewayCloudOsoOptions = cloudososForGateway.items
-    .filter((c) => {
-      const tagged = entityRefsOfFabric(fabricRef);
-      return !tagged.length || tagged.includes(entityNameFromNamespace(c.metadata.namespace));
-    })
-    .map((c) => ({
-      value: c.metadata.name,
-      label: `${c.metadata.name} (${c.metadata.namespace})`,
-      ready: (c.status as { ready?: boolean } | undefined)?.ready,
-    }));
-
   /** CloudGatewaySelect options for TransportLink — gateways for the selected fabric, re-filters on change (§18.11). */
   const gatewayOptionsForFabric = gateways.items
     .filter((g) => !fabricRef || (g.spec as { fabricRef?: string } | undefined)?.fabricRef === fabricRef)
@@ -424,12 +431,35 @@ export function CreateResourceForm({
       ready: (g.status as { ready?: boolean } | undefined)?.ready,
     }));
 
-  /** BackendSelect options for NetworkPlacement — CloudOSO, CloudVirt, PlatformOpenshift hosted/openstack Joined. */
+  /** BackendSelect options for NetworkPlacement — CloudOSO and CloudVirt projects. */
   const backendOptions = buildBackendOptions({
     cloudosos: cloudososForPlacement.items,
     cloudvirts: cloudvirtsForPlacement.items,
-    platforms: platformsForPlacement.items,
   });
+
+  /** Picking a CloudInfrastructure: remember its type and prefill site values the project inherits. */
+  const onCloudInfrastructurePicked = (item: CloudInfrastructure | undefined) => {
+    setCloudRefType(item?.spec.type ?? '');
+    const os = item?.spec.openstack;
+    if (type === 'cloudoso' && os) {
+      setProjectDomain(os.projectDomain ?? '');
+      setExternalNetwork(os.externalNetwork ?? '');
+      setOsoDesignate({ zoneId: os.designate?.zoneId, projectId: os.designate?.projectId });
+      if (!baseDomain && os.baseDomain) setBaseDomain(os.baseDomain);
+      if (!route53VaultPath && os.route53VaultPath) setRoute53VaultPath(os.route53VaultPath);
+    }
+    if (type === 'cloudaws' && item?.spec.aws?.baseDomain && !awsBaseDomain) {
+      setAwsBaseDomain(item.spec.aws.baseDomain);
+    }
+  };
+
+  const vmNamespaceList = parseCidrList(vmNamespaces);
+  const vmNamespacesValid =
+    vmNamespaceList.length <= 16 && vmNamespaceList.every((n) => n.length <= 63 && DNS_LABEL.test(n));
+  const overlayMtuValid =
+    !overlayMtu.trim() || (Number(overlayMtu) >= 1280 && Number(overlayMtu) <= 9216);
+  const cinfraCredsSet =
+    cinfraCredMode === 'vault' ? !!cinfraCredVaultPath.trim() : !!cinfraCredSecret.trim();
 
   useEffect(() => {
     if (type === 'persona' && !namespace && !entityName) {
@@ -527,21 +557,29 @@ export function CreateResourceForm({
           ...(Object.keys(toolRbac).length ? { toolRbac } : {}),
         };
       }
-      case 'cloudoso': {
-        const credName = `${name}-openstack-credentials`;
+      case 'cloudoso':
+        // Credentials and site settings come from the CloudInfrastructure (no vaultPath / secret here).
         return {
+          cloudRef: { kind: 'CloudInfrastructure', name: cloudRefName },
           project: osoProject,
           baseDomain,
-          projectDomain,
-          externalNetwork,
           landingzone,
-          ...(cloudsYaml.trim()
-            ? { credentialsSecretRef: { name: credName } }
-            : { vaultPath }),
-          ...(route53VaultPath.trim() ? { route53VaultPath } : {}),
+          ...(projectDomain.trim() ? { projectDomain: projectDomain.trim() } : {}),
+          ...(externalNetwork.trim() ? { externalNetwork: externalNetwork.trim() } : {}),
+          ...(osoDesignate.zoneId ? { designateZoneId: osoDesignate.zoneId } : {}),
+          ...(osoDesignate.projectId ? { designateProjectId: osoDesignate.projectId } : {}),
+          ...(route53VaultPath.trim() ? { route53VaultPath: route53VaultPath.trim() } : {}),
         };
-      }
       case 'cloudaws': {
+        if (cloudRefName) {
+          // Credentials come from the CloudInfrastructure.
+          return {
+            cloudRef: { kind: 'CloudInfrastructure', name: cloudRefName },
+            account: awsAccount,
+            baseDomain: awsBaseDomain || baseDomain,
+            landingzone,
+          };
+        }
         const credName = `${name}-aws-credentials`;
         return {
           account: awsAccount,
@@ -554,10 +592,77 @@ export function CreateResourceForm({
       }
       case 'cloudvirt':
         return {
-          vaultPath: virtVaultPath || vaultPath,
+          cloudRef: { kind: 'CloudInfrastructure', name: cloudRefName },
           baseDomain: virtBaseDomain || baseDomain,
           storageClass: virtStorageClass || undefined,
         };
+      case 'cloudinfrastructure': {
+        const credentialsRef = cloudInfrastructureNeedsCredentials(cinfraType)
+          ? cinfraCredMode === 'vault'
+            ? { vaultPath: cinfraCredVaultPath.trim() }
+            : { secretRef: { name: cinfraCredSecret.trim() } }
+          : undefined;
+        const common = {
+          type: cinfraType,
+          ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+          ...(credentialsRef ? { credentialsRef } : {}),
+          ...(cinfraEntityRefs.length ? { entityRefs: cinfraEntityRefs.map((n) => ({ name: n })) } : {}),
+        };
+        if (cinfraType === 'openstack') {
+          const nodeSets = parseCidrList(cinfraNodeSets);
+          return {
+            ...common,
+            openstack: {
+              region: cinfraRegion.trim() || DEFAULT_CLOUD_INFRA_OPENSTACK.region,
+              ...(cinfraMgmtKubeconfig.trim() ? { managementClusterKubeconfigRef: cinfraMgmtKubeconfig.trim() } : {}),
+              netConfigRef: cinfraNetConfig.trim() || DEFAULT_CLOUD_INFRA_OPENSTACK.netConfigRef,
+              ...(nodeSets.length ? { dataplaneNodeSetRefs: nodeSets } : {}),
+              ...(cinfraExternalNetwork.trim() ? { externalNetwork: cinfraExternalNetwork.trim() } : {}),
+              ...(cinfraBaseDomain.trim() ? { baseDomain: cinfraBaseDomain.trim() } : {}),
+              ...(cinfraProjectDomain.trim() ? { projectDomain: cinfraProjectDomain.trim() } : {}),
+              ...(cinfraDesignateZone.trim() || cinfraDesignateProject.trim()
+                ? {
+                    designate: {
+                      ...(cinfraDesignateZone.trim() ? { zoneId: cinfraDesignateZone.trim() } : {}),
+                      ...(cinfraDesignateProject.trim() ? { projectId: cinfraDesignateProject.trim() } : {}),
+                    },
+                  }
+                : {}),
+              ...(route53VaultPath.trim() ? { route53VaultPath: route53VaultPath.trim() } : {}),
+            },
+          };
+        }
+        if (cinfraType === 'openshift') {
+          return {
+            ...common,
+            openshift: {
+              clusterRef: cinfraClusterRef.trim() || DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterRef,
+              bootImage: cinfraBootImage.trim() || DEFAULT_CLOUD_INFRA_OPENSHIFT.bootImage,
+              ...(cinfraStorageClass.trim() ? { storageClass: cinfraStorageClass.trim() } : {}),
+              hostedClusterCidrDefaults: {
+                clusterNetworkPool: {
+                  cidr: cinfraPodPool.trim() || DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterNetworkPool.cidr,
+                  blockPrefixLength:
+                    Number(cinfraPodBlock) || DEFAULT_CLOUD_INFRA_OPENSHIFT.clusterNetworkPool.blockPrefixLength,
+                },
+                serviceNetworkPool: {
+                  cidr: cinfraSvcPool.trim() || DEFAULT_CLOUD_INFRA_OPENSHIFT.serviceNetworkPool.cidr,
+                  blockPrefixLength:
+                    Number(cinfraSvcBlock) || DEFAULT_CLOUD_INFRA_OPENSHIFT.serviceNetworkPool.blockPrefixLength,
+                },
+              },
+            },
+          };
+        }
+        return {
+          ...common,
+          aws: {
+            accountId: cinfraAwsAccount.trim(),
+            region: cinfraRegion.trim(),
+            ...(cinfraBaseDomain.trim() ? { baseDomain: cinfraBaseDomain.trim() } : {}),
+          },
+        };
+      }
       case 'platformopenshift': {
         const adminList = rbacMulti;
         const operatorList = rbacOperator;
@@ -571,7 +676,7 @@ export function CreateResourceForm({
               }
             : undefined;
         if (platformType === 'aws') {
-          // AWS PlatformOpenshift has no fabric attachment — omit spec.fabric / spec.networking entirely (§15.0).
+          // AWS clusters take no address plan from a CloudInfrastructure — omit spec.networking.
           return {
             type: 'aws',
             aws: {
@@ -584,23 +689,17 @@ export function CreateResourceForm({
             ...(toolRbac ? { toolRbac } : {}),
           };
         }
-        // hosted / openstack only — JoinPolicySelect + FabricSelect/FabricMultiSelect (§18.4).
-        const fabricSpec =
-          joinPolicy === 'None'
-            ? { joinPolicy: 'None' as const, manageGatewayAndLink: false }
-            : {
-                joinPolicy,
-                ...(joinPolicy === 'ExplicitOnly' ? { fabricRefs: fabricRefsExplicit } : {}),
-                ...(preferredFabricRef ? { preferredFabricRef } : {}),
-                manageGatewayAndLink,
-              };
+        // Clusters do not join a fabric. Explicit CIDRs are used as given; omitted ones are
+        // allocated from the CloudInfrastructure's hostedClusterCidrDefaults.
+        const clusterNetwork = parseCidrList(poClusterNetwork);
+        const serviceNetwork = parseCidrList(poServiceNetwork);
         const networkingSpec =
-          joinPolicy === 'None'
-            ? undefined
-            : {
-                allocateFromFabric: true,
-                ...((ipamFabricRef || preferredFabricRef) ? { fabricRef: ipamFabricRef || preferredFabricRef } : {}),
-              };
+          clusterNetwork.length || serviceNetwork.length
+            ? {
+                ...(clusterNetwork.length ? { clusterNetwork } : {}),
+                ...(serviceNetwork.length ? { serviceNetwork } : {}),
+              }
+            : undefined;
         if (platformType === 'hosted') {
           const envName = platformEnv || cloudVirtRef;
           return {
@@ -609,7 +708,6 @@ export function CreateResourceForm({
               environment: envName,
               nodePoolReplicas: Number(nodePoolReplicas) || 2,
             },
-            fabric: fabricSpec,
             ...(networkingSpec ? { networking: networkingSpec } : {}),
             ...(toolRbac ? { toolRbac } : {}),
           };
@@ -620,9 +718,8 @@ export function CreateResourceForm({
             environment: platformEnv || cloudosoRef,
             controlPlaneCount: Number(cpCount) || 3,
             workerCount: Number(workerCount) || 3,
-            externalNetwork,
+            ...(externalNetwork.trim() ? { externalNetwork: externalNetwork.trim() } : {}),
           },
-          fabric: fabricSpec,
           ...(networkingSpec ? { networking: networkingSpec } : {}),
           ...(toolRbac ? { toolRbac } : {}),
         };
@@ -668,69 +765,90 @@ export function CreateResourceForm({
         return {
           description,
           ...(networkFabricRef ? { fabricRef: networkFabricRef } : {}),
+          ...(overlayMtu.trim() ? { overlayMtu: Number(overlayMtu) } : {}),
           networkViewerRbac,
         };
       case 'networkplacement':
         return {
           network: networkRef,
-          // BackendSelect (§18.6) — CloudOSO / CloudVirt / PlatformOpenshift hosted|openstack only.
+          // BackendSelect — CloudOSO / CloudVirt project in this entity namespace.
           backend: { kind: backendKind, name: backendName },
           prefixes: prefixes.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
-          state: 'present',
+          ...(backendKind === 'CloudVirt' && vmNamespaceList.length ? { vmNamespaces: vmNamespaceList } : {}),
         };
       case 'hybridfabric': {
-        const rrs = parseRouteReflectors(fabricRrText);
+        const localnet = fabricUnderlayType === 'localnet';
         return {
           enabled: fabricEnabled,
           domainAsn: Number(domainAsn) || DEFAULT_FABRIC_DOMAIN_ASN,
           entityRefs: fabricEntityRefs.map((n) => ({ name: n })),
-          routeReflectors: rrs.length > 0 ? rrs : DEFAULT_FABRIC_ROUTE_REFLECTORS,
           vniPool: {
             start: Number(vniStart) || DEFAULT_FABRIC_VNI.start,
             end: Number(vniEnd) || DEFAULT_FABRIC_VNI.end,
           },
           transportDefaults: {
             mtu: Number(fabricMtu) || DEFAULT_FABRIC_TRANSPORT.mtu,
-            innerMssClamp: Number(fabricMssClamp) || DEFAULT_FABRIC_TRANSPORT.innerMssClamp,
             defaultTunnelType: fabricTunnelType,
           },
           underlay: {
+            type: fabricUnderlayType,
             nadName: fabricUnderlayNad || DEFAULT_FABRIC_UNDERLAY.nadName,
             cidr: fabricUnderlayCidr || DEFAULT_FABRIC_UNDERLAY.cidr,
-            ...(fabricUnderlayGateway ? { gatewayAddress: fabricUnderlayGateway } : {}),
+            ...(localnet
+              ? {
+                  physicalNetworkName: fabricUnderlayPhysnet || DEFAULT_FABRIC_UNDERLAY.physicalNetworkName,
+                  ...(fabricHubVtepBlock ? { hubVtepBlock: fabricHubVtepBlock } : {}),
+                  ...(fabricHubLegAddress ? { hubLegAddress: fabricHubLegAddress } : {}),
+                }
+              : fabricUnderlayGateway
+                ? { gatewayAddress: fabricUnderlayGateway }
+                : {}),
             mtu: Number(fabricUnderlayMtu) || DEFAULT_FABRIC_UNDERLAY.mtu,
           },
-          ...(fabricBgwName || fabricBgwLoopback || fabricBgwVaultRef
-            ? {
-                borderGateway: {
-                  ...(fabricBgwName ? { name: fabricBgwName } : {}),
-                  ...(fabricBgwLoopback ? { loopback: fabricBgwLoopback } : {}),
-                  ...(fabricBgwVaultRef ? { vaultCredentialRef: fabricBgwVaultRef } : {}),
-                },
-              }
-            : {}),
+          borderGateway: {
+            name: fabricBgwName || DEFAULT_FABRIC_BORDER_GATEWAY.name,
+            loopback: fabricBgwLoopback || DEFAULT_FABRIC_BORDER_GATEWAY.loopback,
+            ...(fabricBgwVaultRef ? { vaultCredentialRef: fabricBgwVaultRef } : {}),
+            wireguard: {
+              address: fabricBgwWgAddress || DEFAULT_FABRIC_BORDER_GATEWAY.wireguardAddress,
+              listenPort: Number(fabricBgwWgPort) || DEFAULT_FABRIC_BORDER_GATEWAY.wireguardListenPort,
+            },
+          },
         };
       }
-      case 'cloudgateway':
+      case 'cloudgateway': {
+        const siteUnderlay = {
+          ...(siteUnderlayInterface.trim() ? { interface: siteUnderlayInterface.trim() } : {}),
+          ...(siteComputeInterface.trim() ? { computeInterface: siteComputeInterface.trim() } : {}),
+          ...(siteUnderlayCidr.trim() ? { cidr: siteUnderlayCidr.trim() } : {}),
+          ...(siteUnderlayGateway.trim() ? { gatewayAddress: siteUnderlayGateway.trim() } : {}),
+        };
         return {
           enabled: true,
-          cloud: cloudProvider,
-          region,
-          domainAsn: Number(domainAsn) || 65001,
           fabricRef,
-          // Backend picked via PlatformOpenshiftSelect (cloud=openshift) or CloudOSOSelect (cloud=openstack).
-          // AWS PlatformOpenshift can never be a fabric gateway backend (§15.0) — cloud=aws has no ref here.
-          ...(cloudProvider === 'openshift' && gatewayBackendName ? { platformOpenshiftRef: gatewayBackendName } : {}),
-          ...(cloudProvider === 'openstack' && gatewayBackendName ? { openstackCloudOSORef: gatewayBackendName } : {}),
-          transport: { type: 'wireguard' },
+          // The CloudInfrastructure type selects the gateway flavour (openstack site VM / openshift hub landing).
+          cloudRef: { kind: 'CloudInfrastructure', name: cloudRefName },
+          ...(gatewayTransport ? { transport: { type: gatewayTransport } } : {}),
+          ...(gatewayTransport === 'wireguard' && gatewayWgAddress.trim()
+            ? { wireguard: { address: gatewayWgAddress.trim() } }
+            : {}),
+          ...(cloudRefType !== 'openshift' && Object.keys(siteUnderlay).length ? { siteUnderlay } : {}),
         };
-      case 'transportlink':
+      }
+      case 'transportlink': {
+        // Operator-generated in the new API; tunnel type follows the gateway's transport.
+        const gwTransport = (
+          gateways.items.find((g) => g.metadata.name === gatewayRef)?.spec as
+            | { transport?: { type?: string } }
+            | undefined
+        )?.transport?.type;
         return {
           enabled: true,
           fabricRef,
           cloudGatewayRef: gatewayRef,
-          tunnelType: 'wireguard',
+          ...(gwTransport === 'none' || gwTransport === 'wireguard' ? { tunnelType: gwTransport } : {}),
         };
+      }
       case 'uihealthchecker':
         return {
           url: healthUrl,
@@ -750,31 +868,22 @@ export function CreateResourceForm({
     if (type === 'entity' && !billingID) return false;
     if (type === 'persona' && !entityNs) return false;
     if (type === 'assignment' && !teamRef) return false;
-    if (
-      type === 'cloudoso' &&
-      (!osoProject ||
-        !baseDomain ||
-        !projectDomain ||
-        !externalNetwork ||
-        (!cloudsYaml.trim() && !vaultPath))
-    )
-      return false;
+    if (type === 'cloudoso' && (!cloudRefName || !osoProject || !baseDomain)) return false;
     if (
       type === 'cloudaws' &&
       (!awsAccount ||
         !(awsBaseDomain || baseDomain) ||
-        (!(awsAccessKeyId.trim() && awsSecretAccessKey.trim()) && !awsVaultPath))
+        (!cloudRefName && !(awsAccessKeyId.trim() && awsSecretAccessKey.trim()) && !awsVaultPath))
     )
       return false;
-    if (type === 'cloudvirt' && (!(virtVaultPath || vaultPath) || !(virtBaseDomain || baseDomain))) return false;
+    if (type === 'cloudvirt' && (!cloudRefName || !(virtBaseDomain || baseDomain))) return false;
     if (type === 'platformopenshift' && !(platformEnv || cloudosoRef || cloudAwsRef || cloudVirtRef)) return false;
-    if (
-      type === 'platformopenshift' &&
-      platformType !== 'aws' &&
-      joinPolicy === 'ExplicitOnly' &&
-      fabricRefsExplicit.length === 0
-    )
-      return false;
+    if (type === 'cloudinfrastructure') {
+      if (cloudInfrastructureNeedsCredentials(cinfraType) && !cinfraCredsSet) return false;
+      if (cinfraType === 'aws' && (!/^[0-9]{12}$/.test(cinfraAwsAccount.trim()) || !cinfraRegion.trim())) {
+        return false;
+      }
+    }
     if (type === 'persona' && (!(personaRbacs[0] || rbacRef) || !personaType)) return false;
     if (type === 'vaultkv' && !vaultRef) return false;
     if (type === 'migration' && (!vmName || !cloudosoRef)) return false;
@@ -782,6 +891,8 @@ export function CreateResourceForm({
     if (type === 'aaporg' && !aapConfig) return false;
     if (type === 'quayorg' && !quayConfig) return false;
     if (type === 'networkplacement' && (!networkRef || !backendKind || !backendName || !prefixes.trim())) return false;
+    if (type === 'networkplacement' && backendKind === 'CloudVirt' && !vmNamespacesValid) return false;
+    if (type === 'hybridnetwork' && !overlayMtuValid) return false;
     if (
       type === 'hybridnetwork' &&
       fabricOptionsForEntity.filter((o) => !o.isDisabled).length > 1 &&
@@ -789,14 +900,12 @@ export function CreateResourceForm({
     ) {
       return false;
     }
-    if (type === 'hybridfabric' && (!domainAsn || fabricEntityRefs.length === 0)) return false;
     if (
-      type === 'cloudgateway' &&
-      (!fabricRef ||
-        !region ||
-        ((cloudProvider === 'openshift' || cloudProvider === 'openstack') && !gatewayBackendName))
+      type === 'hybridfabric' &&
+      (!domainAsn || fabricEntityRefs.length === 0 || !fabricUnderlayCidr || !fabricBgwLoopback)
     )
       return false;
+    if (type === 'cloudgateway' && (!fabricRef || !cloudRefName)) return false;
     if (type === 'transportlink' && (!fabricRef || !gatewayRef)) return false;
     if (type === 'uihealthchecker' && !healthUrl.startsWith('http')) return false;
     return true;
@@ -808,13 +917,17 @@ export function CreateResourceForm({
     setResult(null);
     try {
       const targetNs =
-        type === 'hybridfabric' || type === 'cloudgateway' || type === 'transportlink' || type === 'uihealthchecker'
+        type === 'hybridfabric' ||
+        type === 'cloudinfrastructure' ||
+        type === 'cloudgateway' ||
+        type === 'transportlink' ||
+        type === 'uihealthchecker'
           ? 'sovereign-cloud'
           : entityNs;
       if (!targetNs) {
         throw new Error('Namespace is required');
       }
-      if (type === 'cloudaws' && awsAccessKeyId.trim() && awsSecretAccessKey.trim()) {
+      if (type === 'cloudaws' && !cloudRefName && awsAccessKeyId.trim() && awsSecretAccessKey.trim()) {
         await createNamespaceSecret(targetNs, {
           name: `${name}-aws-credentials`,
           labels: {
@@ -825,18 +938,6 @@ export function CreateResourceForm({
             AWS_ACCESS_KEY_ID: awsAccessKeyId.trim(),
             AWS_SECRET_ACCESS_KEY: awsSecretAccessKey.trim(),
             ACCOUNT_ID: awsAccount.trim(),
-          },
-        });
-      }
-      if (type === 'cloudoso' && cloudsYaml.trim()) {
-        await createNamespaceSecret(targetNs, {
-          name: `${name}-openstack-credentials`,
-          labels: {
-            'hybridsovereign.redhat/cloudoso': name,
-            'hybridsovereign.redhat/credential-type': 'openstack',
-          },
-          stringData: {
-            'clouds.yaml': cloudsYaml.trim(),
           },
         });
       }
@@ -984,33 +1085,36 @@ export function CreateResourceForm({
 
               {type === 'cloudoso' && (
                 <>
+                  <CloudInfrastructureSelect
+                    id="oso-cloudref"
+                    label={t('fields.cloudRef')}
+                    value={cloudRefName}
+                    onChange={setCloudRefName}
+                    onSelectInfrastructure={onCloudInfrastructurePicked}
+                    types={['openstack']}
+                    entityName={currentEntityName}
+                    isRequired
+                  />
                   <FormGroup label="OpenStack project" fieldId="oso-project" isRequired>
                     <TextInput id="oso-project" value={osoProject} onChange={(_e, v) => setOsoProject(v)} isRequired />
-                  </FormGroup>
-                  <FormGroup label="clouds.yaml" fieldId="oso-clouds" isRequired>
-                    <TextArea
-                      id="oso-clouds"
-                      value={cloudsYaml}
-                      onChange={(_e, v) => setCloudsYaml(v)}
-                      rows={12}
-                      placeholder={'clouds:\n  openstack:\n    auth:\n      auth_url: https://...\n      username: ...\n      password: ...\n      project_name: ...\n      user_domain_name: Default\n      project_domain_name: Default\n    region_name: ...\n    interface: public\n    identity_api_version: 3'}
-                      isRequired
-                    />
                   </FormGroup>
                   <FormGroup label="Base domain" fieldId="oso-base" isRequired>
                     <TextInput id="oso-base" value={baseDomain} onChange={(_e, v) => setBaseDomain(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="Project domain" fieldId="oso-pdom" isRequired>
-                    <TextInput id="oso-pdom" value={projectDomain} onChange={(_e, v) => setProjectDomain(v)} isRequired />
+                  <FormGroup label={t('fields.projectDomain')} fieldId="oso-pdom">
+                    <TextInput id="oso-pdom" value={projectDomain} onChange={(_e, v) => setProjectDomain(v)} />
+                    <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                      {t('fields.inheritsFromCloudInfra')}
+                    </p>
                   </FormGroup>
-                  <FormGroup label="External network" fieldId="oso-ext" isRequired>
-                    <TextInput id="oso-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} isRequired />
+                  <FormGroup label={t('fields.externalNetwork')} fieldId="oso-ext">
+                    <TextInput id="oso-ext" value={externalNetwork} onChange={(_e, v) => setExternalNetwork(v)} />
+                    <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                      {t('fields.inheritsFromCloudInfra')}
+                    </p>
                   </FormGroup>
                   <FormGroup label="Route53 vault path (optional)" fieldId="oso-r53">
                     <TextInput id="oso-r53" value={route53VaultPath} onChange={(_e, v) => setRoute53VaultPath(v)} />
-                  </FormGroup>
-                  <FormGroup label="Vault path (optional fallback)" fieldId="oso-vault">
-                    <TextInput id="oso-vault" value={vaultPath} onChange={(_e, v) => setVaultPath(v)} />
                   </FormGroup>
                   <FormGroup label="Landing zone" fieldId="oso-lz">
                     <TextInput id="oso-lz" value={landingzone} onChange={(_e, v) => setLandingzone(v)} />
@@ -1020,34 +1124,50 @@ export function CreateResourceForm({
 
               {type === 'cloudaws' && (
                 <>
+                  <CloudInfrastructureSelect
+                    id="aws-cloudref"
+                    label={t('fields.cloudRef')}
+                    value={cloudRefName}
+                    onChange={setCloudRefName}
+                    onSelectInfrastructure={onCloudInfrastructurePicked}
+                    types={['aws']}
+                    entityName={currentEntityName}
+                    placeholder={t('form.cloudInfraOptional')}
+                  />
                   <FormGroup label="AWS account ID" fieldId="aws-acct" isRequired>
                     <TextInput id="aws-acct" value={awsAccount} onChange={(_e, v) => setAwsAccount(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="AWS access key ID" fieldId="aws-ak" isRequired>
-                    <TextInput
-                      id="aws-ak"
-                      value={awsAccessKeyId}
-                      onChange={(_e, v) => setAwsAccessKeyId(v)}
-                      autoComplete="off"
-                      isRequired
-                    />
-                  </FormGroup>
-                  <FormGroup label="AWS secret access key" fieldId="aws-sk" isRequired>
-                    <TextInput
-                      id="aws-sk"
-                      type="password"
-                      value={awsSecretAccessKey}
-                      onChange={(_e, v) => setAwsSecretAccessKey(v)}
-                      autoComplete="new-password"
-                      isRequired
-                    />
-                  </FormGroup>
+                  {!cloudRefName && (
+                    <>
+                      <FormGroup label="AWS access key ID" fieldId="aws-ak" isRequired>
+                        <TextInput
+                          id="aws-ak"
+                          value={awsAccessKeyId}
+                          onChange={(_e, v) => setAwsAccessKeyId(v)}
+                          autoComplete="off"
+                          isRequired
+                        />
+                      </FormGroup>
+                      <FormGroup label="AWS secret access key" fieldId="aws-sk" isRequired>
+                        <TextInput
+                          id="aws-sk"
+                          type="password"
+                          value={awsSecretAccessKey}
+                          onChange={(_e, v) => setAwsSecretAccessKey(v)}
+                          autoComplete="new-password"
+                          isRequired
+                        />
+                      </FormGroup>
+                    </>
+                  )}
                   <FormGroup label="Base domain" fieldId="aws-base" isRequired>
                     <TextInput id="aws-base" value={awsBaseDomain} onChange={(_e, v) => setAwsBaseDomain(v)} isRequired />
                   </FormGroup>
-                  <FormGroup label="Vault path (optional fallback)" fieldId="aws-vault">
-                    <TextInput id="aws-vault" value={awsVaultPath} onChange={(_e, v) => setAwsVaultPath(v)} />
-                  </FormGroup>
+                  {!cloudRefName && (
+                    <FormGroup label="Vault path (optional fallback)" fieldId="aws-vault">
+                      <TextInput id="aws-vault" value={awsVaultPath} onChange={(_e, v) => setAwsVaultPath(v)} />
+                    </FormGroup>
+                  )}
                   <FormGroup label="Landing zone" fieldId="aws-lz">
                     <TextInput id="aws-lz" value={landingzone} onChange={(_e, v) => setLandingzone(v)} />
                   </FormGroup>
@@ -1056,9 +1176,16 @@ export function CreateResourceForm({
 
               {type === 'cloudvirt' && (
                 <>
-                  <FormGroup label="Vault path" fieldId="virt-vault" isRequired>
-                    <TextInput id="virt-vault" value={virtVaultPath} onChange={(_e, v) => setVirtVaultPath(v)} isRequired />
-                  </FormGroup>
+                  <CloudInfrastructureSelect
+                    id="virt-cloudref"
+                    label={t('fields.cloudRef')}
+                    value={cloudRefName}
+                    onChange={setCloudRefName}
+                    onSelectInfrastructure={onCloudInfrastructurePicked}
+                    types={['openshift']}
+                    entityName={currentEntityName}
+                    isRequired
+                  />
                   <FormGroup label="Base domain" fieldId="virt-base" isRequired>
                     <TextInput id="virt-base" value={virtBaseDomain} onChange={(_e, v) => setVirtBaseDomain(v)} isRequired />
                   </FormGroup>
@@ -1158,85 +1285,32 @@ export function CreateResourceForm({
                     </FormGroup>
                   )}
 
-                  {platformType === 'aws' ? (
-                    <Alert variant="info" isInline title="AWS PlatformOpenshift clusters do not attach to Hybrid Fabric" className="sc-mb">
-                      AWS PlatformOpenshift clusters do not attach to Hybrid Fabric / EVPN / CUDN. Use CloudOSO or
-                      CloudVirt-backed OpenShift (hosted / openstack) for fabric networking.
-                    </Alert>
-                  ) : (
+                  {platformType !== 'aws' && (
                     <>
-                      <JoinPolicySelect
-                        id="po-join-policy"
-                        value={joinPolicy}
-                        onChange={(v) => {
-                          setJoinPolicy(v);
-                          if (v === 'None') {
-                            setFabricRefsExplicit([]);
-                            setPreferredFabricRef('');
-                            setIpamFabricRef('');
-                          }
-                        }}
-                        isRequired
-                      />
-                      {joinPolicy === 'ExplicitOnly' && (
-                        <FabricMultiSelect
-                          id="po-fabric-refs"
-                          label="Fabrics"
-                          value={fabricRefsExplicit}
-                          onChange={setFabricRefsExplicit}
-                          options={fabricOptionsForEntity}
-                          isRequired
+                      <FormGroup label={t('fields.clusterNetwork')} fieldId="po-cluster-net">
+                        <TextInput
+                          id="po-cluster-net"
+                          value={poClusterNetwork}
+                          onChange={(_e, v) => setPoClusterNetwork(v)}
+                          placeholder={t('form.allocateAutomatically')}
                         />
-                      )}
-                      {joinPolicy !== 'None' && (
-                        <>
-                          <FabricSelect
-                            id="po-preferred-fabric"
-                            label="Preferred fabric"
-                            value={preferredFabricRef}
-                            onChange={setPreferredFabricRef}
-                            options={fabricOptionsForEntity}
-                            placeholder="Discover automatically"
-                          />
-                          <FabricSelect
-                            id="po-ipam-fabric"
-                            label="IPAM fabric"
-                            value={ipamFabricRef}
-                            onChange={setIpamFabricRef}
-                            options={fabricOptionsForEntity}
-                            placeholder="Same as preferred fabric"
-                          />
-                          {(() => {
-                            const ref = ipamFabricRef || preferredFabricRef;
-                            const fab = fabrics.items.find((f) => f.metadata.name === ref);
-                            const avail = (fab?.status as { availableVniCount?: number } | undefined)
-                              ?.availableVniCount;
-                            if (ref && typeof avail === 'number' && avail <= 0) {
-                              return (
-                                <Alert variant="warning" isInline title="Fabric IPAM exhausted">
-                                  HybridFabric <strong>{ref}</strong> reports availableVniCount=0.
-                                  Cluster CIDR / VNI allocation from this fabric will fail until VNIs are released.
-                                </Alert>
-                              );
-                            }
-                            return null;
-                          })()}
-                          <FormGroup label="Manage CloudGateway + TransportLink automatically" fieldId="po-manage-gw">
-                            <Switch
-                              id="po-manage-gw"
-                              isChecked={manageGatewayAndLink}
-                              onChange={(_e, checked) => setManageGatewayAndLink(checked)}
-                            />
-                          </FormGroup>
-                        </>
-                      )}
-                      {joinPolicy === 'None' && (
-                        <Alert variant="info" isInline title="Standalone install" className="sc-mb">
-                          No EVPN/CUDN until attached later via “Attach to fabric…”.
-                        </Alert>
-                      )}
+                      </FormGroup>
+                      <FormGroup label={t('fields.serviceNetwork')} fieldId="po-service-net">
+                        <TextInput
+                          id="po-service-net"
+                          value={poServiceNetwork}
+                          onChange={(_e, v) => setPoServiceNetwork(v)}
+                          placeholder={t('form.allocateAutomatically')}
+                        />
+                        <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                          {t('fields.clusterCidrsHelp')}
+                        </p>
+                      </FormGroup>
                     </>
                   )}
+                  <Alert variant="info" isInline title={t('form.noFabricJoinTitle')} className="sc-mb">
+                    {t('form.noFabricJoinBody')}
+                  </Alert>
 
                   <RbacMultiSelect
                     id="plat-rbac-admin"
@@ -1433,6 +1507,18 @@ export function CreateResourceForm({
                     }
                     isRequired={fabricOptionsForEntity.filter((o) => !o.isDisabled).length > 1}
                   />
+                  <FormGroup label={t('fields.overlayMtu')} fieldId="hn-mtu">
+                    <TextInput
+                      id="hn-mtu"
+                      type="number"
+                      value={overlayMtu}
+                      onChange={(_e, v) => setOverlayMtu(v)}
+                      validated={overlayMtuValid ? 'default' : 'error'}
+                    />
+                    <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                      {t('fields.overlayMtuHelp')}
+                    </p>
+                  </FormGroup>
                   <RbacMultiSelect
                     id="hn-viewers"
                     label="Network viewer RBAC"
@@ -1461,6 +1547,21 @@ export function CreateResourceForm({
                   <FormGroup label="Prefixes (CIDR, comma-separated)" fieldId="np-prefixes" isRequired>
                     <TextArea id="np-prefixes" value={prefixes} onChange={(_e, v) => setPrefixes(v)} rows={2} />
                   </FormGroup>
+                  {backendKind === 'CloudVirt' && (
+                    <FormGroup label={t('fields.vmNamespaces')} fieldId="np-vm-ns">
+                      <TextArea
+                        id="np-vm-ns"
+                        value={vmNamespaces}
+                        onChange={(_e, v) => setVmNamespaces(v)}
+                        rows={2}
+                        placeholder={backendName && networkRef ? `${backendName}-${networkRef}` : undefined}
+                        validated={vmNamespacesValid ? 'default' : 'error'}
+                      />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        {t('fields.vmNamespacesHelp')}
+                      </p>
+                    </FormGroup>
+                  )}
                 </>
               )}
 
@@ -1477,8 +1578,7 @@ export function CreateResourceForm({
                   <FormGroup label="Domain ASN" fieldId="hf-asn" isRequired>
                     <TextInput id="hf-asn" value={domainAsn} onChange={(_e, v) => setDomainAsn(v)} />
                     <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
-                      Unique fabric ASN (e.g. Acme 65010, Chad 65020). Hub RR local ASN uses the
-                      lowest ASN among fabrics that share route-reflector IPs.
+                      {t('fields.domainAsnHelp')}
                     </p>
                   </FormGroup>
                   <FormGroup label="VNI pool start" fieldId="hf-vni-start">
@@ -1507,37 +1607,44 @@ export function CreateResourceForm({
                         onChange={(_e, v) => setFabricTunnelType(v as FabricTunnelType)}
                         aria-label="Default tunnel type"
                       >
-                        <FormSelectOption value="none" label="None (native EVPN underlay)" />
-                        <FormSelectOption value="wireguard" label="WireGuard" />
-                        <FormSelectOption value="ipsec" label="IPsec" />
-                        <FormSelectOption value="macsec" label="MACsec" />
+                        {FABRIC_TUNNEL_TYPES.map((tt) => (
+                          <FormSelectOption
+                            key={tt}
+                            value={tt}
+                            label={tt === 'none' ? t('fields.tunnelNone') : t('fields.tunnelWireguard')}
+                          />
+                        ))}
                       </FormSelect>
                       <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
-                        Lab default is None — FR6 / OCP EVPN do not require an overlay tunnel.
+                        {t('fields.defaultTunnelTypeHelp')}
                       </p>
                     </FormGroup>
                     <FormGroup label="MTU" fieldId="hf-mtu">
                       <TextInput id="hf-mtu" value={fabricMtu} onChange={(_e, v) => setFabricMtu(v)} />
                     </FormGroup>
-                    <FormGroup label="Inner MSS clamp" fieldId="hf-mss">
-                      <TextInput
-                        id="hf-mss"
-                        value={fabricMssClamp}
-                        onChange={(_e, v) => setFabricMssClamp(v)}
-                      />
-                    </FormGroup>
-                    <FormGroup label="Route reflectors" fieldId="hf-rr">
-                      <TextArea
-                        id="hf-rr"
-                        value={fabricRrText}
-                        onChange={(_e, v) => setFabricRrText(v)}
-                        rows={3}
-                      />
+                    <FormGroup label={t('fields.underlayType')} fieldId="hf-ul-type">
+                      <FormSelect
+                        id="hf-ul-type"
+                        value={fabricUnderlayType}
+                        onChange={(_e, v) => setFabricUnderlayType(v as FabricUnderlayType)}
+                        aria-label={t('fields.underlayType')}
+                      >
+                        <FormSelectOption value="localnet" label={t('fields.underlayLocalnet')} />
+                        <FormSelectOption value="ovn-layer2" label={t('fields.underlayLayer2')} />
+                      </FormSelect>
                       <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
-                        One per line as <code>name=address</code>. Defaults deploy managed hub FRR
-                        pods on these IPs.
+                        {t('fields.underlayHelp')}
                       </p>
                     </FormGroup>
+                    {fabricUnderlayType === 'localnet' && (
+                      <FormGroup label={t('fields.underlayPhysicalNetwork')} fieldId="hf-ul-physnet">
+                        <TextInput
+                          id="hf-ul-physnet"
+                          value={fabricUnderlayPhysnet}
+                          onChange={(_e, v) => setFabricUnderlayPhysnet(v)}
+                        />
+                      </FormGroup>
+                    )}
                     <FormGroup label="Underlay network name" fieldId="hf-ul-nad">
                       <TextInput
                         id="hf-ul-nad"
@@ -1545,23 +1652,46 @@ export function CreateResourceForm({
                         onChange={(_e, v) => setFabricUnderlayNad(v)}
                       />
                     </FormGroup>
-                    <FormGroup label="Underlay CIDR" fieldId="hf-ul-cidr">
+                    <FormGroup label="Underlay CIDR" fieldId="hf-ul-cidr" isRequired>
                       <TextInput
                         id="hf-ul-cidr"
                         value={fabricUnderlayCidr}
                         onChange={(_e, v) => setFabricUnderlayCidr(v)}
                       />
                       <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
-                        Hub underlay segment shared by the border gateway and member cluster nodes.
+                        {t('form.immutableAfterCreate')}
                       </p>
                     </FormGroup>
-                    <FormGroup label="Underlay gateway address" fieldId="hf-ul-gw">
-                      <TextInput
-                        id="hf-ul-gw"
-                        value={fabricUnderlayGateway}
-                        onChange={(_e, v) => setFabricUnderlayGateway(v)}
-                      />
-                    </FormGroup>
+                    {fabricUnderlayType === 'localnet' ? (
+                      <>
+                        <FormGroup label={t('fields.underlayHubVtepBlock')} fieldId="hf-ul-vtep">
+                          <TextInput
+                            id="hf-ul-vtep"
+                            value={fabricHubVtepBlock}
+                            onChange={(_e, v) => setFabricHubVtepBlock(v)}
+                          />
+                          <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                            {t('fields.underlayHubVtepBlockHelp')}
+                          </p>
+                        </FormGroup>
+                        <FormGroup label={t('fields.underlayHubLegAddress')} fieldId="hf-ul-leg">
+                          <TextInput
+                            id="hf-ul-leg"
+                            value={fabricHubLegAddress}
+                            onChange={(_e, v) => setFabricHubLegAddress(v)}
+                          />
+                        </FormGroup>
+                      </>
+                    ) : (
+                      <FormGroup label="Underlay gateway address" fieldId="hf-ul-gw">
+                        <TextInput
+                          id="hf-ul-gw"
+                          value={fabricUnderlayGateway}
+                          onChange={(_e, v) => setFabricUnderlayGateway(v)}
+                          placeholder={t('form.firstHostOfCidr')}
+                        />
+                      </FormGroup>
+                    )}
                     <FormGroup label="Underlay MTU" fieldId="hf-ul-mtu">
                       <TextInput
                         id="hf-ul-mtu"
@@ -1569,20 +1699,36 @@ export function CreateResourceForm({
                         onChange={(_e, v) => setFabricUnderlayMtu(v)}
                       />
                     </FormGroup>
-                    <FormGroup label="Border gateway name (optional)" fieldId="hf-bgw-name">
+                    <FormGroup label={t('fields.borderGatewayName')} fieldId="hf-bgw-name">
                       <TextInput
                         id="hf-bgw-name"
                         value={fabricBgwName}
                         onChange={(_e, v) => setFabricBgwName(v)}
-                        placeholder="fabric-bgw"
                       />
                     </FormGroup>
-                    <FormGroup label="Border gateway loopback (optional)" fieldId="hf-bgw-lo">
+                    <FormGroup label={t('fields.borderGatewayLoopback')} fieldId="hf-bgw-lo" isRequired>
                       <TextInput
                         id="hf-bgw-lo"
                         value={fabricBgwLoopback}
                         onChange={(_e, v) => setFabricBgwLoopback(v)}
-                        placeholder="10.255.10.10"
+                      />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        {t('form.immutableAfterCreate')}
+                      </p>
+                    </FormGroup>
+                    <FormGroup label={t('fields.bgwWireguardAddress')} fieldId="hf-bgw-wg">
+                      <TextInput
+                        id="hf-bgw-wg"
+                        value={fabricBgwWgAddress}
+                        onChange={(_e, v) => setFabricBgwWgAddress(v)}
+                      />
+                    </FormGroup>
+                    <FormGroup label={t('fields.bgwWireguardPort')} fieldId="hf-bgw-wg-port">
+                      <TextInput
+                        id="hf-bgw-wg-port"
+                        type="number"
+                        value={fabricBgwWgPort}
+                        onChange={(_e, v) => setFabricBgwWgPort(v)}
                       />
                     </FormGroup>
                     <FormGroup label="Border gateway Vault credential ref (optional)" fieldId="hf-bgw-vault">
@@ -1593,71 +1739,327 @@ export function CreateResourceForm({
                         placeholder="fabric/<fabric>/bgw"
                       />
                       <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
-                        Leave blank unless an external border gateway is configured. Never paste
-                        secrets here — Vault path only.
+                        {t('form.bgwVaultRefHelp')}
                       </p>
                     </FormGroup>
                   </ExpandableSection>
                 </>
               )}
 
-              {type === 'cloudgateway' && (
+              {type === 'cloudinfrastructure' && (
                 <>
                   <RefSelect
-                    id="cg-cloud"
-                    label="Cloud"
-                    value={cloudProvider}
+                    id="ci-type"
+                    label={t('fields.cloudInfraType')}
+                    value={cinfraType}
                     onChange={(v) => {
-                      setCloudProvider(v);
-                      setGatewayBackendName('');
+                      const next = v as CloudInfrastructureType;
+                      setCinfraType(next);
+                      setCinfraRegion(next === 'openstack' ? DEFAULT_CLOUD_INFRA_OPENSTACK.region : next === 'aws' ? 'us-east-1' : '');
                     }}
-                    options={[
-                      { value: 'aws', label: 'AWS' },
-                      { value: 'openstack', label: 'OpenStack' },
-                      { value: 'openshift', label: 'OpenShift' },
-                    ]}
+                    options={CLOUD_INFRASTRUCTURE_TYPES.map((ct) => ({
+                      value: ct,
+                      label:
+                        ct === 'openstack'
+                          ? t('fields.cloudTypeOpenstack')
+                          : ct === 'openshift'
+                            ? t('fields.cloudTypeOpenshift')
+                            : t('fields.cloudTypeAws'),
+                    }))}
                     isRequired
                   />
-                  <FormGroup label="Region" fieldId="cg-region" isRequired>
-                    <TextInput id="cg-region" value={region} onChange={(_e, v) => setRegion(v)} />
+                  <p className="sc-text-muted" style={{ marginTop: '-0.75rem' }}>
+                    {t('form.immutableAfterCreate')}
+                  </p>
+                  <FormGroup label={t('fields.displayName')} fieldId="ci-display">
+                    <TextInput id="ci-display" value={displayName} onChange={(_e, v) => setDisplayName(v)} />
                   </FormGroup>
-                  <FormGroup label="Domain ASN" fieldId="cg-asn">
-                    <TextInput id="cg-asn" value={domainAsn} onChange={(_e, v) => setDomainAsn(v)} />
-                  </FormGroup>
+                  {cloudInfrastructureNeedsCredentials(cinfraType) && (
+                    <>
+                      <RefSelect
+                        id="ci-cred-mode"
+                        label={t('fields.credentialsSource')}
+                        value={cinfraCredMode}
+                        onChange={(v) => setCinfraCredMode(v === 'secret' ? 'secret' : 'vault')}
+                        options={[
+                          { value: 'vault', label: t('fields.credentialsVaultPath') },
+                          { value: 'secret', label: t('fields.credentialsSecretName') },
+                        ]}
+                        isRequired
+                      />
+                      {cinfraCredMode === 'vault' ? (
+                        <FormGroup label={t('fields.credentialsVaultPath')} fieldId="ci-cred-vault" isRequired>
+                          <TextInput
+                            id="ci-cred-vault"
+                            value={cinfraCredVaultPath}
+                            onChange={(_e, v) => setCinfraCredVaultPath(v)}
+                            placeholder={cinfraType === 'openstack' ? 'oso/accounts/<site>-admin' : 'aws/accounts/<account>'}
+                            isRequired
+                          />
+                        </FormGroup>
+                      ) : (
+                        <FormGroup label={t('fields.credentialsSecretName')} fieldId="ci-cred-secret" isRequired>
+                          <TextInput
+                            id="ci-cred-secret"
+                            value={cinfraCredSecret}
+                            onChange={(_e, v) => setCinfraCredSecret(v)}
+                            isRequired
+                          />
+                        </FormGroup>
+                      )}
+                      <p className="sc-text-muted" style={{ marginTop: '-0.75rem' }}>
+                        {t('fields.credentialsRefHelp')}
+                      </p>
+                    </>
+                  )}
+                  <EntityMultiSelect
+                    id="ci-entities"
+                    label={t('fields.entityRefs')}
+                    value={cinfraEntityRefs}
+                    onChange={setCinfraEntityRefs}
+                    options={namesWithReady(entities.items)}
+                  />
+                  <p className="sc-text-muted" style={{ marginTop: '-0.75rem' }}>
+                    {t('fields.cloudInfraEntityRefsHelp')}
+                  </p>
+                  {cinfraType === 'openstack' && (
+                    <>
+                      <FormGroup label={t('fields.region')} fieldId="ci-os-region">
+                        <TextInput id="ci-os-region" value={cinfraRegion} onChange={(_e, v) => setCinfraRegion(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.managementClusterKubeconfigRef')} fieldId="ci-os-kubeconfig">
+                        <TextInput
+                          id="ci-os-kubeconfig"
+                          value={cinfraMgmtKubeconfig}
+                          onChange={(_e, v) => setCinfraMgmtKubeconfig(v)}
+                          placeholder={name ? `oso/${name}/mgmt-kubeconfig` : 'oso/<name>/mgmt-kubeconfig'}
+                        />
+                        <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                          {t('fields.managementClusterKubeconfigRefHelp')}
+                        </p>
+                      </FormGroup>
+                      <FormGroup label={t('fields.netConfigRef')} fieldId="ci-os-netconfig">
+                        <TextInput id="ci-os-netconfig" value={cinfraNetConfig} onChange={(_e, v) => setCinfraNetConfig(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.dataplaneNodeSetRefs')} fieldId="ci-os-nodesets">
+                        <TextArea
+                          id="ci-os-nodesets"
+                          value={cinfraNodeSets}
+                          onChange={(_e, v) => setCinfraNodeSets(v)}
+                          rows={2}
+                          placeholder="openstack-compute01"
+                        />
+                        <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                          {t('fields.dataplaneNodeSetRefsHelp')}
+                        </p>
+                      </FormGroup>
+                      <FormGroup label={t('fields.externalNetwork')} fieldId="ci-os-ext">
+                        <TextInput
+                          id="ci-os-ext"
+                          value={cinfraExternalNetwork}
+                          onChange={(_e, v) => setCinfraExternalNetwork(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.baseDomain')} fieldId="ci-os-base">
+                        <TextInput id="ci-os-base" value={cinfraBaseDomain} onChange={(_e, v) => setCinfraBaseDomain(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.projectDomain')} fieldId="ci-os-pdom">
+                        <TextInput
+                          id="ci-os-pdom"
+                          value={cinfraProjectDomain}
+                          onChange={(_e, v) => setCinfraProjectDomain(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.designateZoneId')} fieldId="ci-os-dzone">
+                        <TextInput
+                          id="ci-os-dzone"
+                          value={cinfraDesignateZone}
+                          onChange={(_e, v) => setCinfraDesignateZone(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.designateProjectId')} fieldId="ci-os-dproj">
+                        <TextInput
+                          id="ci-os-dproj"
+                          value={cinfraDesignateProject}
+                          onChange={(_e, v) => setCinfraDesignateProject(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.route53VaultPath')} fieldId="ci-os-r53">
+                        <TextInput
+                          id="ci-os-r53"
+                          value={route53VaultPath}
+                          onChange={(_e, v) => setRoute53VaultPath(v)}
+                        />
+                      </FormGroup>
+                    </>
+                  )}
+                  {cinfraType === 'openshift' && (
+                    <>
+                      <FormGroup label={t('fields.clusterRef')} fieldId="ci-ocp-cluster">
+                        <TextInput
+                          id="ci-ocp-cluster"
+                          value={cinfraClusterRef}
+                          onChange={(_e, v) => setCinfraClusterRef(v)}
+                        />
+                        <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                          {t('fields.clusterRefHelp')}
+                        </p>
+                      </FormGroup>
+                      <FormGroup label={t('fields.bootImage')} fieldId="ci-ocp-image">
+                        <TextInput id="ci-ocp-image" value={cinfraBootImage} onChange={(_e, v) => setCinfraBootImage(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.storageClass')} fieldId="ci-ocp-sc">
+                        <TextInput
+                          id="ci-ocp-sc"
+                          value={cinfraStorageClass}
+                          onChange={(_e, v) => setCinfraStorageClass(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.clusterNetworkPoolCidr')} fieldId="ci-ocp-pod">
+                        <TextInput id="ci-ocp-pod" value={cinfraPodPool} onChange={(_e, v) => setCinfraPodPool(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.clusterNetworkPoolBlock')} fieldId="ci-ocp-pod-block">
+                        <TextInput
+                          id="ci-ocp-pod-block"
+                          type="number"
+                          value={cinfraPodBlock}
+                          onChange={(_e, v) => setCinfraPodBlock(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.serviceNetworkPoolCidr')} fieldId="ci-ocp-svc">
+                        <TextInput id="ci-ocp-svc" value={cinfraSvcPool} onChange={(_e, v) => setCinfraSvcPool(v)} />
+                      </FormGroup>
+                      <FormGroup label={t('fields.serviceNetworkPoolBlock')} fieldId="ci-ocp-svc-block">
+                        <TextInput
+                          id="ci-ocp-svc-block"
+                          type="number"
+                          value={cinfraSvcBlock}
+                          onChange={(_e, v) => setCinfraSvcBlock(v)}
+                        />
+                        <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                          {t('fields.hostedClusterCidrDefaultsHelp')}
+                        </p>
+                      </FormGroup>
+                    </>
+                  )}
+                  {cinfraType === 'aws' && (
+                    <>
+                      <FormGroup label={t('fields.awsAccountId')} fieldId="ci-aws-account" isRequired>
+                        <TextInput
+                          id="ci-aws-account"
+                          value={cinfraAwsAccount}
+                          onChange={(_e, v) => setCinfraAwsAccount(v)}
+                          validated={!cinfraAwsAccount || /^[0-9]{12}$/.test(cinfraAwsAccount.trim()) ? 'default' : 'error'}
+                          isRequired
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.region')} fieldId="ci-aws-region" isRequired>
+                        <TextInput id="ci-aws-region" value={cinfraRegion} onChange={(_e, v) => setCinfraRegion(v)} isRequired />
+                      </FormGroup>
+                      <FormGroup label={t('fields.baseDomain')} fieldId="ci-aws-base">
+                        <TextInput id="ci-aws-base" value={cinfraBaseDomain} onChange={(_e, v) => setCinfraBaseDomain(v)} />
+                      </FormGroup>
+                    </>
+                  )}
+                </>
+              )}
+
+              {type === 'cloudgateway' && (
+                <>
                   <FabricSelect
                     id="cg-fabric"
                     label="Fabric"
                     value={fabricRef}
-                    onChange={(v) => {
-                      setFabricRef(v);
-                      setGatewayBackendName('');
-                    }}
+                    onChange={setFabricRef}
                     options={fabricSelectOptions}
                     isRequired
                   />
-                  {cloudProvider === 'openshift' && (
-                    <PlatformOpenshiftSelect
-                      id="cg-backend-po"
-                      value={gatewayBackendName}
-                      onChange={setGatewayBackendName}
-                      options={gatewayPlatformOptions}
-                      isRequired
-                    />
+                  <CloudInfrastructureSelect
+                    id="cg-cloudref"
+                    label={t('fields.cloudRef')}
+                    value={cloudRefName}
+                    onChange={(v) => {
+                      setCloudRefName(v);
+                      setCloudRefType('');
+                    }}
+                    onSelectInfrastructure={onCloudInfrastructurePicked}
+                    types={['openstack', 'openshift']}
+                    isRequired
+                  />
+                  <p className="sc-text-muted" style={{ marginTop: '-0.75rem' }}>
+                    {t('fields.gatewayCloudRefHelp')}
+                  </p>
+                  <FormGroup label={t('fields.tunnelType')} fieldId="cg-transport">
+                    <FormSelect
+                      id="cg-transport"
+                      value={gatewayTransport}
+                      onChange={(_e, v) => setGatewayTransport(v as FabricTunnelType | '')}
+                      aria-label={t('fields.tunnelType')}
+                    >
+                      <FormSelectOption value="" label={t('form.fabricDefaultTransport')} />
+                      {FABRIC_TUNNEL_TYPES.map((tt) => (
+                        <FormSelectOption
+                          key={tt}
+                          value={tt}
+                          label={tt === 'none' ? t('fields.tunnelNone') : t('fields.tunnelWireguard')}
+                        />
+                      ))}
+                    </FormSelect>
+                    <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                      {t('fields.gatewayTransportHelp')}
+                    </p>
+                  </FormGroup>
+                  {gatewayTransport === 'wireguard' && (
+                    <FormGroup label={t('fields.gatewayWireguardAddress')} fieldId="cg-wg-address">
+                      <TextInput
+                        id="cg-wg-address"
+                        value={gatewayWgAddress}
+                        onChange={(_e, v) => setGatewayWgAddress(v)}
+                        placeholder={t('form.allocateAutomatically')}
+                      />
+                      <p className="sc-text-muted" style={{ marginTop: '0.25rem' }}>
+                        {t('fields.gatewayWireguardAddressHelp')}
+                      </p>
+                    </FormGroup>
                   )}
-                  {cloudProvider === 'openstack' && (
-                    <CloudOSOSelect
-                      id="cg-backend-oso"
-                      value={gatewayBackendName}
-                      onChange={setGatewayBackendName}
-                      options={gatewayCloudOsoOptions}
-                      isRequired
-                    />
-                  )}
-                  {cloudProvider === 'aws' && (
-                    <Alert variant="info" isInline title="AWS Cloud Gateway" className="sc-mb">
-                      AWS gateways front the CloudAWS account directly. Fabric attach to an AWS
-                      PlatformOpenshift cluster is unsupported (§15.0).
-                    </Alert>
+                  {cloudRefType !== 'openshift' && (
+                    <ExpandableSection
+                      toggleText={t('form.siteUnderlaySection')}
+                      isExpanded={fabricAdvancedOpen}
+                      onToggle={(_e, isOpen) => setFabricAdvancedOpen(isOpen)}
+                    >
+                      <p className="sc-text-muted">{t('fields.siteUnderlayHelp')}</p>
+                      <FormGroup label={t('fields.siteUnderlayInterface')} fieldId="cg-su-if">
+                        <TextInput
+                          id="cg-su-if"
+                          value={siteUnderlayInterface}
+                          onChange={(_e, v) => setSiteUnderlayInterface(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.siteUnderlayComputeInterface')} fieldId="cg-su-cif">
+                        <TextInput
+                          id="cg-su-cif"
+                          value={siteComputeInterface}
+                          onChange={(_e, v) => setSiteComputeInterface(v)}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.siteUnderlayCidr')} fieldId="cg-su-cidr">
+                        <TextInput
+                          id="cg-su-cidr"
+                          value={siteUnderlayCidr}
+                          onChange={(_e, v) => setSiteUnderlayCidr(v)}
+                          placeholder="192.168.80.0/24"
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('fields.siteUnderlayGatewayAddress')} fieldId="cg-su-gw">
+                        <TextInput
+                          id="cg-su-gw"
+                          value={siteUnderlayGateway}
+                          onChange={(_e, v) => setSiteUnderlayGateway(v)}
+                          placeholder={t('form.firstHostOfCidr')}
+                        />
+                      </FormGroup>
+                    </ExpandableSection>
                   )}
                 </>
               )}

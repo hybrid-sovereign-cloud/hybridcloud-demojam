@@ -44,6 +44,15 @@ provision:
   samples: true  # seed workshop sample CRs once (no selfHeal — UI deletes stay deleted)
   aapConfig: true  # JobTemplates / org config only (not AAP instance)
 
+# Image for every kind_reconcile operator Deployment in gitops/custom-operators
+# (plain kustomize, so not templated): hs-operators applies it via
+# spec.source.kustomize.images, replacing the quay default below. Empty keeps
+# the manifests as they are. Pin a tag or digest, never :latest, e.g.
+#   image-registry.openshift-image-registry.svc:5000/sovereign-cloud/hybridsovereign-ansible-operator:fabric-restructure-<sha>
+customOperators:
+  defaultImage: quay.io/gauravshankar/hybridsovereign-ansible-operator
+  image: ""
+
 # Hard bans
 kafka: false
 eda: false

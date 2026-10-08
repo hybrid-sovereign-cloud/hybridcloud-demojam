@@ -1,6 +1,6 @@
 # Lab 3 — Provision PlatformOpenshift
 
-Match the Cloud\* from Lab 2.
+Match the Cloud\* project from Lab 2. A PlatformOpenshift is a tenant cluster on that project; it does **not** join the hybrid fabric (no fabric or gateway step here, see [Lab 0](lab-00-guardrails.md#tenants-cannot-attach-their-own-clusters-to-the-fabric)). Tenant networks that must span sites are placed on cloud projects in [Lab 6](lab-06-hybrid-fabric.md).
 
 ## Track A — AWS
 
@@ -48,9 +48,11 @@ metadata:
 spec:
   type: hosted
   hosted:
-    environment: local-virt
+    environment: local-virt          # or workshop-virt from Lab 2
     nodePoolReplicas: 2
 ```
+
+Pod and service CIDRs: leave `spec.networking` out and they are allocated from the CloudInfrastructure's `hostedClusterCidrDefaults` (CG-NAT `100.64.0.0/10` on `hub-virt`) and checked against the hub and the other clusters; `status.networking` shows the result. `spec.fabric` and `spec.networking.allocateFromFabric` are deprecated and ignored.
 
 ## Monitor
 

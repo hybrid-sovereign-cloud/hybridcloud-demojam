@@ -1,4 +1,9 @@
 # Tenant VRFs (HybridNetwork) and their placements on the platform fabric.
+# Backends are tenant cloud projects: CloudVirt (VMs on the hub) and CloudOSO.
+# CloudVirt placements: the operator creates the vmNamespaces, labelled as
+# primary-network members of the HybridNetwork, before any VM starts.
+# CloudOSO placement acme-core-oso1 (10.110.1.0/24) is applied outside GitOps
+# (samples/hybridvpc/acme-chad-networks.yaml), like CloudOSO oso1 itself.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridNetwork
@@ -11,13 +16,13 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
-  description: Acme core VRF — HCP1 via EVPN IP-VRF (no RHOSO spoke in ZTP)
+  description: Acme core VRF (hub VMs and the OpenStack site)
   fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
 metadata:
-  name: acme-core-hcp1
+  name: acme-core-hub
   namespace: entity-acme-corp
   annotations:
     argocd.argoproj.io/sync-wave: "65"
@@ -27,11 +32,12 @@ metadata:
 spec:
   network: acme-core
   backend:
-    kind: PlatformOpenshift
-    name: hcp1
+    kind: CloudVirt
+    name: local-virt
   prefixes:
-    - 10.110.0.0/24
-  state: present
+    - 10.110.2.0/24
+  vmNamespaces:
+    - acme-core-vms
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridNetwork
@@ -44,13 +50,13 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
     hybridsovereign.redhat/platform-fabric: "true"
 spec:
-  description: Chad app VRF — HCP2 + HCP3 only
+  description: Chad app VRF (hub VMs)
   fabricRef: platform-fabric
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: NetworkPlacement
 metadata:
-  name: chad-app-hcp2
+  name: chad-app-hub
   namespace: entity-chad
   annotations:
     argocd.argoproj.io/sync-wave: "65"
@@ -60,27 +66,9 @@ metadata:
 spec:
   network: chad-app
   backend:
-    kind: PlatformOpenshift
-    name: hcp2
+    kind: CloudVirt
+    name: local-virt
   prefixes:
-    - 10.120.0.0/24
-  state: present
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: NetworkPlacement
-metadata:
-  name: chad-app-hcp3
-  namespace: entity-chad
-  annotations:
-    argocd.argoproj.io/sync-wave: "65"
-  labels:
-    hybridsovereign.redhat/gitops-owned: "true"
-    hybridsovereign.redhat/platform-fabric: "true"
-spec:
-  network: chad-app
-  backend:
-    kind: PlatformOpenshift
-    name: hcp3
-  prefixes:
-    - 10.120.1.0/24
-  state: present
+    - 10.120.2.0/24
+  vmNamespaces:
+    - chad-app-vms

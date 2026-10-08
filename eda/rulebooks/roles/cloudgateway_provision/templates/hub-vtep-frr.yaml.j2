@@ -1,0 +1,56 @@
+# Hub VTEP CR + FRRConfiguration peering the BGW hub-leg address from every hub node
+# (CloudGateway openshift path, plan §4 steps 4-5; handover/hub-build/20-vtep-frr.yaml).
+# VTEP mode Unmanaged (OCP 4.22 support guidance): OVN-K discovers the node address
+# inside cidrs that hub-underlay.sh put on br-ex. The cidrs also make the
+# OVN-K-generated FRRConfiguration accept remote /32 VTEPs (e.g. RHOSO computes).
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: "{{ hen_vtep_name }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+spec:
+  cidrs: ["{{ hen_underlay_cidr }}"]
+  mode: Unmanaged
+---
+apiVersion: frrk8s.metallb.io/v1beta1
+kind: FRRConfiguration
+metadata:
+  name: "{{ hen_frr_name }}"
+  namespace: "{{ hen_frr_namespace }}"
+  labels:
+    evpn: "true"
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+spec:
+  nodeSelector: {}
+  bgp:
+    routers:
+    - asn: {{ hen_asn | int }}
+      neighbors:
+      # The hub-leg address, not the loopback: hub nodes reach the BGW only on-link
+      # (OVN-K br-ex flows); the loopback stays the peer of site gateways / EDPM.
+      - address: "{{ hen_hub_peer }}"
+        asn: {{ hen_asn | int }}
+        disableMP: false
+        dualStackAddressFamily: false
+        toAdvertise:
+          allowed:
+            mode: all
+        toReceive:
+          allowed:
+            mode: all
+  raw:
+    priority: 5
+    rawConfig: |
+      router bgp {{ hen_asn | int }}
+       neighbor {{ hen_hub_peer }} remote-as {{ hen_asn | int }}
+       neighbor {{ hen_hub_peer }} ebgp-multihop 32
+       address-family l2vpn evpn
+        neighbor {{ hen_hub_peer }} activate
+       exit-address-family
+       address-family ipv4 unicast
+        neighbor {{ hen_hub_peer }} activate
+       exit-address-family
+      exit

@@ -1,0 +1,12 @@
+# Migrate the existing CloudOSO oso1 to the CloudInfrastructure model (restructure
+# cutover §5b step 4). oso1 itself is created outside GitOps; the site settings it
+# carried now live on CloudInfrastructure oso1 (gitops/apps/platform-fabric).
+# JSON merge patch: sets cloudRef and removes the fields that moved.
+#   oc patch cloudoso oso1 -n entity-acme-corp --type merge --patch-file samples/cloudoso/oso1-cloudref.yaml
+spec:
+  cloudRef:
+    kind: CloudInfrastructure
+    name: oso1
+  managementClusterKubeconfigRef: null
+  dataplaneNodeSetRefs: null
+  netConfigRef: null

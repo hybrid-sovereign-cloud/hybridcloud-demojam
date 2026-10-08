@@ -34,6 +34,54 @@
       ansible.builtin.set_fact:
         hf_teardown_allocated_count: "{{ hf_teardown_allocated_map | length }}"
 
+    # Mirror of the WireGuard address ledger (hybridfabric_provision bgw_facts.yml):
+    # entries are released by cloudgateway_teardown. Gateways still attached to
+    # this fabric keep the ledger (and therefore the fabric) alive.
+    - name: List CloudGateways still attached to this fabric
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudGateway
+        namespace: "{{ hybridfabric_cr_namespace }}"
+      register: hf_teardown_gateways
+      failed_when: false
+
+    - name: Count attached gateways
+      ansible.builtin.set_fact:
+        hf_teardown_gateway_names: >-
+          {{
+            hf_teardown_gateways.resources | default([])
+            | selectattr('spec.fabricRef', 'defined')
+            | selectattr('spec.fabricRef', 'equalto', hybridfabric_cr_name)
+            | map(attribute='metadata.name') | list
+          }}
+
+    - name: Block teardown while CloudGateways are attached
+      when:
+        - hf_teardown_gateway_names | length > 0
+        - hf_teardown_block_on_gateways | default(true) | bool
+      block:
+        - ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
+          vars:
+            cr_api_version: hybridsovereign.redhat/v1alpha1
+            cr_plural: hybridfabrics
+            cr_name: "{{ hybridfabric_cr_name }}"
+            cr_namespace: "{{ hybridfabric_cr_namespace }}"
+            cr_status_body:
+              status: failed
+              ready: false
+              deletionComplete: false
+              message: >-
+                Blocked: CloudGateway(s) {{ hf_teardown_gateway_names | join(', ') }} still use
+                HybridFabric {{ hybridfabric_cr_name }}. Delete them first.
+              lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+        - ansible.builtin.fail:
+            msg: >-
+              HybridFabric {{ hybridfabric_cr_name }} teardown blocked: CloudGateway(s)
+              {{ hf_teardown_gateway_names | join(', ') }} still attached.
+
     # BLOCK: refuse to delete the numbering ledger while any VNI is still
     # allocated — the tenant HybridNetworks holding those VNIs must be
     # released first.

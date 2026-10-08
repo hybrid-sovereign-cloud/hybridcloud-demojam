@@ -1,0 +1,8 @@
+---
+# Kinds whose spec.cloudRef may point at a CloudInfrastructure. Teardown refuses
+# (deletionComplete false) while any of them still references it.
+cit_referencing_kinds:
+  - CloudGateway
+  - CloudOSO
+  - CloudVirt
+  - CloudAWS

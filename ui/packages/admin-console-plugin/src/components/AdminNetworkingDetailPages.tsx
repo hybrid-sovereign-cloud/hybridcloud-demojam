@@ -37,6 +37,12 @@ function makeClusterDetailPage(
   return Page;
 }
 
+/** Platform-owned cloud sites; always read from sovereign-cloud. */
+export const AdminCloudInfrastructureDetailPage = makeClusterDetailPage(
+  'CloudInfrastructure',
+  'Cloud Infrastructure',
+  '/hybridsovereign/clouds/infrastructure',
+);
 export const AdminHybridFabricDetailPage = makeClusterDetailPage(
   'HybridFabric',
   'Hybrid Fabrics',

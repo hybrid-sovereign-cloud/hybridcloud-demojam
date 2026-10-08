@@ -4,17 +4,28 @@
 #
 # Objects (namespace = HybridFabric namespace, normally sovereign-cloud):
 #   NAD <spec.underlay.nadName>   OVN-K layer2, no IPAM, mtu spec.underlay.mtu
+#                                 (type localnet: that name is the hub-leg localnet NAD,
+#                                 bgw_hub_leg.yml; the layer2 leg keeps fabric-underlay)
 #   Secret <bgw>-config           wg0.conf / frr.conf / dnsmasq / nft (bgw_config.yml)
 #   Secret <bgw>-cloudinit        cloud-init userdata (first boot)
 #   VirtualMachine <bgw>          CentOS Stream 9, default (masquerade) + underlay (bridge)
 #   Service <bgw>-wss + Route <bgw> (passthrough) for wstunnel (WireGuard over TLS 443)
 #
+# Rollout (plan §3.2.5):
+#   VM spec changed (boot-hash annotation)  -> restart the VMI (applies config too)
+#   only wg0/frr/dnsmasq/nft content changed -> in-place push (bgw_config_push.yml),
+#                                              VMI keeps running
+# cloud-init changes alone do not restart: the guest runs cloud-init's
+# per-instance modules once per root disk, so a reboot would not apply them
+# (set bgw_restart_on_cloudinit_change to restart anyway).
+#
 # Sets: hf_border_bgw_ready, hf_border_message, hf_bgw_endpoint, hf_bgw_peer_count
 
-- name: Render and apply BGW config Secret
+- name: Render and apply BGW config Secret (rollout decided below)
   ansible.builtin.include_tasks: bgw_config.yml
   vars:
     bgw_fabric_cr: "{{ hybridfabric_cr_lookup.resources[0] }}"
+    bgw_apply_mode: deferred
 
 # Lab: the hub kubemacpool webhook was down and rejected VM create/update.
 # Explicit MACs are set on every fabric interface, so opting out is safe.
@@ -41,6 +52,12 @@
     state: present
     definition: "{{ lookup('template', 'bgw-nad.yaml.j2') | from_yaml }}"
 
+# BGW hub leg (plan §3.2.5 / §4, underlay type localnet): localnet NAD (owned
+# here), third NIC hubleg/eth2 on it, hubLegAddress, nft eth2 rules, dnsmasq
+# range without spec.underlay.hubVtepBlock. Facts come from bgw_facts.yml.
+- name: BGW hub leg (localnet NAD, stale hub-leg NAD cleanup)
+  ansible.builtin.include_tasks: bgw_hub_leg.yml
+
 - name: Render BGW cloud-init
   ansible.builtin.set_fact:
     _bgw_userdata: "{{ lookup('template', 'bgw-user-data.j2') }}"
@@ -53,6 +70,41 @@
     fail_msg: BGW cloud-init did not render to valid cloud-config YAML
     quiet: true
   no_log: true
+
+# Boot hash = VM spec (+ cloud-init with the dynamic config blanked out, when
+# bgw_restart_on_cloudinit_change). The config files are rolled out separately.
+- name: Compute BGW boot hash
+  ansible.builtin.set_fact:
+    bgw_boot_hash: >-
+      {{
+        (
+          (lookup('template', 'bgw-vm.yaml.j2', template_vars={'bgw_boot_hash': ''}) | from_yaml | to_json(sort_keys=true))
+          ~ ((lookup('template', 'bgw-user-data.j2', template_vars={'bgw_wg0_conf': '', 'bgw_frr_conf': '', 'bgw_dnsmasq_conf': '', 'bgw_fabric_nft': ''}))
+             if (bgw_restart_on_cloudinit_change | default(false) | bool) else '')
+        ) | hash('sha256')
+      }}
+  no_log: true
+
+- name: Read existing BGW VirtualMachine
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachine
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_vm_before
+
+# A VM created before this change has no boot-hash: record it, do not restart.
+- name: Detect a BGW VM spec change
+  ansible.builtin.set_fact:
+    bgw_boot_changed: >-
+      {{
+        (_bgw_vm_before.resources | default([])) | length > 0
+        and (((_bgw_vm_before.resources[0].metadata.annotations | default({})).get('hybridsovereign.redhat/boot-hash', '')) | length > 0)
+        and (_bgw_vm_before.resources[0].metadata.annotations['hybridsovereign.redhat/boot-hash'] != bgw_boot_hash)
+      }}
 
 - name: Apply BGW cloud-init Secret
   kubernetes.core.k8s:
@@ -93,6 +145,63 @@
   loop_control:
     label: "{{ item.kind }}/{{ item.metadata.name }}"
 
+- name: Read BGW VMI (rollout decision)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_vmi_before
+
+- name: Restart BGW VMI for a VM spec change
+  when:
+    - bgw_boot_changed | bool
+    - (_bgw_vmi_before.resources | default([])) | length > 0
+    - bgw_restart_on_change | default(true) | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    name: "{{ bgw_name }}"
+    namespace: "{{ bgw_namespace }}"
+  register: _bgw_spec_restart
+
+- name: Record the VM-spec restart (it also applies the config disk)
+  when: _bgw_spec_restart is changed
+  block:
+    - name: Set restart facts
+      ansible.builtin.set_fact:
+        bgw_vmi_restarted: true
+        bgw_apply_note: "(VM spec changed; VMI restarted)"
+
+    - name: Mark the config as applied on the Secret
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: patched
+        api_version: v1
+        kind: Secret
+        name: "{{ bgw_name }}-config"
+        namespace: "{{ bgw_namespace }}"
+        definition:
+          metadata:
+            annotations:
+              hybridsovereign.redhat/applied-hash: "{{ bgw_config_hash }}"
+
+- name: Roll out changed config in place (VMI keeps running)
+  when:
+    - not (_bgw_spec_restart is changed)
+    - bgw_rollout_needed | bool
+    - (_bgw_vmi_before.resources | default([])) | length > 0
+  ansible.builtin.include_tasks: bgw_config_push.yml
+
 # AgentConnected is the "setup finished" signal: fabric-bgw-setup.sh enables
 # qemu-guest-agent as its last step (after frr, dnsmasq, wg-quick, wstunnel).
 - name: Wait for BGW VMI Ready and guest agent connected
@@ -114,6 +223,19 @@
   retries: "{{ bgw_wait_retries | int }}"
   delay: "{{ bgw_wait_delay | int }}"
   failed_when: false
+
+# A guest that predates the hub leg gets eth2 from the VM-spec restart above, but
+# not its NM profile: cloud-init per-instance modules ran once on that root disk,
+# and the restart path marks the config applied without a push. Push once (no
+# restart fallback) so the hubleg profile lands; a no-op on a fresh guest.
+- name: Bring up the hub leg in a guest restarted for the NIC change
+  when:
+    - bgw_hub_leg_enabled | bool
+    - bgw_vmi_restarted | default(false) | bool
+    - (_bgw_vmi.resources | default([])) | length > 0
+  ansible.builtin.include_tasks: bgw_config_push.yml
+  vars:
+    bgw_inplace_fallback: defer
 
 - name: Set BGW readiness facts
   ansible.builtin.set_fact:
@@ -137,7 +259,9 @@
       {{ bgw_underlay_address }}/{{ bgw_underlay_prefixlen }}, wss {{ bgw_endpoint }},
       wireguard peers={{ bgw_peers | map(attribute='name') | join(',') | default('none', true) }}
       {{ ('(skipped: ' ~ (bgw_peer_errors | join('; ')) ~ ')') if (bgw_peer_errors | length > 0) else '' }}
-      {{ '(config changed; VMI restarted)' if (bgw_vmi_restarted | default(false) | bool) else '' }}
+      {{ bgw_hub_leg_message | default('') }}
+      {{ bgw_apply_note | default('') }}
+      {{ ('(RT policy: ' ~ (bgw_rt_plan_errors | join('; ')) ~ ')') if (bgw_rt_plan_errors | default([]) | length > 0) else '' }}
 
 - name: Fail closed when the BGW is required but not Ready
   when:

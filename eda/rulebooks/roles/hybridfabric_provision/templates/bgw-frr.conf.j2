@@ -14,6 +14,31 @@ service integrated-vtysh-config
 bgp extcommunity-list standard FABRIC-RT permit rt {{ rt }}
 {% endfor %}
 !
+{% endif %}
+{% if bgw_rt_policy_per_site | bool %}
+! Per-site RT policy (plan §3.2.5, decision 6): one peer-group per site
+! (listen ranges below). A site may only announce, and only receives, the RTs of
+! the HybridNetworks placed on it (NetworkPlacements), intersected with the
+! ledger allow-list above. Re-rendered by EDA when placements change.
+{% for g in bgw_peer_groups %}
+{% for rt in g.rts %}
+bgp extcommunity-list standard {{ g.name }}-RT permit rt {{ rt }}
+{% endfor %}
+{% if g.rts | length > 0 %}
+route-map {{ g.name }}-EVPN-IN permit 10
+ match extcommunity {{ g.name }}-RT
+exit
+route-map {{ g.name }}-EVPN-OUT permit 10
+ match extcommunity {{ g.name }}-RT
+exit
+{% endif %}
+route-map {{ g.name }}-EVPN-IN deny 100
+exit
+route-map {{ g.name }}-EVPN-OUT deny 100
+exit
+!
+{% endfor %}
+{% elif bgw_rt_filter_enabled | bool %}
 {% if bgw_allowed_rts | length > 0 %}
 route-map SPOKES-EVPN-IN permit 10
  match extcommunity FABRIC-RT
@@ -29,25 +54,38 @@ router bgp {{ bgw_asn }}
  bgp cluster-id {{ bgw_loopback }}
  no bgp ebgp-requires-policy
  no bgp default ipv4-unicast
- neighbor SPOKES peer-group
- neighbor SPOKES remote-as {{ bgw_asn }}
- neighbor SPOKES ebgp-multihop 32
-{% for r in bgw_listen_ranges %}
- bgp listen range {{ r }} peer-group SPOKES
+{% for g in bgw_peer_groups %}
+ neighbor {{ g.name }} peer-group
+ neighbor {{ g.name }} remote-as {{ bgw_asn }}
+ neighbor {{ g.name }} ebgp-multihop 32
+{% if bgw_bgp_password | length > 0 %}
+ neighbor {{ g.name }} password {{ bgw_bgp_password }}
+{% endif %}
+{% for r in g.ranges %}
+ bgp listen range {{ r }} peer-group {{ g.name }}
+{% endfor %}
 {% endfor %}
  !
  address-family ipv4 unicast
-  neighbor SPOKES activate
-  neighbor SPOKES route-reflector-client
+{% for g in bgw_peer_groups %}
+  neighbor {{ g.name }} activate
+  neighbor {{ g.name }} route-reflector-client
+{% endfor %}
  exit-address-family
  !
  address-family l2vpn evpn
-  neighbor SPOKES activate
-  neighbor SPOKES route-reflector-client
-  neighbor SPOKES attribute-unchanged next-hop
-{% if bgw_rt_filter_enabled | bool %}
-  neighbor SPOKES route-map SPOKES-EVPN-IN in
+{% for g in bgw_peer_groups %}
+  neighbor {{ g.name }} activate
+  neighbor {{ g.name }} route-reflector-client
+  neighbor {{ g.name }} attribute-unchanged next-hop
+{% if bgw_rt_policy_per_site | bool %}
+  neighbor {{ g.name }} soft-reconfiguration inbound
+  neighbor {{ g.name }} route-map {{ g.name }}-EVPN-IN in
+  neighbor {{ g.name }} route-map {{ g.name }}-EVPN-OUT out
+{% elif bgw_rt_filter_enabled | bool %}
+  neighbor {{ g.name }} route-map SPOKES-EVPN-IN in
 {% endif %}
+{% endfor %}
  exit-address-family
 exit
 !

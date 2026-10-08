@@ -1,5 +1,6 @@
 # Seed AAP JobTemplates against HybridSovereign EDA project (real playbooks).
-# Includes cloudoso, cloudaws, cloudvirt, platformopenshift (no hello_world park stubs).
+# Includes cloudoso, cloudaws, cloudvirt, platformopenshift, cloudinfrastructure (no hello_world park stubs).
+# Fabric kinds run on the de-hybridvpc EE (python-openstackclient).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -105,6 +106,7 @@ spec:
                 [assignment]=eda/rulebooks/assignment-provision-playbook.yml
                 [hybridfabric]=eda/rulebooks/hybridfabric-provision-playbook.yml
                 [cloudgateway]=eda/rulebooks/cloudgateway-provision-playbook.yml
+                [cloudinfrastructure]=eda/rulebooks/cloudinfrastructure-provision-playbook.yml
                 [transportlink]=eda/rulebooks/transportlink-provision-playbook.yml
                 [hybridnetwork]=eda/rulebooks/hybridnetwork-provision-playbook.yml
                 [networkplacement]=eda/rulebooks/networkplacement-provision-playbook.yml
@@ -130,6 +132,7 @@ spec:
                 [assignment]=eda/rulebooks/assignment-teardown-playbook.yml
                 [hybridfabric]=eda/rulebooks/hybridfabric-teardown-playbook.yml
                 [cloudgateway]=eda/rulebooks/cloudgateway-teardown-playbook.yml
+                [cloudinfrastructure]=eda/rulebooks/cloudinfrastructure-teardown-playbook.yml
                 [transportlink]=eda/rulebooks/transportlink-teardown-playbook.yml
                 [hybridnetwork]=eda/rulebooks/hybridnetwork-teardown-playbook.yml
                 [networkplacement]=eda/rulebooks/networkplacement-teardown-playbook.yml
@@ -139,6 +142,30 @@ spec:
                 [cloudaws]=eda/rulebooks/cloudaws-teardown-playbook.yml
                 [cloudvirt]=eda/rulebooks/cloudvirt-teardown-playbook.yml
               )
+
+              # Fabric JTs need python-openstackclient (FR6 probe, Neutron EVPN router):
+              # without an EE they fall back to AAP's default EE, which lacks it
+              # ("openstack CLI not available in this execution environment").
+              # de-hybridvpc (eda/hybridvpc/decision-environment.yml) ships it.
+              FABRIC_EE_NAME="de-hybridvpc"
+              FABRIC_EE_IMAGE="{{ .Values.fabricExecutionEnvironmentImage | default "quay.io/gauravshankar/de-hybridvpc:0.1.1" }}"
+              declare -A FABRIC_EE_KINDS=(
+                [hybridfabric]=1 [cloudgateway]=1 [cloudinfrastructure]=1 [networkplacement]=1
+                [transportlink]=1 [hybridnetwork]=1
+              )
+              FABRIC_EE_ID=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/execution_environments/?name=${FABRIC_EE_NAME}" | jfirst_id)
+              if [ -z "${FABRIC_EE_ID}" ]; then
+                RESP=$(curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/execution_environments/" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"${FABRIC_EE_NAME}\",\"image\":\"${FABRIC_EE_IMAGE}\",\"pull\":\"missing\",\"organization\":$ORG,\"description\":\"Fabric jobs: kubernetes.core + openstacksdk + python-openstackclient\"}")
+                FABRIC_EE_ID=$(echo "$RESP" | jget id)
+                [ -n "${FABRIC_EE_ID}" ] || echo "WARNING: could not create EE ${FABRIC_EE_NAME}: $RESP (fabric JTs keep the default EE)"
+              else
+                curl -sk "${auth[@]}" -X PATCH "$HOST/api/controller/v2/execution_environments/${FABRIC_EE_ID}/" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"image\":\"${FABRIC_EE_IMAGE}\"}" >/dev/null
+              fi
+              echo "fabric EE ${FABRIC_EE_NAME} id=${FABRIC_EE_ID:-none} image=${FABRIC_EE_IMAGE}"
 
               # Ensure Vault credential type + credential for VAULT_TOKEN/VAULT_ADDR
               CT=$(curl -sk "${auth[@]}" "$HOST/api/controller/v2/credential_types/?name=Sovereign%20Vault%20Token" | jget count)
@@ -189,6 +216,12 @@ spec:
                     -d "{\"project\":$PROJ,\"playbook\":\"$PB\",\"ask_variables_on_launch\":true,\"extra_vars\":\"plugin_rbac_keycloak_realm: sso\\nKEYCLOAK_EXTERNAL_URL: ${KC_URL}\\n\"}" >/dev/null
                   echo "updated $NAME id=$ID pb=$PB"
                 fi
+                if [ -n "${4:-}" ] && [ -n "${ID:-}" ]; then
+                  curl -sk "${auth[@]}" -X PATCH "$HOST/api/controller/v2/job_templates/$ID/" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"execution_environment\":$4}" >/dev/null
+                  echo "  $NAME execution_environment=$4"
+                fi
                 if [ -n "${CRED_ID:-}" ] && [ -n "${ID:-}" ] && [ "$PROJ" = "$HS_PROJ" ]; then
                   curl -sk "${auth[@]}" -X POST "$HOST/api/controller/v2/job_templates/$ID/credentials/" \
                     -H 'Content-Type: application/json' \
@@ -197,8 +230,10 @@ spec:
               }
 
               for k in "${!REAL_PB[@]}"; do
-                upsert_jt "${k}-provision" "${REAL_PB[$k]}" "$HS_PROJ"
-                upsert_jt "${k}-teardown" "${REAL_TD[$k]}" "$HS_PROJ"
+                EE_ARG=""
+                if [ -n "${FABRIC_EE_KINDS[$k]:-}" ]; then EE_ARG="${FABRIC_EE_ID:-}"; fi
+                upsert_jt "${k}-provision" "${REAL_PB[$k]}" "$HS_PROJ" "$EE_ARG"
+                upsert_jt "${k}-teardown" "${REAL_TD[$k]}" "$HS_PROJ" "$EE_ARG"
               done
 
               # Prove seed landed (operators look these up by exact name)

@@ -32,16 +32,35 @@
         networkplacement_generation: "{{ networkplacement_cr_lookup.resources[0].metadata.generation | default(0) | int }}"
         np_entity: "{{ networkplacement_cr_namespace | regex_replace('^entity-', '') }}"
         np_backend_name: "{{ networkplacement_cr_lookup.resources[0].spec.backend.name | default('') }}"
+        np_backend_kind: "{{ networkplacement_cr_lookup.resources[0].spec.backend.kind | default('') }}"
         np_target_backend: >-
           {{
-            'aws' if (networkplacement_cr_lookup.resources[0].spec.backend.kind | default('')) == 'CloudAWS'
-            else ('openstack' if (networkplacement_cr_lookup.resources[0].spec.backend.kind | default('')) == 'CloudOSO'
-            else 'openshift')
+            {'CloudAWS': 'aws', 'CloudOSO': 'openstack', 'CloudVirt': 'openshift'}.get(
+              networkplacement_cr_lookup.resources[0].spec.backend.kind | default(''), 'unsupported')
           }}
 
     - name: Get timestamp
       ansible.builtin.set_fact:
         networkplacement_status_transition_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+
+    # ---------------------------------------------------------------
+    # Backends are CloudOSO, CloudAWS, CloudVirt only (plan decision 6): a
+    # tenant cluster-admin controls OVN-K/FRR on a hosted cluster, so
+    # PlatformOpenshift attachment is removed.
+    # ---------------------------------------------------------------
+    - name: Set backend-kind failure reason before failing
+      when: np_backend_kind not in ['CloudOSO', 'CloudAWS', 'CloudVirt']
+      ansible.builtin.set_fact:
+        networkplacement_fail_reason: "{{ 'BackendKindRemoved' if np_backend_kind == 'PlatformOpenshift' else 'BackendKindUnsupported' }}"
+
+    - name: Reject unsupported backend kinds
+      when: np_backend_kind not in ['CloudOSO', 'CloudAWS', 'CloudVirt']
+      ansible.builtin.fail:
+        msg: >-
+          NetworkPlacement {{ networkplacement_cr_name }}: spec.backend.kind={{ np_backend_kind }} is not
+          supported; use CloudOSO, CloudAWS or CloudVirt
+          {{- ' (PlatformOpenshift attachment was removed: tenant cluster-admins control the hosted
+          cluster network stack; place VMs on CloudVirt instead)' if np_backend_kind == 'PlatformOpenshift' else '' }}.
 
     # ---------------------------------------------------------------
     # state: absent — withdraw, keep the VNI (HybridNetwork owns release)
@@ -118,6 +137,13 @@
         np_vrf: "{{ hn_lookup.resources[0].status.vrfName | default(np_spec.network) }}"
         np_canonical_rt: "{{ hn_lookup.resources[0].status.canonicalRt | default('') }}"
         np_domain_asn: "{{ hn_lookup.resources[0].status.canonicalRt | default('0:0') | regex_replace(':.*$', '') | int }}"
+        # Overlay MTU (CUDN mtu, Neutron network MTU): HybridNetwork spec.overlayMtu,
+        # else status.overlayMtu, else the lab default (1300).
+        np_overlay_mtu: >-
+          {{
+            (hn_lookup.resources[0].spec | default({})).overlayMtu
+            | default((hn_lookup.resources[0].status | default({})).overlayMtu | default(np_overlay_default_mtu, true), true) | int
+          }}
 
     - name: Load HybridFabric detail (used for spoke FRR route reflectors)
       kubernetes.core.k8s_info:
@@ -137,11 +163,44 @@
         hn_all_fabrics_detail: "{{ (np_fabric_lookup.resources | default([{}]))[0] | default({}, true) }}"
 
     # ---------------------------------------------------------------
-    # Resolve CloudGateway + TransportLink Ready for this backend on the
-    # entity's fabric (design §8.5.1). backend-kind specific resolution.
+    # Resolve the backend's site and its CloudGateway (design §8.5.1):
+    # backend (CloudOSO / CloudVirt, entity namespace) -> spec.cloudRef ->
+    # CloudInfrastructure -> the CloudGateway on this fabric with the same
+    # cloudRef. Deprecated: a CloudOSO without cloudRef matches a gateway whose
+    # spec.openstackCloudOSORef names it.
     # ---------------------------------------------------------------
-    - name: Resolve CloudGateway/TransportLink for CloudOSO backend
-      when: np_spec.backend.kind == 'CloudOSO'
+    - name: Read the backend cloud project
+      when: np_backend_kind in ['CloudOSO', 'CloudVirt']
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: "{{ np_backend_kind }}"
+        name: "{{ np_backend_name }}"
+        namespace: "{{ networkplacement_cr_namespace }}"
+      register: np_backend_obj_lookup
+      failed_when: false
+
+    - name: Set backend site facts
+      ansible.builtin.set_fact:
+        np_backend_obj: "{{ (np_backend_obj_lookup.resources | default([]) + [{}])[0] }}"
+        np_backend_site: "{{ (((np_backend_obj_lookup.resources | default([]) + [{}])[0].spec | default({})).cloudRef | default({}, true)).name | default('', true) }}"
+
+    - name: Resolve the backend's CloudInfrastructure
+      when: np_backend_site | length > 0
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+      vars:
+        ci_ref_name: "{{ np_backend_site }}"
+        ci_expected_type: "{{ np_target_backend }}"
+
+    - name: Keep the backend CloudInfrastructure
+      ansible.builtin.set_fact:
+        np_cloudinfra: "{{ ci_obj if (np_backend_site | length > 0) else {} }}"
+        np_cloudinfra_error: "{{ ci_error if (np_backend_site | length > 0) else '' }}"
+
+    - name: List CloudGateways in sovereign-cloud
+      when: np_backend_kind in ['CloudOSO', 'CloudVirt']
       kubernetes.core.k8s_info:
         host: "{{ services_api_host }}"
         api_key: "{{ services_bearer_token }}"
@@ -149,68 +208,36 @@
         api_version: hybridsovereign.redhat/v1alpha1
         kind: CloudGateway
         namespace: sovereign-cloud
-      register: np_all_gateways_oso
+      register: np_all_gateways
       failed_when: false
 
-    - name: Select CloudGateway matching this CloudOSO backend + fabric
-      when: np_spec.backend.kind == 'CloudOSO'
+    - name: Select the CloudGateway of this site on the network's fabric
+      when: np_backend_kind in ['CloudOSO', 'CloudVirt']
       ansible.builtin.set_fact:
         np_gateway: >-
-          {{
-            np_all_gateways_oso.resources
-            | default([])
-            | selectattr('spec.cloud', 'equalto', 'openstack')
-            | selectattr('spec.openstackCloudOSORef', 'equalto', np_backend_name)
-            | selectattr('spec.fabricRef', 'equalto', hn_selected_fabric_name)
-            | list
-            | first
-            | default({}, true)
-          }}
+          {%- set ns = namespace(hit={}) -%}
+          {%- for g in np_all_gateways.resources | default([]) -%}
+          {%-   set gs = g.spec | default({}) -%}
+          {%-   if gs.fabricRef | default('') == hn_selected_fabric_name and not ns.hit -%}
+          {%-     if np_backend_site | length > 0 and ((gs.cloudRef | default({}, true)).name | default('')) == np_backend_site -%}
+          {%-       set ns.hit = g -%}
+          {%-     elif np_backend_site | length == 0 and np_backend_kind == 'CloudOSO'
+                     and (gs.cloudRef | default({}, true)).name | default('') == ''
+                     and gs.openstackCloudOSORef | default('') == np_backend_name -%}
+          {%-       set ns.hit = g -%}
+          {%-     endif -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ ns.hit }}
 
-    - name: Resolve fabricMembership CloudGateway/TransportLink for PlatformOpenshift/CloudVirt backend
-      when: np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
-      kubernetes.core.k8s_info:
-        host: "{{ services_api_host }}"
-        api_key: "{{ services_bearer_token }}"
-        validate_certs: false
-        api_version: hybridsovereign.redhat/v1alpha1
-        kind: PlatformOpenshift
-        name: "{{ np_backend_name }}"
-        namespace: "{{ networkplacement_cr_namespace }}"
-      register: np_backend_po_lookup
-      failed_when: false
-
-    - name: Select fabricMembership matching this fabric
-      when: np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
-      ansible.builtin.set_fact:
-        np_membership: >-
-          {{
-            (np_backend_po_lookup.resources | default([{}]))[0].status.fabricMembership
-            | default([])
-            | selectattr('fabric', 'equalto', hn_selected_fabric_name)
-            | selectattr('phase', 'equalto', 'Joined')
-            | list
-            | first
-            | default({}, true)
-          }}
-
-    - name: Load CloudGateway/TransportLink from fabricMembership refs
+    - name: Warn about a backend without cloudRef
       when:
-        - np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
-        - (np_membership.cloudGatewayRef | default('')) | length > 0
-      block:
-        - kubernetes.core.k8s_info:
-            host: "{{ services_api_host }}"
-            api_key: "{{ services_bearer_token }}"
-            validate_certs: false
-            api_version: hybridsovereign.redhat/v1alpha1
-            kind: CloudGateway
-            name: "{{ np_membership.cloudGatewayRef }}"
-            namespace: sovereign-cloud
-          register: np_membership_gw
-          failed_when: false
-        - ansible.builtin.set_fact:
-            np_gateway: "{{ (np_membership_gw.resources | default([{}]))[0] | default({}, true) }}"
+        - np_backend_kind in ['CloudOSO', 'CloudVirt']
+        - np_backend_site | length == 0
+      ansible.builtin.set_fact:
+        np_site_warning: >-
+          {{ np_backend_kind }} {{ np_backend_name }} has no spec.cloudRef; matched the deprecated
+          CloudGateway.spec.openstackCloudOSORef.
 
     - name: Set empty gateway fact for unsupported/AWS backends
       when: np_gateway is not defined
@@ -221,11 +248,11 @@
       ansible.builtin.set_fact:
         np_gateway_ready: "{{ (np_gateway.status.ready | default(false)) | bool }}"
         np_cloud_gateway_ref: "{{ np_gateway.metadata.name | default('') }}"
-        np_transport_link_ref: "{{ np_membership.transportLinkRef | default('') }}"
+        np_transport_link_ref: ""
 
     - name: Patch Blocked when prerequisite CloudGateway is not Ready
       when:
-        - np_spec.backend.kind in ['CloudOSO', 'PlatformOpenshift', 'CloudVirt']
+        - np_spec.backend.kind in ['CloudOSO', 'CloudVirt']
         - not np_gateway_ready
       block:
         - ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
@@ -244,14 +271,16 @@
               vni: "{{ np_vni | int }}"
               domainAsn: "{{ np_domain_asn | int }}"
               message: >-
-                Blocked: no Ready CloudGateway/TransportLink found for backend
-                {{ np_spec.backend.kind }}/{{ np_backend_name }} on fabric {{ hn_selected_fabric_name }}.
+                Blocked: no Ready CloudGateway found for backend
+                {{ np_spec.backend.kind }}/{{ np_backend_name }} (site {{ np_backend_site | default('', true) or 'unset' }})
+                on fabric {{ hn_selected_fabric_name }}. {{ np_cloudinfra_error | default('') }}
               lastReconciledAt: "{{ networkplacement_status_transition_time }}"
               observedGeneration: "{{ networkplacement_generation }}"
         - ansible.builtin.fail:
             msg: >-
-              Blocked: no Ready CloudGateway/TransportLink found for backend
-              {{ np_spec.backend.kind }}/{{ np_backend_name }} on fabric {{ hn_selected_fabric_name }}.
+              Blocked: no Ready CloudGateway found for backend
+              {{ np_spec.backend.kind }}/{{ np_backend_name }} (site {{ np_backend_site | default('', true) or 'unset' }})
+              on fabric {{ hn_selected_fabric_name }}. {{ np_cloudinfra_error | default('') }}
 
     - name: Set prerequisiteReady true + fabricApplied best-effort (design §8.5.4)
       ansible.builtin.set_fact:
@@ -345,47 +374,64 @@
           NetworkPlacement {{ networkplacement_cr_name }} prefixes overlap another placement of
           HybridNetwork {{ np_spec.network }}: {{ np_sibling_overlap_check.stderr | default('overlap detected') }}
 
-    # design/fabric.md §16.5 — reject placement prefixes overlapping cluster networking
-    - name: Overlap-check placement prefixes vs PlatformOpenshift.status.networking
-      when:
-        - np_spec.backend.kind == 'PlatformOpenshift'
-        - np_backend_po_lookup is defined
-        - (np_backend_po_lookup.resources | default([])) | length > 0
+    # design/fabric.md §16.5 / plan §2.2 — CloudVirt placements land on the hub:
+    # prefixes must not overlap the hub's cluster, service or node networks.
+    - name: Read hub network config for the CloudVirt overlap check
+      when: np_backend_kind == 'CloudVirt'
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: config.openshift.io/v1
+        kind: Network
+        name: cluster
+      register: np_hub_net
+      failed_when: false
+
+    - name: List hub nodes for the CloudVirt overlap check
+      when: np_backend_kind == 'CloudVirt'
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Node
+      register: np_hub_nodes
+      failed_when: false
+
+    - name: Overlap-check CloudVirt prefixes vs hub cluster/service/node networks
+      when: np_backend_kind == 'CloudVirt'
       ansible.builtin.shell: |
         set -euo pipefail
         python3 <<'PY'
         import ipaddress, json, os, sys
-
-        def overlaps(a, b):
-            return ipaddress.ip_network(a, strict=False).overlaps(ipaddress.ip_network(b, strict=False))
-
-        prefixes = json.loads(os.environ["PREFIXES"])
-        net = json.loads(os.environ["NET_STATUS"])
-        cluster_cidrs = []
-        # OVN-K: a CUDN subnet must not overlap the own pod/service CIDRs of the cluster.
-        # The node underlay (connected route on the node NIC) is excluded too:
-        # underlay.cidr, or machineNetwork on clusters that predate the fabric underlay.
-        for key in ("clusterNetwork", "serviceNetwork", "machineNetwork"):
-            val = net.get(key) or []
-            if isinstance(val, str):
-                cluster_cidrs.append(val)
-            elif isinstance(val, list):
-                cluster_cidrs.extend([v for v in val if v])
-        if (net.get("underlay") or {}).get("cidr"):
-            cluster_cidrs.append(net["underlay"]["cidr"])
+        net = json.loads(os.environ["HUB_NET"])
+        st = net.get("status") or net.get("spec") or {}
+        hub = [c.get("cidr") for c in st.get("clusterNetwork") or [] if c.get("cidr")]
+        hub += [c for c in st.get("serviceNetwork") or [] if c]
+        # Node addresses: a /32 per InternalIP (machine network CIDRs are not on the API).
+        hub += ["%s/32" % a for a in json.loads(os.environ["NODE_IPS"])]
+        hub += json.loads(os.environ.get("EXTRA") or "[]")
         hits = []
-        for p in prefixes:
-            for c in cluster_cidrs:
-                if overlaps(p, c):
-                    hits.append(f"{p} overlaps {c}")
+        for p in json.loads(os.environ["PREFIXES"]):
+            for h in hub:
+                if ipaddress.ip_network(p, strict=False).overlaps(ipaddress.ip_network(h, strict=False)):
+                    hits.append("%s overlaps hub %s" % (p, h))
         if hits:
-            print("; ".join(hits), file=sys.stderr)
+            print("; ".join(sorted(set(hits))), file=sys.stderr)
             sys.exit(1)
         print("ok")
         PY
       environment:
         PREFIXES: "{{ np_spec.prefixes | default([]) | to_json }}"
-        NET_STATUS: "{{ (np_backend_po_lookup.resources | default([{}]))[0].status.networking | default({}) | to_json }}"
+        HUB_NET: "{{ ((np_hub_net.resources | default([])) + [{}])[0] | to_json }}"
+        NODE_IPS: >-
+          {{
+            np_hub_nodes.resources | default([]) | map(attribute='status.addresses') | flatten
+            | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address')
+            | select('match', '^[0-9.]+$') | list | to_json
+          }}
+        EXTRA: "{{ np_hub_reserved_cidrs | default([]) | to_json }}"
       register: np_net_overlap_check
       changed_when: false
       failed_when: false
@@ -397,11 +443,10 @@
         - np_net_overlap_check is defined
         - (np_net_overlap_check.rc | default(0)) != 0
 
-    - name: Fail when placement prefixes overlap PlatformOpenshift cluster networking
+    - name: Fail when CloudVirt prefixes overlap hub networking
       ansible.builtin.fail:
         msg: >-
-          NetworkPlacement {{ networkplacement_cr_name }} prefixes overlap
-          PlatformOpenshift/{{ np_backend_name }} status.networking:
+          NetworkPlacement {{ networkplacement_cr_name }} prefixes overlap the hub's networks:
           {{ np_net_overlap_check.stderr | default('overlap detected') }}
       when:
         - np_net_overlap_check is defined
@@ -422,15 +467,36 @@
       when: np_spec.backend.kind == 'CloudOSO'
       ansible.builtin.include_tasks: backend_rhoso_ovn_evpn.yml
 
-    - name: Dispatch to OpenShift CUDN EVPN backend
-      when: np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
-      ansible.builtin.include_tasks: backend_openshift_evpn.yml
-      vars:
-        hn_fabric_cr: "{{ hn_all_fabrics_detail | default({}) }}"
+    # Hub CNV EVPN backend (plan §3.2.4 / §4): Layer2 primary CUDN with ipVRF +
+    # macVRF on the hub VTEP, RouteAdvertisements, vmNamespaces created labelled.
+    - name: Dispatch to the hub CNV EVPN backend (Layer2 CUDN, RouteAdvertisements, vmNamespaces)
+      when: np_spec.backend.kind == 'CloudVirt'
+      ansible.builtin.include_tasks: backend_cloudvirt_evpn.yml
 
     - name: Set networkplacement_fail_reason from backend failure
       ansible.builtin.set_fact:
         networkplacement_fail_reason: "{{ np_backend_fail_reason | default('') }}"
+
+    # Per-site RT policy on the BGW (plan §3.2.5): a realized placement adds its
+    # RT to its site's peer-group. bgw_config.yml re-renders and pushes in place;
+    # a no-op when nothing changed. Failure only warns (the next HybridFabric
+    # reconcile retries).
+    - name: Refresh the border gateway per-site RT policy
+      when:
+        - np_backend_applied | default(false) | bool
+        - ((hn_all_fabrics_detail.spec | default({})).borderGateway | default({})).loopback | default('') | length > 0
+      block:
+        - name: Re-render BGW config for this placement's site
+          ansible.builtin.include_role:
+            name: hybridfabric_provision
+            tasks_from: bgw_config.yml
+          vars:
+            bgw_fabric_cr: "{{ hn_all_fabrics_detail }}"
+      rescue:
+        - name: Record BGW refresh failure
+          ansible.builtin.set_fact:
+            np_bgw_refresh_warning: >-
+              BGW RT policy not refreshed: {{ ansible_failed_result.msg | default('error') }}
 
     # ---------------------------------------------------------------
     # §8.5.5 validate — live BGP / TCP-179 probe (design/fabric-verify.md)
@@ -448,7 +514,9 @@
         cr_status_body:
           status: "{{ 'ready' if (np_backend_applied | default(false)) else 'failed' }}"
           ready: "{{ np_backend_ready | default(false) }}"
-          message: "{{ np_backend_message | default('') }} {{ np_validated_message }}"
+          message: >-
+            {{ np_backend_message | default('') }} {{ np_validated_message }}
+            {{ np_bgw_refresh_warning | default('') }} {{ np_site_warning | default('') }}
           lastReconciledAt: "{{ networkplacement_status_transition_time }}"
           observedGeneration: "{{ networkplacement_generation }}"
           entity: "{{ np_entity }}"
@@ -467,8 +535,12 @@
           validated: "{{ np_validated | default(false) }}"
           lastValidatedAt: "{{ networkplacement_status_transition_time }}"
           realizedPrefixes: "{{ np_spec.prefixes | default([]) }}"
+          # CloudVirt: hub namespaces created for this placement; CUDN/RA/VTEP/L2VNI ids.
+          vmNamespaces: "{{ np_vm_namespaces | default([]) }}"
+          backendIds: "{{ np_backend_ids | default({}) }}"
           cloudGatewayRef: "{{ np_cloud_gateway_ref | default('') }}"
           transportLinkRef: "{{ np_transport_link_ref | default('') }}"
+          cloudInfrastructure: "{{ np_backend_site | default('') }}"
           conditions:
             - type: Ready
               status: "{{ 'True' if (np_backend_ready | default(false)) else 'False' }}"

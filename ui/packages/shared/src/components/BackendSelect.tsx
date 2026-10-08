@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { FormGroup, Select, SelectList, SelectOption, MenuToggle } from '@patternfly/react-core';
 import type { MenuToggleElement } from '@patternfly/react-core';
 import type { K8sResource } from '../types';
-import { filterFabricCapablePlatformOpenshifts } from './PlatformOpenshiftSelect';
+import { useTranslation } from '../i18n';
 
-export type BackendKind = 'CloudOSO' | 'CloudVirt' | 'PlatformOpenshift';
+/** Placement backends offered in the UI (PlatformOpenshift no longer attaches to the fabric). */
+export type BackendKind = 'CloudOSO' | 'CloudVirt';
 
 export interface BackendSelectOption {
   kind: BackendKind;
@@ -35,15 +36,13 @@ const decode = (v: string): BackendSelectValue => {
 };
 
 /**
- * Build BackendSelect options from CloudOSO / CloudVirt / PlatformOpenshift lists.
- * **Never** includes AWS PlatformOpenshift — fabric EVPN attach is unsupported for `type: aws`
- * (design/fabric.md §15.0 / §18.2). PlatformOpenshift options are marked `ready` only when
- * `status.fabricMembership` reports at least one `Joined` fabric.
+ * Build BackendSelect options from CloudOSO / CloudVirt lists (tenant cloud projects).
+ * PlatformOpenshift is not a placement backend: hosted clusters do not join the fabric; their
+ * workloads attach through a CloudVirt placement instead.
  */
 export function buildBackendOptions(sources: {
   cloudosos?: K8sResource<object, { ready?: boolean }>[] | null;
   cloudvirts?: K8sResource<object, { ready?: boolean }>[] | null;
-  platforms?: K8sResource<{ type?: string }, { ready?: boolean; fabricMembership?: { phase?: string }[] }>[] | null;
 }): BackendSelectOption[] {
   const cloudoso = (sources.cloudosos ?? []).map((c) => ({
     kind: 'CloudOSO' as const,
@@ -57,19 +56,12 @@ export function buildBackendOptions(sources: {
     label: c.metadata.name,
     ready: c.status?.ready,
   }));
-  const platforms = filterFabricCapablePlatformOpenshifts(sources.platforms ?? []).map((p) => ({
-    kind: 'PlatformOpenshift' as const,
-    name: p.metadata.name,
-    label: p.metadata.namespace ? `${p.metadata.name} (${p.metadata.namespace})` : p.metadata.name,
-    ready: (p.status?.fabricMembership ?? []).some((m) => m.phase === 'Joined'),
-  }));
-  return [...cloudoso, ...cloudvirt, ...platforms];
+  return [...cloudoso, ...cloudvirt];
 }
 
 /**
- * Single-select "backend" dropdown for `NetworkPlacement.spec.backend` — CloudOSO, CloudVirt,
- * PlatformOpenshift (hosted/openstack, Joined) only. Writes `{ kind, name }` — never a free-text
- * backend name, never AWS PlatformOpenshift for fabric EVPN (design/fabric.md §18.2 / §18.6).
+ * Single-select "backend" dropdown for `NetworkPlacement.spec.backend` — CloudOSO or CloudVirt
+ * project in the entity namespace. Writes `{ kind, name }`, never a free-text backend name.
  */
 export function BackendSelect({
   id = 'backend-select',
@@ -80,6 +72,7 @@ export function BackendSelect({
   isRequired,
   placeholder = 'Select backend…',
 }: BackendSelectProps): React.ReactElement {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const selectedValue = value ? encode(value) : '';
   const selectedOption = options.find((o) => encode(o) === selectedValue);
@@ -117,7 +110,7 @@ export function BackendSelect({
         <SelectList>
           {options.length === 0 ? (
             <SelectOption isDisabled value="">
-              No Joined backends available
+              {t('form.backendNone')}
             </SelectOption>
           ) : (
             options.map((o) => (
@@ -125,7 +118,7 @@ export function BackendSelect({
                 key={encode(o)}
                 value={encode(o)}
                 isSelected={encode(o) === selectedValue}
-                description={o.ready === false ? 'Not Ready / not fabric-joined' : undefined}
+                description={o.ready === false ? t('form.notReady') : undefined}
               >
                 {o.kind} · {o.label}
               </SelectOption>

@@ -14,7 +14,8 @@ oc get ns | grep entity-
 # AAP reachable (JobTemplates exist)
 oc get automationcontroller -A 2>/dev/null || true
 
-# Local CloudVirt (hub CNV) if smoke app synced
+# Platform cloud infrastructure and the local CloudVirt (hub CNV) if the apps are synced
+oc get cloudinfrastructure -n sovereign-cloud
 oc get cloudvirt -A
 ```
 
@@ -22,7 +23,7 @@ oc get cloudvirt -A
 
 - At least one Entity (e.g. `acme-corp`) and namespace `entity-acme-corp`.
 - Namespace operator Running in that entity NS.
-- CRDs for CloudAWS / CloudOSO / CloudVirt / PlatformOpenshift present.
+- CRDs for CloudInfrastructure / CloudAWS / CloudOSO / CloudVirt / PlatformOpenshift present.
 
 If Entity missing, create from UI or `samples/entity/acme-corp.yaml` (adjust to your lab), then continue.
 

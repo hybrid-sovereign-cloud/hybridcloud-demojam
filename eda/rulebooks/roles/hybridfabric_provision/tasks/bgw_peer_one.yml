@@ -2,18 +2,25 @@
 # One WireGuard peer on the BGW for CloudGateway bgw_gw (loop var).
 - name: Resolve WireGuard peer for {{ bgw_gw.metadata.name }}
   block:
-    - name: Resolve gateway Vault path (fabric/wireguard/<gateway> unless overridden)
+    - name: Resolve gateway Vault path and tunnel address
       ansible.builtin.set_fact:
         _bgw_gw_vault: "{{ bgw_gw.spec.transport.vaultPeerConfigRef | default('fabric/wireguard/' ~ bgw_gw.metadata.name, true) }}"
+        # spec.wireguard.address wins, else the ledger allocation (bgw_facts.yml).
+        _bgw_gw_wg_address: >-
+          {{
+            (bgw_gw.spec.wireguard | default({}, true)).address
+            | default((bgw_wg_gateway_addresses | default({})).get(bgw_gw.metadata.name, ''), true)
+          }}
 
     - name: Require peer fields on the CloudGateway
       ansible.builtin.assert:
         that:
-          - ((bgw_gw.spec.wireguard | default({})).address | default('')) | length > 0
+          - _bgw_gw_wg_address | length > 0
           - ((bgw_gw.spec.siteUnderlay | default({})).cidr | default('')) | length > 0
         fail_msg: >-
-          CloudGateway {{ bgw_gw.metadata.name }} needs spec.wireguard.address and
-          spec.siteUnderlay.cidr to peer with the BGW.
+          CloudGateway {{ bgw_gw.metadata.name }} needs spec.siteUnderlay.cidr and a tunnel
+          address (spec.wireguard.address or a free address in the BGW tunnel subnet:
+          {{ bgw_wg_alloc_error | default('', true) }}) to peer with the BGW.
 
     - name: Read gateway Vault entry
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
@@ -33,8 +40,10 @@
             bgw_peers + [{
               'name': bgw_gw.metadata.name,
               'publicKey': vault_kv_data.wgPublicKey,
-              'wgIp': bgw_gw.spec.wireguard.address | regex_replace('/.*$', ''),
-              'siteCidr': bgw_gw.spec.siteUnderlay.cidr
+              'wgIp': _bgw_gw_wg_address | regex_replace('/.*$', ''),
+              'siteCidr': bgw_gw.spec.siteUnderlay.cidr,
+              'site': (bgw_gw.spec.cloudRef | default({}, true)).name | default('', true),
+              'legacyCloudOSO': bgw_gw.spec.openstackCloudOSORef | default('', true)
             }]
           }}
   rescue:

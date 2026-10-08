@@ -1,5 +1,8 @@
-# Always-on CloudVirt for the local OpenShift Virtualization (CNV) cluster.
+# Always-on CloudVirt (tenant project) on the hub OpenShift Virtualization (CNV).
 # CNV is adopted on every target (adopt.cnv); this CR is base ZTP with Entity, not a sample.
+# cloudRef: the platform CloudInfrastructure hub-virt (sovereign-cloud), declared in
+# gitops/apps/platform-fabric/templates/cloud-infrastructure.yaml. That app syncs
+# after this one; the CloudVirt reports Blocked until hub-virt exists, then reconciles.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
@@ -13,13 +16,13 @@ metadata:
     hybridsovereign.redhat/platform-smoke: "true"
     hybridsovereign.redhat/local-cluster: "true"
 spec:
-  # Local in-cluster CNV — credentials optional for stub provision; path reserved for virt tooling.
-  vaultPath: virt/accounts/local
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt
   # Stable logical domain (no per-cluster apps./api. hardcoding in Git).
   baseDomain: cnv.local
   # Workshop / external ODF default; CRD default is internal ocs-storagecluster-ceph-rbd.
   storageClass: ocs-external-storagecluster-ceph-rbd
-  enableVRF: false
   toolRbac:
     environmentAdminRbac:
       - acme-platform-admins

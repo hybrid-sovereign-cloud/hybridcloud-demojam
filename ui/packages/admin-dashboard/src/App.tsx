@@ -39,6 +39,7 @@ import {
   BarsIcon,
   GlobeIcon,
   UserEditIcon,
+  InfrastructureIcon,
 } from '@patternfly/react-icons';
 import { NavLink, Routes, Route, useLocation } from 'react-router-dom';
 import {
@@ -80,6 +81,13 @@ const NAV: NavEntry[] = [
     labelKey: 'nav.hybridFabrics',
     icon: TopologyIcon,
     kind: 'HybridFabric',
+  },
+  {
+    type: 'link',
+    path: '/clouds/infrastructure',
+    labelKey: 'nav.cloudInfrastructure',
+    icon: InfrastructureIcon,
+    kind: 'CloudInfrastructure',
   },
   {
     type: 'link',
@@ -324,15 +332,51 @@ function AdminLayout(): React.ReactElement {
             <Route
               path="/clouds"
               element={
+                <>
+                  <ResourceListPage
+                    kind="CloudInfrastructure"
+                    title={t('pages.cloudInfrastructureSection')}
+                    subtitle={t('pages.cloudInfrastructureSectionSubtitle')}
+                    listPath="/clouds/infrastructure"
+                    createPath="/create/cloudinfrastructure"
+                    namespace="sovereign-cloud"
+                  />
+                  <div style={{ marginTop: '1.5rem' }}>
+                    <ResourceListPage
+                      kind="CloudOSO"
+                      title={t('pages.cloudProjectsSection')}
+                      subtitle={t('pages.cloudProjectsSectionSubtitle')}
+                      secondaryKind="CloudAWS"
+                      tertiaryKind="CloudVirt"
+                      listPath="/clouds/cloudoso"
+                      secondaryListPath="/clouds/cloudaws"
+                      tertiaryListPath="/clouds/cloudvirt"
+                    />
+                  </div>
+                </>
+              }
+            />
+            <Route
+              path="/clouds/infrastructure"
+              element={
                 <ResourceListPage
-                  kind="CloudOSO"
-                  title={t('nav.cloudEnvironments')}
-                  subtitle={t('pages.cloudEnvironmentsSubtitle')}
-                  secondaryKind="CloudAWS"
-                  tertiaryKind="CloudVirt"
-                  listPath="/clouds/cloudoso"
-                  secondaryListPath="/clouds/cloudaws"
-                  tertiaryListPath="/clouds/cloudvirt"
+                  kind="CloudInfrastructure"
+                  title={t('nav.cloudInfrastructure')}
+                  subtitle={t('pages.cloudInfrastructureSectionSubtitle')}
+                  listPath="/clouds/infrastructure"
+                  createPath="/create/cloudinfrastructure"
+                  namespace="sovereign-cloud"
+                />
+              }
+            />
+            <Route
+              path="/clouds/infrastructure/:name"
+              element={
+                <AdminResourceDetailPage
+                  kind="CloudInfrastructure"
+                  title={t('nav.cloudInfrastructure')}
+                  listPath="/clouds/infrastructure"
+                  fixedNamespace="sovereign-cloud"
                 />
               }
             />

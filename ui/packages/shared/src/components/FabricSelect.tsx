@@ -24,9 +24,8 @@ export interface FabricSelectProps {
 
 /**
  * Single-select dropdown of Ready `HybridFabric` CR names (PatternFly Select).
- * Writes `PlatformOpenshift.spec.networking.fabricRef` / `spec.fabric.preferredFabricRef`,
- * gateway `fabricRef`, link `fabricRef` — never a free-text fabric name (design/fabric.md §18.2).
- * Hidden entirely for PlatformOpenshift `type: aws` (§15.0 / §18.4).
+ * Writes `HybridNetwork.spec.fabricRef`, gateway `fabricRef`, link `fabricRef` — never a free-text
+ * fabric name.
  */
 export function FabricSelect({
   id = 'fabric-select',

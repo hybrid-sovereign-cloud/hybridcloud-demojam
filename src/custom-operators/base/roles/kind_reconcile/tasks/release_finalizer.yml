@@ -1,0 +1,49 @@
+---
+# Release a deleting CR once EDA teardown reported status.deletionComplete.
+# Included from main.yml (deletionComplete already set when the run started) and
+# from wait_teardown.yml (set while this run waited on the teardown job).
+#
+# ansible-operator only drops the watches finalizer after a successful finalizer
+# playbook. meta:end_play alone has raced with status patches and left CRs stuck
+# with deletionComplete=true. Explicitly clear hybridsovereign finalizers via
+# JSON patch (strategic merge ignores empty finalizers lists). Finalizers owned
+# by others (foregroundDeletion from an Argo prune, other controllers) are kept;
+# the test op makes the patch a no-op if the list changed since the read, and
+# end_play then still lets ansible-operator drop its own finalizer.
+- name: Read finalizers on deleting CR
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+  register: hs_release_live
+  failed_when: false
+
+- name: Compute finalizers to keep
+  ansible.builtin.set_fact:
+    hs_release_finalizers: "{{ ((hs_release_live.resources | default([{}]))[0] | default({}, true)).metadata.finalizers | default([]) }}"
+    hs_release_keep: >-
+      {{
+        ((hs_release_live.resources | default([{}]))[0] | default({}, true)).metadata.finalizers | default([])
+        | reject('search', 'hybridsovereign[.]redhat')
+        | list
+      }}
+
+- name: Remove hybridsovereign finalizers from deleting CR
+  when: hs_release_finalizers | length != hs_release_keep | length
+  kubernetes.core.k8s_json_patch:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ hs_kind }}"
+    name: "{{ hs_name }}"
+    namespace: "{{ hs_namespace }}"
+    patch:
+      - op: test
+        path: /metadata/finalizers
+        value: "{{ hs_release_finalizers }}"
+      - op: replace
+        path: /metadata/finalizers
+        value: "{{ hs_release_keep }}"
+  failed_when: false
+
+- name: End play after finalizer clear
+  ansible.builtin.meta: end_play

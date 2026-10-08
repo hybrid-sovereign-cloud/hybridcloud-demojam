@@ -74,6 +74,16 @@
   {
     "type": "console.navigation/href",
     "properties": {
+      "id": "hybridsovereign-cloud-infrastructure",
+      "section": "hybridsovereign-admin-networks-section",
+      "perspective": "hybridsovereign",
+      "name": "Cloud Infrastructure",
+      "href": "/hybridsovereign/clouds/infrastructure"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
       "id": "hybridsovereign-gateways",
       "section": "hybridsovereign-admin-networks-section",
       "perspective": "hybridsovereign",
@@ -445,6 +455,26 @@
         "$codeRef": "AdminCloudsPage"
       },
       "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/clouds/infrastructure",
+      "component": {
+        "$codeRef": "AdminCloudInfrastructuresPage"
+      },
+      "exact": true
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/clouds/infrastructure/:name",
+      "component": {
+        "$codeRef": "AdminCloudInfrastructureDetailPage"
+      },
+      "exact": false
     }
   },
   {

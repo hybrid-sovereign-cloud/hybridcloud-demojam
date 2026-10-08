@@ -5,7 +5,8 @@
 #      subnet routes to the BGW loopback / hub underlay / tunnel net via the site
 #      gateway). Patched once, before any NodeSet. Routes MUST be in NetConfig:
 #      the dataplane operator overwrites <net>_host_routes.
-#   2. NodeSets from CloudOSO.spec.dataplaneNodeSetRefs, strictly one at a time
+#   2. NodeSets from CloudInfrastructure.spec.openstack.dataplaneNodeSetRefs
+#      (deprecated: CloudOSO.spec.dataplaneNodeSetRefs), strictly one at a time
 #      in CR order (openstack_edpm_nodeset.yml): patch, one
 #      OpenStackDataPlaneDeployment scoped to that NodeSet, wait for Ready/failure,
 #      record the fingerprint, then the next. NodeSets whose fingerprint already
@@ -13,13 +14,14 @@
 #      NodeSets failed (default 0 = stop on the first failure); the rest are
 #      reported NotAttempted.
 #
-# Expected: cgw_mgmt_kubeconfig, cgw_cloudoso, facts from openstack_site_gateway.yml.
+# Expected: cgw_mgmt_kubeconfig, rcs_nodeset_names, rcs_netconfig_name (from
+#           common/tasks/resolve_cloudgateway_site.yml), facts from openstack_site_gateway.yml.
 # Sets: cgw_edpm_ready, cgw_edpm_message; patches CloudGateway.status.edpmNodeSets.
 
-- name: Resolve dataplane refs from CloudOSO
+- name: Resolve dataplane refs from the site (CloudInfrastructure)
   ansible.builtin.set_fact:
-    cgw_nodeset_names: "{{ (cgw_cloudoso.spec | default({})).dataplaneNodeSetRefs | default([], true) }}"
-    cgw_netconfig_name: "{{ (cgw_cloudoso.spec | default({})).netConfigRef | default('openstacknetconfig', true) }}"
+    cgw_nodeset_names: "{{ rcs_nodeset_names | default([], true) }}"
+    cgw_netconfig_name: "{{ rcs_netconfig_name | default('openstacknetconfig', true) }}"
     cgw_edpm_workdir: "/tmp/cgw-{{ cloudgateway_cr_name }}-edpm"
     cgw_edpm_params:
       network: "{{ cgw_su_netconfig_network }}"
@@ -38,9 +40,11 @@
   ansible.builtin.set_fact:
     cloudgateway_fail_reason: DataplaneNodeSetRefsMissing
 
-- name: Require CloudOSO.spec.dataplaneNodeSetRefs
+- name: Require dataplaneNodeSetRefs on the site
   ansible.builtin.fail:
-    msg: "CloudOSO {{ cloudgateway_spec.openstackCloudOSORef }} needs spec.dataplaneNodeSetRefs for fabric EDPM landing"
+    msg: >-
+      CloudInfrastructure {{ cgw_site_name }} needs spec.openstack.dataplaneNodeSetRefs for
+      fabric EDPM landing"
   when: cgw_nodeset_names | length == 0
 
 - name: Prepare EDPM work directory

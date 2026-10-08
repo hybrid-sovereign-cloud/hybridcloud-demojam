@@ -1,17 +1,18 @@
 # CloudVirt
 
-Registers an **OpenShift Virtualization (CNV)** environment used as the target for **hosted** PlatformOpenshift (Hypershift HCP + KubeVirt workers).
+A tenant project on a platform-registered **OpenShift Virtualization (CNV)** site ([CloudInfrastructure](cloudinfrastructure.md) of type `openshift`). Targets: tenant VMs attached to a HybridNetwork (NetworkPlacement backend) and **hosted** PlatformOpenshift (Hypershift HCP + KubeVirt workers).
 
 ## Flow
 
 ```text
-Vault path (or adopt local CNV)
-        → CloudVirt
+CloudInfrastructure (type openshift, sovereign-cloud, platform admin)
+        → CloudVirt (entity NS, spec.cloudRef)
         → status.ready
+        → NetworkPlacement backend (VM namespaces on the fabric)
         → PlatformOpenshift type=hosted refs this CloudVirt
 ```
 
-## Minimal example (new remote virt cluster)
+## Minimal example
 
 ```yaml
 apiVersion: hybridsovereign.redhat/v1alpha1
@@ -20,10 +21,15 @@ metadata:
   name: workshop-virt
   namespace: entity-example-corp
 spec:
-  vaultPath: virt/accounts/workshop-virt   # kubeconfig / tooling creds in Vault
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt                         # in sovereign-cloud
   baseDomain: virt.example.com
   storageClass: ocs-external-storagecluster-ceph-rbd
-  enableVRF: false
+  vmNamespaceQuota:                        # optional, per VM namespace
+    hard:
+      requests.cpu: "16"
+      requests.memory: 64Gi
   toolRbac:
     environmentAdminRbac:
       - example-platform-admins
@@ -35,19 +41,20 @@ spec:
 
 ## Local CNV (hub cluster)
 
-The platform ships a GitOps sample `local-virt` on the hub CNV:
+The platform registers the hub CNV as CloudInfrastructure `hub-virt` (`gitops/apps/platform-fabric/templates/cloud-infrastructure.yaml`). Each entity gets a CloudVirt `local-virt` on it: `gitops/apps/platform-smoke/templates/cloudvirt-local.yaml` (acme-corp) and `gitops/apps/platform-fabric/templates/entity-chad.yaml` (chad).
 
-See `gitops/apps/platform-smoke/templates/cloudvirt-local.yaml`.
+VMs join a tenant VRF through a [NetworkPlacement](fabric.md#networkplacement) with `backend.kind: CloudVirt`; the operator creates the VM namespaces listed in `spec.vmNamespaces`.
 
 ## Important fields
 
 | Field | Meaning |
 |-------|---------|
-| `spec.vaultPath` | Vault KV for virt credentials |
-| `spec.baseDomain` | Parent DNS for hosted clusters |
+| `spec.cloudRef.name` | CloudInfrastructure (type openshift) in `sovereign-cloud` |
+| `spec.baseDomain` | Parent DNS for hosted clusters (required) |
 | `spec.storageClass` | Disk StorageClass for VMs / etcd |
+| `spec.vmNamespaceQuota.hard` | ResourceQuota for each VM namespace a placement creates |
 | `spec.networkAttachment` | Optional NAD |
-| `spec.enableVRF` / `vrfId` | Design-time VRF flags |
+| `spec.vaultPath`, `hostedClusterCidrDefaults`, `enableVRF`, `vrfId` | Deprecated (CIDR defaults moved to CloudInfrastructure); removed when validation is tightened |
 
 ## Status to wait for
 

@@ -1,0 +1,116 @@
+# Hub node leg of the fabric underlay (CloudGateway openshift path, plan §4):
+# files/hub-underlay.sh on every hub node. Fabric-scoped (one per HybridFabric),
+# named <fabric>-hub-underlay; removed by cloudgateway_teardown remove_hub_evpn.yml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "{{ hen_underlay_ds }}"
+  namespace: "{{ hen_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+---
+# Privileged SCC for the SA, scoped to the namespace (what
+# `oc adm policy add-scc-to-user privileged -z <sa>` creates).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: "{{ hen_underlay_ds }}-privileged"
+  namespace: "{{ hen_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+- kind: ServiceAccount
+  name: "{{ hen_underlay_ds }}"
+  namespace: "{{ hen_namespace }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ hen_underlay_ds }}"
+  namespace: "{{ hen_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+data:
+  hub-underlay.sh: |
+    {{ lookup('file', role_path ~ '/files/hub-underlay.sh') | indent(4) }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: "{{ hen_underlay_ds }}"
+  namespace: "{{ hen_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+    hybridsovereign.redhat/hub-underlay: "true"
+    hybridsovereign.redhat/cloudgateway: "{{ cloudgateway_cr_name }}"
+spec:
+  selector:
+    matchLabels:
+      app: "{{ hen_underlay_ds }}"
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: "{{ hen_underlay_ds }}"
+        hybridsovereign.redhat/fabric: "{{ hen_fabric_name }}"
+      annotations:
+        # Roll the pods when the script changes (env changes roll them anyway).
+        hybridsovereign.redhat/config-hash: "{{ lookup('file', role_path ~ '/files/hub-underlay.sh') | hash('sha256') | truncate(16, true, '') }}"
+    spec:
+      serviceAccountName: "{{ hen_underlay_ds }}"
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+      - operator: Exists
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: underlay
+        image: "{{ cgw_hub_underlay_image }}"
+        command: [/bin/bash, /scripts/hub-underlay.sh]
+        securityContext:
+          privileged: true
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        # Same names as the hand-built DaemonSet (handover/hub-build/10-hub-underlay-ds.yaml).
+        - {name: UNDERLAY_IFACE, value: "{{ cgw_hub_macnat_interface }}"}
+        - {name: UNDERLAY_BRIDGE, value: "{{ cgw_hub_bridge }}"}
+        - {name: BGW_MAC, value: "{{ hen_hub_leg_mac }}"}
+        - {name: BGW_IP, value: "{{ hen_hub_leg_ip }}"}
+        - {name: BGW_LOOPBACK, value: "{{ hen_bgw_loopback }}"}
+        - {name: VTEP_BLOCK, value: "{{ hen_vtep_block }}"}
+        - {name: UNDERLAY_CIDR, value: "{{ hen_underlay_cidr }}"}
+        - {name: BGW_WG_CIDR, value: "{{ hen_wg_cidr }}"}
+        - {name: SITE_CIDRS, value: "{{ cgw_hub_site_cidrs | join(',') }}"}
+        # Role additions: shim on/off, teardown remove pass, re-apply period.
+        - {name: MACNAT_ENABLED, value: "{{ (cgw_hub_macnat_enabled | bool) | ternary('true', 'false') }}"}
+        - {name: HUB_UNDERLAY_MODE, value: "{{ cgw_hub_underlay_mode | default('apply') }}"}
+        - {name: REAPPLY_SECONDS, value: "{{ cgw_hub_reapply_seconds | string }}"}
+        readinessProbe:
+          exec:
+            command: [test, -f, /tmp/ready]
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      volumes:
+      - name: scripts
+        configMap:
+          name: "{{ hen_underlay_ds }}"
+          defaultMode: 0555

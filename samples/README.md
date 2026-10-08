@@ -29,11 +29,12 @@ oc apply -k samples/ --context=hub-admin
 2. **RbacConfig** — cluster-wide Keycloak RBAC (plugins namespace)
 3. **Rbac** — entity-scoped group definitions
 4. **Team**, **Project**, **Persona**
-5. **CloudOSO** / **CloudAWS** — cloud environments
-6. **PlatformOpenshift** — after cloud env is `status.ready`
-7. **Assignment** — binds teams to clusters
-8. Plugin CRs: **AAPConfig**, **AAPOrg**, **QuayConfig**, **QuayOrg**, **Vault**, **VaultKV**
-9. **OpenStackMigration**, **Iaac** (optional)
+5. **CloudInfrastructure** (platform, `sovereign-cloud`) — cloud sites with admin credentials
+6. **CloudOSO** / **CloudAWS** / **CloudVirt** — tenant cloud projects (`spec.cloudRef` names the CloudInfrastructure)
+7. **PlatformOpenshift** — after cloud env is `status.ready`
+8. **Assignment** — binds teams to clusters
+9. Plugin CRs: **AAPConfig**, **AAPOrg**, **QuayConfig**, **QuayOrg**, **Vault**, **VaultKV**
+10. **OpenStackMigration**, **Iaac** (optional)
 
 ## Sanitization
 
@@ -46,7 +47,7 @@ The following were stripped or replaced in all samples:
 
 ## Sample inventory
 
-**Total samples:** 120
+**Total samples:** 123
 
 | Kind | Count |
 |------|-------|
@@ -54,6 +55,7 @@ The following were stripped or replaced in all samples:
 | `aaporg/` | 5 |
 | `assignment/` | 15 |
 | `cloudaws/` | 4 |
+| `cloudinfrastructure/` | 3 |
 | `cloudoso/` | 8 |
 | `entity/` | 3 |
 | `iaac/` | 1 |

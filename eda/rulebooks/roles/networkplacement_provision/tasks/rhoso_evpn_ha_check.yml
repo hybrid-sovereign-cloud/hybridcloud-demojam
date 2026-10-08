@@ -6,7 +6,10 @@
 # group and its EVPN port never binds. Remedy: delete and recreate the router.
 #
 # Expected: np_cloudoso, np_os_cloud_name, np_os_env, np_spec, np_backend_name,
-#           np_vni, np_neutron_router_id. Optional: np_gateway (CloudGateway).
+#           np_vni, np_neutron_router_id, np_cloudinfra (CloudInfrastructure of the
+#           CloudOSO's cloudRef; management kubeconfig source).
+#           Deprecated fallback (no cloudRef): CloudOSO / CloudGateway
+#           managementClusterKubeconfigRef, else oso/<cloudoso>/mgmt-kubeconfig.
 # Sets: np_evpn_ha_chassis_ok, np_evpn_ha_chassis_message, np_neutron_router_id
 
 - name: Default HA chassis check facts
@@ -15,7 +18,8 @@
     np_evpn_ha_chassis_message: ""
     np_mgmt_kubeconfig_ref: >-
       {{
-        np_cloudoso.spec.managementClusterKubeconfigRef
+        (((np_cloudinfra | default({})).spec | default({})).openstack | default({})).managementClusterKubeconfigRef
+        | default(np_cloudoso.spec.managementClusterKubeconfigRef | default('', true), true)
         | default(((np_gateway | default({})).spec | default({})).managementClusterKubeconfigRef | default(''), true)
         | default('oso/' ~ np_backend_name ~ '/mgmt-kubeconfig', true)
       }}
@@ -26,23 +30,22 @@
   when: np_mgmt_kubeconfig_ref | length == 0
   ansible.builtin.set_fact:
     np_evpn_ha_chassis_message: >-
-      CloudOSO {{ np_backend_name }} has no spec.managementClusterKubeconfigRef;
-      HA chassis group not verified.
+      No management cluster kubeconfig for CloudOSO {{ np_backend_name }}
+      (CloudInfrastructure spec.openstack.managementClusterKubeconfigRef); HA chassis group not verified.
 
 - name: Check and repair HA chassis group
   when: np_mgmt_kubeconfig_ref | length > 0
   block:
-    - name: Read management cluster kubeconfig from Vault
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
-      vars:
-        vault_kv_path: "{{ np_mgmt_kubeconfig_ref }}"
-
     - name: Write management cluster kubeconfig
-      ansible.builtin.copy:
-        content: "{{ vault_kv_data.kubeconfig }}"
-        dest: "{{ np_mgmt_kubeconfig_file }}"
-        mode: "0600"
-      no_log: true
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+      vars:
+        ci_kubeconfig_ref: "{{ np_mgmt_kubeconfig_ref }}"
+        ci_kubeconfig_dest: "{{ np_mgmt_kubeconfig_file }}"
+
+    - name: Require a readable management cluster kubeconfig
+      ansible.builtin.fail:
+        msg: "{{ ci_kubeconfig_error }}"
+      when: not (ci_kubeconfig_ok | bool)
 
     - name: Read HA chassis of evpn-hcg-<router id>
       kubernetes.core.k8s_exec:

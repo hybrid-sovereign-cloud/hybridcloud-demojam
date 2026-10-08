@@ -18,11 +18,19 @@
   vars:
     bgw_fabric_cr: "{{ cgw_fabric }}"
 
+# VM name follows the site: fabric-gw-<CloudInfrastructure> (deprecated path:
+# fabric-gw-<CloudOSO>). The lab cutover names both oso1, so the live VM keeps its name.
+# wireguard.address: spec wins, else the address bgw_facts.yml allocated from the
+# BGW tunnel subnet (ledger key wgAddresses in fabric-numbering-<fabric>).
 - name: Set site underlay facts
   ansible.builtin.set_fact:
     cgw_su: "{{ cloudgateway_spec.siteUnderlay | default({}) }}"
-    cgw_gw_vm_name: "fabric-gw-{{ cloudgateway_spec.openstackCloudOSORef }}"
-    cgw_gw_wg_address: "{{ (cloudgateway_spec.wireguard | default({})).address | default('') }}"
+    cgw_gw_vm_name: "fabric-gw-{{ cgw_site_name }}"
+    cgw_gw_wg_address: >-
+      {{
+        (cloudgateway_spec.wireguard | default({})).address
+        | default((bgw_wg_gateway_addresses | default({})).get(cloudgateway_cr_name, ''), true)
+      }}
     # Vault layout: fabric/wireguard/<gateway> unless spec.transport.vaultPeerConfigRef overrides.
     cgw_gw_vault_path: >-
       {{ cloudgateway_spec.transport.vaultPeerConfigRef | default('fabric/wireguard/' ~ cloudgateway_cr_name, true) }}
@@ -33,9 +41,14 @@
     cgw_su_compute_interface: "{{ cgw_su.computeInterface | default('') }}"
     cgw_su_cidr: "{{ cgw_su.cidr | default('') }}"
     cgw_su_mtu: "{{ cgw_su.mtu | default(cgw_su_default_mtu, true) | int }}"
-    cgw_macnat_enabled: "{{ (cgw_su.macNatShim | default({})).enabled | default(false) | bool }}"
-    cgw_gw_mac: "{{ (cgw_su.macNatShim | default({})).vmMac | default(cgw_gw_default_mac, true) }}"
-    cgw_macnat_interface: "{{ (cgw_su.macNatShim | default({})).interface | default(cgw_su.interface | default(''), true) }}"
+    # spec.macNatShim (new) wins over the deprecated spec.siteUnderlay.macNatShim.
+    cgw_macnat: "{{ cloudgateway_spec.macNatShim | default(cgw_su.macNatShim | default({}), true) }}"
+
+- name: Set MAC-NAT shim facts
+  ansible.builtin.set_fact:
+    cgw_macnat_enabled: "{{ cgw_macnat.enabled | default(false) | bool }}"
+    cgw_gw_mac: "{{ cgw_macnat.vmMac | default((cgw_su.macNatShim | default({})).vmMac | default(cgw_gw_default_mac, true), true) }}"
+    cgw_macnat_interface: "{{ cgw_macnat.interface | default(cgw_su.interface | default(''), true) }}"
 
 - name: Set site-underlay-invalid failure reason before validating
   when: >-
@@ -52,8 +65,9 @@
       - cgw_su_cidr | length > 0
       - cgw_gw_wg_address | length > 0
     fail_msg: >-
-      CloudGateway {{ cloudgateway_cr_name }} (cloud=openstack, transport=wireguard) needs
-      spec.siteUnderlay.{interface,computeInterface,cidr} and spec.wireguard.address.
+      CloudGateway {{ cloudgateway_cr_name }} (openstack site, transport=wireguard) needs
+      spec.siteUnderlay.{interface,computeInterface,cidr}, and spec.wireguard.address unless the
+      BGW tunnel subnet has a free address ({{ bgw_wg_alloc_error | default('', true) }}).
 
 - name: Compute site underlay addressing
   ansible.builtin.shell: |

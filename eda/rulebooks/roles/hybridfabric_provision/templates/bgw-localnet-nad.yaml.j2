@@ -1,0 +1,17 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: "{{ bgw_hub_leg_nad }}"
+  namespace: "{{ bgw_namespace }}"
+  labels:
+    hybridsovereign.redhat/fabric: "{{ bgw_fabric_name }}"
+    hybridsovereign.redhat/fabric-underlay: "true"
+    hybridsovereign.redhat/fabric-hub-leg: "true"
+  annotations:
+    hybridsovereign.redhat/description: >-
+      Border gateway hub leg (HybridFabric.spec.underlay.type localnet): OVN-K localnet
+      network on the node bridge mapped to {{ bgw_hub_leg_physnet }} (br-ex by default),
+      no IPAM. Hub node VTEPs ({{ bgw_hub_vtep_block }}) share this L2 with the BGW
+      ({{ bgw_hub_leg_address }}).
+spec:
+  config: '{{ {"cniVersion": "0.3.1", "name": bgw_hub_leg_nad, "type": "ovn-k8s-cni-overlay", "topology": "localnet", "physicalNetworkName": bgw_hub_leg_physnet, "mtu": bgw_hub_leg_mtu | int, "netAttachDefName": bgw_namespace ~ "/" ~ bgw_hub_leg_nad} | to_json }}'

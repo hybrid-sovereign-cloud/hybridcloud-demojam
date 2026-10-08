@@ -33,6 +33,8 @@ export { default as AdminQuayConfigDetailPage } from './components/AdminQuayConf
 export { default as AdminVaultDetailPage } from './components/AdminVaultDetailPage';
 export { default as AdminVaultKVDetailPage } from './components/AdminVaultKVDetailPage';
 export { default as AdminCreatePage } from './components/AdminCreatePage';
+export { default as AdminCloudInfrastructuresPage } from './components/AdminCloudInfrastructuresPage';
+export { default as AdminCloudInfrastructureDetailPage } from './components/AdminCloudInfrastructureDetailPage';
 export { default as AdminHybridFabricsPage } from './components/AdminHybridFabricsPage';
 export { default as AdminCloudGatewaysPage } from './components/AdminCloudGatewaysPage';
 export { default as AdminTransportLinksPage } from './components/AdminTransportLinksPage';

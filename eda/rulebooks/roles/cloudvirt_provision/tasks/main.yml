@@ -1,5 +1,10 @@
 ---
-# CloudVirt provision — mark ready after validating CR (CNV prep stub).
+# CloudVirt provision — tenant project on a CloudInfrastructure of type openshift
+# (hub CNV), plan §2.2. Validates spec.cloudRef (exists, type openshift, Ready,
+# entity allowed by spec.entityRefs) and reports Ready. The VM namespaces that
+# join a network are created by NetworkPlacement (vmNamespaces, hub pass), with
+# spec.vmNamespaceQuota applied there.
+# Deprecated: a CloudVirt without cloudRef is still marked Ready (warning).
 # Avoids operator_sdk collection (not in AAP EE); uses shared vault + status helpers.
 - block:
     - name: Parse event payload (kind_reconcile AAP launch shape)
@@ -33,6 +38,63 @@
           - cloudvirt_cr.resources | length > 0
         fail_msg: "CloudVirt {{ cloudvirt_namespace }}/{{ cloudvirt_name }} not found"
 
+    - name: Read Namespace labels (entity)
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Namespace
+        name: "{{ cloudvirt_namespace }}"
+      register: cloudvirt_ns_lookup
+
+    - name: Set CloudVirt facts
+      ansible.builtin.set_fact:
+        cloudvirt_spec: "{{ cloudvirt_cr.resources[0].spec | default({}) }}"
+        cloudvirt_generation: "{{ cloudvirt_cr.resources[0].metadata.generation | default(0) | int }}"
+        cloudvirt_entity: >-
+          {{ ((cloudvirt_ns_lookup.resources | default([]) + [{}])[0].metadata | default({})).labels
+             | default({}) | dict2items | selectattr('key', 'equalto', 'hybridsovereign.redhat/entity')
+             | map(attribute='value') | first | default(cloudvirt_namespace | regex_replace('^entity-', ''), true) }}
+        cloudvirt_cloudref: "{{ ((cloudvirt_cr.resources[0].spec | default({})).cloudRef | default({}, true)).name | default('', true) }}"
+
+    - name: Resolve spec.cloudRef (CloudInfrastructure type openshift)
+      when: cloudvirt_cloudref | length > 0
+      block:
+        - name: Read CloudInfrastructure
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+          vars:
+            ci_ref_name: "{{ cloudvirt_cloudref }}"
+            ci_expected_type: openshift
+
+        - name: Require a usable openshift CloudInfrastructure
+          ansible.builtin.assert:
+            that:
+              - ci_error | length == 0
+              - ci_ready | bool
+            fail_msg: >-
+              CloudVirt {{ cloudvirt_name }}: {{ ci_error if ci_error | length > 0
+              else ('CloudInfrastructure ' ~ cloudvirt_cloudref ~ ' is not Ready') }}
+
+        - name: Require the entity to be allowed on this infrastructure
+          ansible.builtin.assert:
+            that: >-
+              (ci_spec.entityRefs | default([]) | length == 0)
+              or (cloudvirt_entity in (ci_spec.entityRefs | map(attribute='name') | list))
+            fail_msg: >-
+              Entity {{ cloudvirt_entity }} is not in CloudInfrastructure {{ cloudvirt_cloudref }} spec.entityRefs.
+
+    - name: Set CloudVirt status message
+      ansible.builtin.set_fact:
+        cloudvirt_message: >-
+          {{
+            ('CloudVirt project ready on CloudInfrastructure ' ~ cloudvirt_cloudref
+             ~ ' (cluster ' ~ ((ci_spec.openshift | default({})).clusterRef | default('local', true)) ~ ', evpn='
+             ~ ((ci_capabilities | default({})).evpn | default(false)) ~ ').')
+            if cloudvirt_cloudref | length > 0
+            else 'CloudVirt environment ready (WARNING: no spec.cloudRef; set it to a CloudInfrastructure of type openshift).'
+          }}
+
     - name: Patch CloudVirt ready status
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"
       vars:
@@ -44,7 +106,11 @@
           status: ready
           ready: true
           phase: provisioned
-          message: CloudVirt environment stub ready (CNV prep deferred)
+          message: "{{ cloudvirt_message }}"
+          observedGeneration: "{{ cloudvirt_generation }}"
+          lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
+          entity: "{{ cloudvirt_entity }}"
+          cloudInfrastructure: "{{ cloudvirt_cloudref }}"
           slug: "{{ cloudvirt_name[:5] }}"
           domain: "{{ cloudvirt_cr.resources[0].spec.baseDomain | default('virt.example.com') }}"
 

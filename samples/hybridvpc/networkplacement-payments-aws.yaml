@@ -10,4 +10,3 @@ spec:
     name: aws-prod
   prefixes:
     - 10.50.0.0/24
-  state: present

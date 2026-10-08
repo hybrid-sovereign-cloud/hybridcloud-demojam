@@ -1,5 +1,6 @@
 # Plan / validate PlatformOpenshift pod and service CIDRs (design/fabric.md §16).
-# Run by common/tasks/platformopenshift_fabric_ipam.yml.
+# Run by common/tasks/platformopenshift_fabric_ipam.yml (hosted-cluster CIDR planner;
+# the 'fabric' in the file names is historical, nothing here touches the fabric).
 # Inputs (env, JSON): SOURCE (recorded|explicit|allocate|legacy-default), RECORDED,
 #   EXPLICIT, POOLS {clusterNetworkPool, serviceNetworkPool}, HUB_NETWORK, PEERS,
 #   DENY_PEER_OVERLAP, SELF_NAME, SELF_NAMESPACE.
@@ -16,7 +17,7 @@
 #   * no check against overlay (HybridNetwork) prefixes: overlay uniqueness is per
 #     HybridNetwork and is enforced by NetworkPlacement;
 #   * CIDRs outside the default ranges => legacy=True (LegacyClusterCidrs); kept.
-# No node/machine blocks are allocated: nodes use the fabric underlay segment.
+# No node/machine blocks are allocated (KubeVirt workers use the hub pod network).
 import ipaddress
 import json
 import os

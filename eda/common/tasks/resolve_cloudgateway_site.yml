@@ -1,0 +1,151 @@
+---
+# Normalize "which site does this CloudGateway land on" for every fabric role
+# (cloudgateway_*, transportlink_provision, networkplacement_provision,
+# hybridfabric bgw_facts).
+#
+# New model (plan §2.1): CloudGateway.spec.cloudRef {kind: CloudInfrastructure, name}
+#   and spec.transport.type none|wireguard. NodeSets / NetConfig / management
+#   kubeconfig come from CloudInfrastructure.spec.openstack.
+# Legacy (deprecated, still on live objects during the cutover): spec.cloud +
+#   spec.openstackCloudOSORef / virtCloudVirtRef / platformOpenshiftRef, with the
+#   EDPM refs on the CloudOSO and spec.managementClusterKubeconfigRef on the
+#   gateway. Read only when spec.cloudRef is absent, with a warning.
+#
+# Required vars: rcs_gateway (CloudGateway object)
+# Sets:
+#   rcs_cloud_type        openstack | openshift | aws | ''
+#   rcs_site_name         CloudInfrastructure name (legacy: the CloudOSO/CloudVirt/PO ref)
+#   rcs_cloudinfra        CloudInfrastructure object ({} on the legacy path)
+#   rcs_legacy (bool), rcs_warning (string)
+#   rcs_transport         none | wireguard
+#   rcs_mgmt_kubeconfig_ref, rcs_netconfig_name, rcs_nodeset_names  (openstack)
+#   rcs_external_network, rcs_region                                 (openstack)
+#   rcs_error             '' when usable
+
+- name: Read CloudGateway site intent
+  ansible.builtin.set_fact:
+    _rcs_spec: "{{ rcs_gateway.spec | default({}) }}"
+    _rcs_ref: "{{ (rcs_gateway.spec | default({})).cloudRef | default({}, true) }}"
+    rcs_cloud_type: ""
+    rcs_site_name: ""
+    rcs_cloudinfra: {}
+    rcs_legacy: false
+    rcs_warning: ""
+    rcs_error: ""
+    rcs_mgmt_kubeconfig_ref: ""
+    rcs_netconfig_name: ""
+    rcs_nodeset_names: []
+    rcs_external_network: ""
+    rcs_region: ""
+    rcs_transport: "{{ (((rcs_gateway.spec | default({})).transport | default({}, true)).type | default('none', true)) }}"
+
+# ------------------------------------------------------------------ new model
+- name: Resolve spec.cloudRef (CloudInfrastructure)
+  when: (_rcs_ref.name | default('')) | length > 0
+  block:
+    - name: Reject a cloudRef kind other than CloudInfrastructure
+      when: (_rcs_ref.kind | default('CloudInfrastructure', true)) != 'CloudInfrastructure'
+      ansible.builtin.set_fact:
+        rcs_error: >-
+          CloudGateway {{ rcs_gateway.metadata.name }} spec.cloudRef.kind={{ _rcs_ref.kind }}
+          is not supported (CloudInfrastructure only).
+
+    - name: Read the referenced CloudInfrastructure
+      when: rcs_error | length == 0
+      ansible.builtin.include_tasks: resolve_cloud_infrastructure.yml
+      vars:
+        ci_ref_name: "{{ _rcs_ref.name }}"
+        ci_ref_namespace: "{{ _rcs_ref.namespace | default('sovereign-cloud', true) }}"
+        ci_expected_type: ""
+
+    - name: Set site facts from CloudInfrastructure
+      when: rcs_error | length == 0
+      ansible.builtin.set_fact:
+        rcs_error: "{{ ci_error }}"
+        rcs_cloud_type: "{{ ci_type }}"
+        rcs_site_name: "{{ _rcs_ref.name }}"
+        rcs_cloudinfra: "{{ ci_obj }}"
+        rcs_mgmt_kubeconfig_ref: "{{ (ci_spec.openstack | default({})).managementClusterKubeconfigRef | default('', true) }}"
+        rcs_netconfig_name: "{{ (ci_spec.openstack | default({})).netConfigRef | default('openstacknetconfig', true) }}"
+        rcs_nodeset_names: "{{ (ci_spec.openstack | default({})).dataplaneNodeSetRefs | default([], true) }}"
+        rcs_external_network: "{{ (ci_spec.openstack | default({})).externalNetwork | default('', true) }}"
+        rcs_region: "{{ (ci_spec.openstack | default({})).region | default((ci_spec.aws | default({})).region | default('', true), true) }}"
+
+# ------------------------------------------------------------------ legacy
+- name: Fall back to the deprecated CloudGateway cloud fields
+  when: (_rcs_ref.name | default('')) | length == 0
+  block:
+    - name: Map legacy spec.cloud and per-cloud refs
+      ansible.builtin.set_fact:
+        rcs_legacy: true
+        rcs_cloud_type: "{{ _rcs_spec.cloud | default('') }}"
+        rcs_site_name: >-
+          {{
+            _rcs_spec.openstackCloudOSORef | default('', true)
+            if (_rcs_spec.cloud | default('')) == 'openstack'
+            else (_rcs_spec.virtCloudVirtRef | default(_rcs_spec.platformOpenshiftRef | default('', true), true)
+                  if (_rcs_spec.cloud | default('')) == 'openshift' else '')
+          }}
+        rcs_region: "{{ _rcs_spec.region | default('', true) }}"
+        rcs_warning: >-
+          CloudGateway {{ rcs_gateway.metadata.name }} has no spec.cloudRef; using the deprecated
+          spec.cloud={{ _rcs_spec.cloud | default('unset') }} fields (set cloudRef to a CloudInfrastructure).
+
+    - name: Require a site on the legacy path
+      when: rcs_cloud_type | length == 0
+      ansible.builtin.set_fact:
+        rcs_error: >-
+          CloudGateway {{ rcs_gateway.metadata.name }} sets neither spec.cloudRef nor the
+          deprecated spec.cloud.
+
+    - name: Read the legacy CloudOSO (gateway namespace first, then any namespace)
+      when:
+        - rcs_cloud_type == 'openstack'
+        - rcs_site_name | length > 0
+      block:
+        - name: Read CloudOSO in the gateway namespace
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: CloudOSO
+            name: "{{ rcs_site_name }}"
+            namespace: "{{ rcs_gateway.metadata.namespace | default('sovereign-cloud') }}"
+          register: _rcs_oso_local
+          failed_when: false
+
+        - name: Read CloudOSO in any namespace
+          when: (_rcs_oso_local.resources | default([])) | length == 0
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: hybridsovereign.redhat/v1alpha1
+            kind: CloudOSO
+            name: "{{ rcs_site_name }}"
+          register: _rcs_oso_wide
+          failed_when: false
+
+        - name: Set legacy EDPM refs from CloudOSO
+          vars:
+            _rcs_oso: >-
+              {{
+                ((_rcs_oso_local.resources | default([])) + ((_rcs_oso_wide | default({})).resources | default([])) + [{}])
+                | first
+              }}
+          ansible.builtin.set_fact:
+            rcs_legacy_cloudoso: "{{ _rcs_oso }}"
+            rcs_mgmt_kubeconfig_ref: >-
+              {{
+                _rcs_spec.managementClusterKubeconfigRef
+                | default((_rcs_oso.spec | default({})).managementClusterKubeconfigRef | default('', true), true)
+                | default('oso/' ~ rcs_site_name ~ '/mgmt-kubeconfig', true)
+              }}
+            rcs_netconfig_name: "{{ (_rcs_oso.spec | default({})).netConfigRef | default('openstacknetconfig', true) }}"
+            rcs_nodeset_names: "{{ (_rcs_oso.spec | default({})).dataplaneNodeSetRefs | default([], true) }}"
+            rcs_external_network: "{{ (_rcs_oso.spec | default({})).externalNetwork | default('', true) }}"
+
+    - name: Warn about the deprecated fields
+      ansible.builtin.debug:
+        msg: "WARNING: {{ rcs_warning }}"

@@ -7,6 +7,15 @@
 #                services_bearer_token
 # Sets: bgw_* facts (name, namespace, loopback, underlay, wireguard, peers, ...)
 
+# Shared fabric conventions (common/vars/fabric_evpn.yml) and the BGW hub leg
+# (type localnet, plan §3.2.5 / §4): eth2 on the localnet NAD, hubLegAddress; hub
+# node VTEPs live in hubVtepBlock. Names/addressing are shared with the
+# cloudgateway openshift path (common/tasks/hub_evpn_names.yml).
+- name: Resolve hub-leg names and addressing
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/hub_evpn_names.yml"
+  vars:
+    hen_fabric: "{{ bgw_fabric_cr }}"
+
 - name: Set BGW base facts from HybridFabric.spec.borderGateway
   ansible.builtin.set_fact:
     bgw_spec: "{{ bgw_fabric_cr.spec.borderGateway | default({}) }}"
@@ -21,7 +30,15 @@
     bgw_name: >-
       {{ bgw_spec.name | default('fabric-bgw-' ~ (bgw_fabric_name | regex_replace('-fabric$', '')), true) }}
     bgw_loopback: "{{ bgw_spec.loopback | default('') }}"
-    bgw_underlay_nad: "{{ bgw_ul.nadName | default(bgw_default_underlay_nad, true) }}"
+    # type localnet: spec.underlay.nadName is the hub leg (localnet NAD, eth2) and the
+    # existing OVN-K layer2 leg (eth1, DHCP for any remaining layer2 users) keeps
+    # bgw_default_underlay_nad. type ovn-layer2 (default): nadName is eth1's NAD.
+    bgw_underlay_nad: >-
+      {{
+        bgw_default_underlay_nad
+        if ((bgw_ul.type | default('ovn-layer2', true)) == 'localnet')
+        else (bgw_ul.nadName | default(bgw_default_underlay_nad, true))
+      }}
     bgw_underlay_cidr: "{{ bgw_ul.cidr | default('') }}"
     bgw_underlay_mtu: "{{ bgw_ul.mtu | default(bgw_default_underlay_mtu, true) | int }}"
     bgw_dhcp_lease: "{{ (bgw_ul.dhcpRange | default({})).leaseTime | default(bgw_default_dhcp_lease, true) }}"
@@ -44,6 +61,30 @@
       HybridFabric {{ bgw_fabric_name }}: spec.borderGateway.loopback and
       spec.underlay.cidr are required.
 
+- name: Set BGW hub-leg facts
+  ansible.builtin.set_fact:
+    bgw_hub_leg_enabled: "{{ hen_underlay_type == 'localnet' }}"
+    bgw_hub_leg_nad: "{{ hen_localnet_nad }}"
+    bgw_hub_leg_physnet: "{{ hen_physnet }}"
+    bgw_hub_leg_address: "{{ hen_hub_leg_address }}"
+    bgw_hub_leg_ip: "{{ hen_hub_leg_ip }}"
+    bgw_hub_vtep_block: "{{ hen_vtep_block }}"
+    bgw_hub_leg_mac: "{{ hen_hub_leg_mac }}"
+    bgw_hub_leg_mtu: "{{ bgw_hub_leg_default_mtu | int }}"
+
+- name: Require hub-leg addressing for a localnet underlay
+  when: bgw_hub_leg_enabled | bool
+  ansible.builtin.assert:
+    that:
+      - bgw_hub_vtep_block | length > 0
+      - bgw_hub_leg_address | length > 0
+      - hen_error | length == 0
+      - bgw_hub_leg_nad != bgw_underlay_nad
+    fail_msg: >-
+      HybridFabric {{ bgw_fabric_name }} (underlay.type localnet): {{ hen_error | default('', true) }}
+      spec.underlay.hubVtepBlock is required and spec.underlay.nadName ({{ bgw_hub_leg_nad }}) must
+      differ from the layer2 underlay NAD {{ bgw_underlay_nad }}.
+
 - name: Compute underlay / WireGuard addressing (python ipaddress)
   ansible.builtin.shell: |
     set -euo pipefail
@@ -58,6 +99,23 @@
             raise SystemExit("%s not in %s" % (a, net))
     wg = ipaddress.ip_interface(os.environ["WG"])
     ipaddress.ip_address(os.environ["LOOPBACK"])
+    # DHCP range(s) on eth1 with the hub VTEP block (localnet hub leg) cut out.
+    ranges = [(ipaddress.ip_address(start), ipaddress.ip_address(end))]
+    if os.environ.get("EXCLUDE"):
+        ex = ipaddress.ip_network(os.environ["EXCLUDE"], strict=False)
+        lo_ex, hi_ex = ex.network_address, ex.broadcast_address
+        cut = []
+        for a, b in ranges:
+            if b < lo_ex or a > hi_ex:
+                cut.append((a, b))
+                continue
+            if a < lo_ex:
+                cut.append((a, lo_ex - 1))
+            if b > hi_ex:
+                cut.append((hi_ex + 1, b))
+        ranges = cut
+    if not ranges:
+        raise SystemExit("DHCP range %s-%s lies inside the hub VTEP block" % (start, end))
     print(json.dumps({
         "cidr": str(net),
         "prefixlen": net.prefixlen,
@@ -65,6 +123,7 @@
         "address": addr,
         "dhcp_start": start,
         "dhcp_end": end,
+        "dhcp_ranges": [[str(a), str(b)] for a, b in ranges],
         "wg_ip": str(wg.ip),
         "wg_network": str(wg.network),
     }))
@@ -78,6 +137,7 @@
     DHCP_END: "{{ (bgw_ul.dhcpRange | default({})).end | default('') }}"
     WG: "{{ bgw_wg_address }}"
     LOOPBACK: "{{ bgw_loopback }}"
+    EXCLUDE: "{{ bgw_hub_vtep_block if (bgw_hub_leg_enabled | bool) else '' }}"
   register: _bgw_net_calc
   changed_when: false
 
@@ -89,6 +149,7 @@
     bgw_underlay_address: "{{ (_bgw_net_calc.stdout | from_json).address }}"
     bgw_dhcp_start: "{{ (_bgw_net_calc.stdout | from_json).dhcp_start }}"
     bgw_dhcp_end: "{{ (_bgw_net_calc.stdout | from_json).dhcp_end }}"
+    bgw_dhcp_ranges: "{{ (_bgw_net_calc.stdout | from_json).dhcp_ranges }}"
     bgw_wg_ip: "{{ (_bgw_net_calc.stdout | from_json).wg_ip }}"
     bgw_wg_network: "{{ (_bgw_net_calc.stdout | from_json).wg_network }}"
 
@@ -114,16 +175,21 @@
 
 - name: Ensure BGW WireGuard key pair in Vault (fabric/<fabric>/bgw unless overridden)
   block:
+    # The SSH pair is the in-place config channel (bgw_config_push.yml). It is
+    # generated only when the entry has neither sshPublicKey nor sshPrivateKey, so
+    # a hand-seeded public key (live BGW) is never replaced.
     - name: Read (or generate) BGW key pair
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/wg_keypair_ensure.yml"
       vars:
         wg_kv_path: "{{ bgw_vault_path }}"
+        wg_ssh_generate: "{{ bgw_ssh_generate | default(true) }}"
 
     - name: Keep BGW key material
       ansible.builtin.set_fact:
         bgw_wg_private_key: "{{ wg_keypair.wgPrivateKey }}"
         bgw_wg_public_key: "{{ wg_keypair.wgPublicKey }}"
         bgw_ssh_public_key: "{{ wg_keypair.sshPublicKey }}"
+        bgw_ssh_private_key: "{{ wg_keypair.sshPrivateKey }}"
       no_log: true
   rescue:
     - name: Record unreadable BGW Vault entry
@@ -135,12 +201,14 @@
     bgw_wg_private_key: "{{ bgw_wg_private_key | default('') }}"
     bgw_wg_public_key: "{{ bgw_wg_public_key | default('') }}"
     bgw_ssh_public_key: "{{ bgw_ssh_public_key | default('') }}"
+    bgw_ssh_private_key: "{{ bgw_ssh_private_key | default('') }}"
     bgw_vault_error: "{{ bgw_vault_error | default('') }}"
   no_log: true
 
-# Remote site gateways that tunnel to this BGW: CloudGateway cloud=openstack,
-# transport.type=wireguard on this fabric. Each contributes a WireGuard peer,
-# a BGP listen range and a DHCP option-121 route for its site underlay CIDR.
+# Remote site gateways that tunnel to this BGW: CloudGateways on this fabric with
+# spec.transport.type wireguard (openstack sites; WireGuard runs only BGW <-> site
+# gateway). Each contributes a WireGuard peer, a BGP listen range and a DHCP
+# option-121 route for its site underlay CIDR.
 - name: List CloudGateways that peer with this BGW
   kubernetes.core.k8s_info:
     host: "{{ services_api_host }}"
@@ -155,18 +223,71 @@
   ansible.builtin.set_fact:
     bgw_peers: []
     bgw_peer_errors: []
+    _bgw_fabric_gateways: >-
+      {{
+        _bgw_gateways.resources | default([])
+        | selectattr('spec.fabricRef', 'defined')
+        | selectattr('spec.fabricRef', 'equalto', bgw_fabric_name)
+        | list
+      }}
     _bgw_wg_gateways: >-
       {{
         _bgw_gateways.resources | default([])
         | selectattr('spec.fabricRef', 'defined')
         | selectattr('spec.fabricRef', 'equalto', bgw_fabric_name)
-        | selectattr('spec.cloud', 'defined')
-        | selectattr('spec.cloud', 'equalto', 'openstack')
         | selectattr('spec.transport.type', 'defined')
         | selectattr('spec.transport.type', 'equalto', 'wireguard')
         | rejectattr('metadata.deletionTimestamp', 'defined')
         | list
       }}
+
+# WireGuard tunnel addresses (plan §3.2.5): spec.wireguard.address wins; a
+# wireguard gateway without one gets <ip>/32 from the BGW tunnel subnet, recorded
+# in fabric-numbering-<fabric> key wgAddresses (released by cloudgateway_teardown).
+- name: Allocate WireGuard addresses for gateways without spec.wireguard.address
+  when: bgw_wg_allocate | default(true) | bool
+  block:
+    - name: Write gateway list for the WireGuard ledger
+      ansible.builtin.copy:
+        content: |-
+          [{% for g in _bgw_fabric_gateways %}{{ {
+            'name': g.metadata.name,
+            'address': ((g.spec.wireguard | default({}, true)).address | default('', true)),
+            'wireguard': ((g.spec.transport | default({}, true)).type | default('none', true)) == 'wireguard',
+            'deleting': g.metadata.deletionTimestamp is defined
+          } | to_json }}{{ ', ' if not loop.last else '' }}{% endfor %}]
+        dest: "/tmp/bgw-{{ bgw_fabric_name }}-wg-gateways.json"
+        mode: "0600"
+
+    - name: Allocate from the ledger
+      ansible.builtin.command:
+        argv: [python3, "{{ role_path }}/../../../common/files/fabric_wg_ledger.py", allocate]
+      environment:
+        CR_API_HOST: "{{ services_api_host | trim }}"
+        CR_TOKEN: "{{ services_bearer_token | trim }}"
+        CM_NAMESPACE: "{{ bgw_namespace }}"
+        CM_NAME: "fabric-numbering-{{ bgw_fabric_name }}"
+        GATEWAYS_FILE: "/tmp/bgw-{{ bgw_fabric_name }}-wg-gateways.json"
+        WG_NETWORK: "{{ bgw_wg_network }}"
+        WG_RESERVED: "{{ [bgw_wg_ip] | to_json }}"
+        START_OFFSET: "{{ bgw_wg_alloc_start_offset | default(10) | string }}"
+      register: _bgw_wg_alloc
+      changed_when: (_bgw_wg_alloc.stdout | from_json).changed | bool
+
+    - name: Record WireGuard allocations
+      ansible.builtin.set_fact:
+        bgw_wg_gateway_addresses: "{{ (_bgw_wg_alloc.stdout | from_json).addresses | default({}) }}"
+        bgw_wg_alloc_error: "{{ (_bgw_wg_alloc.stdout | from_json).errors | default([]) | join('; ') }}"
+  always:
+    - name: Remove gateway list
+      ansible.builtin.file:
+        path: "/tmp/bgw-{{ bgw_fabric_name }}-wg-gateways.json"
+        state: absent
+
+- name: Default WireGuard allocation facts
+  ansible.builtin.set_fact:
+    bgw_wg_gateway_addresses: "{{ bgw_wg_gateway_addresses | default({}) }}"
+    bgw_wg_alloc_error: "{{ bgw_wg_alloc_error | default('') }}"
 
 - name: Resolve each site gateway peer (public key from its Vault entry)
   ansible.builtin.include_tasks: bgw_peer_one.yml
@@ -175,14 +296,9 @@
     loop_var: bgw_gw
     label: "{{ bgw_gw.metadata.name }}"
 
-- name: Set derived BGW facts (listen ranges, WireGuard enablement)
+- name: Set derived BGW facts (WireGuard enablement, endpoint)
   ansible.builtin.set_fact:
     bgw_wg_enabled: "{{ (bgw_wg_private_key | length) > 0 }}"
-    bgw_listen_ranges: >-
-      {{
-        ([bgw_underlay_cidr] + (bgw_peers | map(attribute='siteCidr') | list) + [bgw_wg_network])
-        | unique | list
-      }}
     bgw_endpoint: "{{ bgw_ingress_host }}:443"
 
 # Tenant isolation on the shared BGW (design/fabric.md §8.5.4): the BGW only
@@ -202,13 +318,164 @@
 - name: Build the RT allow-list
   ansible.builtin.set_fact:
     bgw_rt_filter_enabled: "{{ (bgw_rt_filter | default('allocated')) == 'allocated' }}"
-    bgw_allowed_rts: >-
+    bgw_rt_policy_per_site: "{{ (bgw_rt_policy | default('per-site')) == 'per-site' }}"
+    _bgw_ledger_vnis: >-
       {{
         (((_bgw_ledger.resources | default([]) + [{}])[0].data | default({})).allocated | default('{}', true) | from_json).values()
-        | map('int') | unique | sort | map('string')
-        | map('regex_replace', '^', (bgw_asn | string) ~ ':')
-        | list
+        | map('int') | unique | sort | list
       }}
+
+# Allow-list = <asn>:<vni> (ipVRF / L3VNI) for every ledger VNI. A localnet
+# fabric (hub CNV Layer2 CUDNs) also allows <asn>:<fabric_l2vni_offset + vni>
+# (macVRF / L2VNI, common/vars/fabric_evpn.yml) so Type-2 routes between hub
+# VTEPs are reflected.
+- name: Build the RT allow-list (L3VNI, plus L2VNI on a localnet fabric)
+  ansible.builtin.set_fact:
+    bgw_allowed_rts: >-
+      {%- set out = [] -%}
+      {%- for v in _bgw_ledger_vnis -%}
+      {%-   set _ = out.append((bgw_asn | string) ~ ':' ~ v) -%}
+      {%- endfor -%}
+      {%- if bgw_hub_leg_enabled | bool -%}
+      {%-   for v in _bgw_ledger_vnis -%}
+      {%-     set _ = out.append((bgw_asn | string) ~ ':' ~ ((fabric_l2vni_offset | int) + (v | int))) -%}
+      {%-   endfor -%}
+      {%- endif -%}
+      {{ out }}
+
+# Per-site RT policy (plan §3.2.5): listen ranges and route-maps per site, from
+# the NetworkPlacements of each site. Lists go through files (E2BIG, see 055dec4).
+- name: Collect placements, networks and CloudOSOs for the per-site RT policy
+  block:
+    - name: List NetworkPlacements
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: NetworkPlacement
+      register: _bgw_np_all
+      failed_when: false
+
+    - name: List HybridNetworks
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: HybridNetwork
+      register: _bgw_hn_all
+      failed_when: false
+
+    - name: List CloudOSOs
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: CloudOSO
+      register: _bgw_oso_all
+      failed_when: false
+
+    - name: Write planner inputs (lists as files)
+      ansible.builtin.copy:
+        content: "{{ item.data | to_json }}"
+        dest: "/tmp/bgw-{{ bgw_fabric_name }}-{{ item.name }}.json"
+        mode: "0600"
+      loop:
+        - name: placements
+          data: "{{ _bgw_np_all.resources | default([]) }}"
+        - name: networks
+          data: "{{ _bgw_hn_all.resources | default([]) }}"
+        - name: cloudosos
+          data: "{{ _bgw_oso_all.resources | default([]) }}"
+        - name: sites
+          # name, siteCidr, site, legacyCloudOSO (+ wgIp/publicKey: public values)
+          data: "{{ bgw_peers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Plan BGW peer-groups and per-site RT lists
+      ansible.builtin.command:
+        argv: [python3, "{{ role_path }}/files/bgw_rt_policy.py"]
+      environment:
+        FABRIC: "{{ bgw_fabric_name }}"
+        UNDERLAY_CIDR: "{{ bgw_underlay_cidr }}"
+        WG_NETWORK: "{{ bgw_wg_network }}"
+        ALLOWED_RTS: "{{ bgw_allowed_rts | to_json }}"
+        L2VNI_OFFSET: "{{ fabric_l2vni_offset | int }}"
+        HUB_VTEP_BLOCK: "{{ bgw_hub_vtep_block if (bgw_hub_leg_enabled | bool) else '' }}"
+        GATEWAYS_FILE: "/tmp/bgw-{{ bgw_fabric_name }}-sites.json"
+        PLACEMENTS_FILE: "/tmp/bgw-{{ bgw_fabric_name }}-placements.json"
+        NETWORKS_FILE: "/tmp/bgw-{{ bgw_fabric_name }}-networks.json"
+        CLOUDOSOS_FILE: "/tmp/bgw-{{ bgw_fabric_name }}-cloudosos.json"
+      register: _bgw_rt_plan
+      changed_when: false
+  always:
+    - name: Remove planner inputs
+      ansible.builtin.file:
+        path: "/tmp/bgw-{{ bgw_fabric_name }}-{{ item }}.json"
+        state: absent
+      loop: [placements, networks, cloudosos, sites]
+
+- name: Set BGW peer-groups (per-site, or one SPOKES group)
+  ansible.builtin.set_fact:
+    bgw_rt_plan: "{{ _bgw_rt_plan.stdout | from_json }}"
+
+- name: Set BGW listen ranges and peer-groups
+  ansible.builtin.set_fact:
+    bgw_peer_groups: >-
+      {{
+        bgw_rt_plan.groups
+        if (bgw_rt_policy_per_site | bool)
+        else [{'name': 'SPOKES', 'kind': 'all', 'ranges': bgw_rt_plan.spokesRanges, 'rts': [], 'gateway': ''}]
+      }}
+    bgw_listen_ranges: "{{ bgw_rt_plan.groups | map(attribute='ranges') | flatten | list }}"
+    bgw_rt_plan_errors: "{{ bgw_rt_plan.errors | default([]) }}"
+
+# Optional fabric-wide BGP TCP-MD5 (HybridFabric.spec.bgp.authentication.secretRef,
+# key password, Secret in the fabric namespace). Spokes need the same password:
+# EDPM (edpm_frr) and FRR-k8s peers are not configured by this role.
+- name: Read the BGP authentication Secret
+  when: ((bgw_fabric_cr.spec.bgp | default({})).authentication | default({})).secretRef.name | default('') | length > 0
+  block:
+    - name: Read Secret
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ bgw_fabric_cr.spec.bgp.authentication.secretRef.name }}"
+        namespace: "{{ bgw_namespace }}"
+      register: _bgw_bgp_auth
+      no_log: true
+
+    - name: Require the password key
+      ansible.builtin.assert:
+        that:
+          - (_bgw_bgp_auth.resources | default([])) | length > 0
+          - ((_bgw_bgp_auth.resources[0].data | default({})).password | default('')) | length > 0
+        fail_msg: >-
+          HybridFabric {{ bgw_fabric_name }} spec.bgp.authentication.secretRef
+          {{ bgw_namespace }}/{{ bgw_fabric_cr.spec.bgp.authentication.secretRef.name }} is missing or has no key password.
+
+    - name: Keep the BGP password
+      ansible.builtin.set_fact:
+        bgw_bgp_password: "{{ _bgw_bgp_auth.resources[0].data.password | b64decode | trim }}"
+      no_log: true
+
+    - name: Require an FRR-safe password (one word, 1-80 characters)
+      ansible.builtin.assert:
+        that: bgw_bgp_password is match('^[!-~]{1,80}$')
+        fail_msg: "BGP password must be 1-80 printable characters without spaces."
+        quiet: true
+      no_log: true
+
+- name: Default BGP password (authentication off)
+  ansible.builtin.set_fact:
+    bgw_bgp_password: "{{ bgw_bgp_password | default('') }}"
+  no_log: true
 
 - name: Fail when site gateways need WireGuard but the BGW has no key
   when:

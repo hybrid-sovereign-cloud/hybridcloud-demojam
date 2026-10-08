@@ -45,6 +45,7 @@ const KIND_LIST_PATH: Partial<Record<string, string>> = {
   CloudOSO: '/clouds/cloudoso',
   CloudAWS: '/clouds/cloudaws',
   CloudVirt: '/clouds/cloudvirt',
+  CloudInfrastructure: '/clouds/infrastructure',
   Persona: '/personas',
   Rbac: '/operators/rbacs',
   RbacConfig: '/operators/rbacconfigs',
@@ -157,6 +158,14 @@ export function OverviewPage(): React.ReactElement {
                 hint={`${bucket(byKind.get('Team') ?? []).ready} ready`}
                 kind="Team"
                 href="/teams"
+              />
+              <InventoryCard
+                title={t('nav.cloudInfrastructure')}
+                count={(byKind.get('CloudInfrastructure') ?? []).length}
+                hint={`${bucket(byKind.get('CloudInfrastructure') ?? []).ready} ready`}
+                kind="CloudInfrastructure"
+                href="/clouds/infrastructure"
+                status={bucket(byKind.get('CloudInfrastructure') ?? []).failed ? 'danger' : 'default'}
               />
               <InventoryCard
                 title="Platforms"

@@ -1,0 +1,63 @@
+# Platform cloud infrastructure (bring-your-own cloud, design/fabric.md §7).
+# Platform-owned, in sovereign-cloud. Tenant cloud projects (CloudOSO, CloudVirt)
+# and the CloudGateways reference these through spec.cloudRef.
+# Wave 25: after the fabric (20), before tenant clouds (30) and gateways (50).
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: oso1
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+spec:
+  type: openstack
+  displayName: OpenStack site oso1
+  # Admin clouds.yaml (key clouds.yaml), seeded by gitops/infrastructure/security.
+  credentialsRef:
+    vaultPath: oso/accounts/example-admin
+  entityRefs:
+    - name: acme-corp
+  openstack:
+    region: regionOne
+    # Vault key `kubeconfig` for the OpenShift cluster running the OpenStack
+    # control plane (namespace openstack: NetConfig, NodeSets, site gateway VM).
+    managementClusterKubeconfigRef: oso/oso1/mgmt-kubeconfig
+    netConfigRef: openstacknetconfig
+    # Rolled out one NodeSet at a time, in this order.
+    dataplaneNodeSetRefs:
+      - openstack-compute01
+    externalNetwork: public
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: hub-virt
+  namespace: sovereign-cloud
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/local-cluster: "true"
+spec:
+  type: openshift
+  displayName: Hub OpenShift Virtualization
+  entityRefs:
+    - name: acme-corp
+    - name: chad
+  openshift:
+    clusterRef: local
+    bootImage: docker://quay.io/containerdisks/centos-stream:9
+    storageClass: ocs-external-storagecluster-ceph-rbd
+    # CG-NAT defaults for hosted clusters (tenants keep all of RFC1918).
+    hostedClusterCidrDefaults:
+      clusterNetworkPool:
+        cidr: 100.64.0.0/11
+        blockPrefixLength: 14
+      serviceNetworkPool:
+        cidr: 100.96.0.0/11
+        blockPrefixLength: 16

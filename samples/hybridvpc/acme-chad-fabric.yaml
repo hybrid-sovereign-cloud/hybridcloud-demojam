@@ -1,6 +1,8 @@
 # Platform fabric with two tenant entities (design/fabric.md §11).
-# Canonical ZTP path: gitops/apps/platform-fabric (Argo hs-platform-fabric).
-# ZTP omits RHOSO/OSO1 — this sample file also has no CloudOSO gateway/link.
+# Canonical ZTP path: gitops/apps/platform-fabric (Argo hs-platform-fabric), which
+# also registers the OpenStack site (CloudInfrastructure oso1, CloudGateway acme-oso1-gw).
+# This sample covers the hub side only: hub-virt infrastructure, its gateway and
+# the second tenant's CloudVirt project.
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: HybridFabric
@@ -14,9 +16,12 @@ spec:
     - name: acme-corp
     - name: chad
   underlay:
-    nadName: fabric-underlay
+    type: localnet
+    physicalNetworkName: physnet
+    nadName: fabric-localnet
     cidr: 192.168.64.0/18
-    gatewayAddress: 192.168.64.1
+    hubVtepBlock: 192.168.65.0/24
+    hubLegAddress: 192.168.65.1/24
     mtu: 1400
   borderGateway:
     name: fabric-bgw
@@ -28,8 +33,35 @@ spec:
     end: 52127
   transportDefaults:
     mtu: 1442
-    innerMssClamp: 1360
     defaultTunnelType: none
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudInfrastructure
+metadata:
+  name: hub-virt
+  namespace: sovereign-cloud
+spec:
+  type: openshift
+  displayName: Hub OpenShift Virtualization
+  openshift:
+    clusterRef: local
+    storageClass: ocs-external-storagecluster-ceph-rbd
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: CloudGateway
+metadata:
+  name: hub-virt-gw
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/fabric: platform-fabric
+spec:
+  enabled: true
+  fabricRef: platform-fabric
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt
+  transport:
+    type: none
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: Entity
@@ -38,7 +70,7 @@ metadata:
   namespace: sovereign-cloud
 spec:
   billingID: CHAD-2026-001
-  description: Chad tenant — dual-HCP fabric isolation showcase
+  description: Chad tenant — VRF isolation showcase (hub VMs)
 ---
 apiVersion: hybridsovereign.redhat/v1alpha1
 kind: CloudVirt
@@ -46,103 +78,8 @@ metadata:
   name: local-virt
   namespace: entity-chad
 spec:
+  cloudRef:
+    kind: CloudInfrastructure
+    name: hub-virt
   baseDomain: cnv.local
-  enableVRF: false
   storageClass: ocs-external-storagecluster-ceph-rbd
-  vaultPath: virt/accounts/local
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
-  name: acme-hcp1-gw
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: acme-corp
-    hybridsovereign.redhat/fabric: platform-fabric
-    hybridsovereign.redhat/platformopenshift: hcp1
-spec:
-  enabled: true
-  cloud: openshift
-  region: local-virt
-  domainAsn: 65010
-  fabricRef: platform-fabric
-  transport:
-    type: none
-  platformOpenshiftRef: hcp1
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
-  name: chad-hcp2-gw
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: platform-fabric
-    hybridsovereign.redhat/platformopenshift: hcp2
-spec:
-  enabled: true
-  cloud: openshift
-  region: local-virt
-  domainAsn: 65010
-  fabricRef: platform-fabric
-  transport:
-    type: none
-  platformOpenshiftRef: hcp2
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: CloudGateway
-metadata:
-  name: chad-hcp3-gw
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/entity: chad
-    hybridsovereign.redhat/fabric: platform-fabric
-    hybridsovereign.redhat/platformopenshift: hcp3
-spec:
-  enabled: true
-  cloud: openshift
-  region: local-virt
-  domainAsn: 65010
-  fabricRef: platform-fabric
-  transport:
-    type: none
-  platformOpenshiftRef: hcp3
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: acme-hcp1-link
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/platformopenshift: hcp1
-spec:
-  enabled: true
-  fabricRef: platform-fabric
-  cloudGatewayRef: acme-hcp1-gw
-  tunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: chad-hcp2-link
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/platformopenshift: hcp2
-spec:
-  enabled: true
-  fabricRef: platform-fabric
-  cloudGatewayRef: chad-hcp2-gw
-  tunnelType: none
----
-apiVersion: hybridsovereign.redhat/v1alpha1
-kind: TransportLink
-metadata:
-  name: chad-hcp3-link
-  namespace: sovereign-cloud
-  labels:
-    hybridsovereign.redhat/platformopenshift: hcp3
-spec:
-  enabled: true
-  fabricRef: platform-fabric
-  cloudGatewayRef: chad-hcp3-gw
-  tunnelType: none

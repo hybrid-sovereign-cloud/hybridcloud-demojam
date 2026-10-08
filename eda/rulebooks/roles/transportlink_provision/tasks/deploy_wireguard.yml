@@ -3,7 +3,7 @@
 #   BGW side    : this gateway becomes a [Peer] on the border gateway — rendered by
 #                 hybridfabric_provision/tasks/bgw_config.yml from Vault
 #                 (gateway wgPublicKey via CloudGateway.spec.transport.vaultPeerConfigRef).
-#                 The BGW VMI restarts when its peer set changes.
+#                 Peer set changes are pushed into the running BGW (bgw_config_push.yml).
 #   Gateway side: rendered by cloudgateway_provision (cloud-init of fabric-gw-<oso>,
 #                 BGW wgPublicKey via HybridFabric.spec.borderGateway.vaultCredentialRef).
 #   Handshake   : best effort. Without guest access the API only shows whether wg0 is
@@ -13,20 +13,21 @@
 # Sets: tl_tunnel_up, tl_ready, tl_border_endpoint, tl_cloud_endpoint, tl_message
 
 - name: Set wrong-cloud failure reason before validating
-  when: (tl_gateway.spec.cloud | default('')) != 'openstack'
+  when: (rcs_cloud_type | default('')) != 'openstack'
   ansible.builtin.set_fact:
     transportlink_fail_reason: TunnelTypeUnsupported
 
 - name: Wireguard links terminate on a RHOSO site gateway VM
   ansible.builtin.assert:
     that:
-      - (tl_gateway.spec.cloud | default('')) == 'openstack'
+      - (rcs_cloud_type | default('')) == 'openstack'
       - ((tl_fabric.spec.borderGateway | default({})).loopback | default('')) | length > 0
     fail_msg: >-
-      TransportLink {{ transportlink_cr_name }} tunnelType=wireguard needs a cloud=openstack
-      CloudGateway and a HybridFabric with spec.borderGateway (HCP spokes use tunnelType none).
+      TransportLink {{ transportlink_cr_name }} tunnelType=wireguard needs a CloudGateway on an
+      openstack site (cloudRef to a CloudInfrastructure type openstack) and a HybridFabric with
+      spec.borderGateway (other sites use transport none).
 
-- name: Render the BGW peer set (restarts the BGW VMI when it changed)
+- name: Render the BGW peer set (pushed in place; VMI restart only as fallback)
   ansible.builtin.include_role:
     name: hybridfabric_provision
     tasks_from: bgw_config.yml
@@ -64,47 +65,27 @@
 
 - name: Read the site gateway VMI on the RHOSO management cluster (best effort)
   block:
-    - name: Read CloudOSO for the management cluster kubeconfig ref
-      kubernetes.core.k8s_info:
-        host: "{{ services_api_host }}"
-        api_key: "{{ services_bearer_token }}"
-        validate_certs: false
-        api_version: hybridsovereign.redhat/v1alpha1
-        kind: CloudOSO
-        name: "{{ tl_gateway.spec.openstackCloudOSORef | default('') }}"
-      register: tl_cloudoso
-
-    - name: Resolve management cluster kubeconfig ref
+    - name: Resolve management cluster kubeconfig ref (CloudInfrastructure, else deprecated fields)
       ansible.builtin.set_fact:
-        tl_mgmt_ref: >-
-          {{
-            tl_gateway.spec.managementClusterKubeconfigRef
-            | default(((tl_cloudoso.resources | default([]) + [{}])[0].spec | default({})).managementClusterKubeconfigRef | default(''), true)
-            | default('oso/' ~ tl_gateway.spec.openstackCloudOSORef ~ '/mgmt-kubeconfig', true)
-          }}
-
-    - name: Read management cluster kubeconfig from Vault
-      when: tl_mgmt_ref | length > 0
-      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/vault_kv_read.yml"
-      vars:
-        vault_kv_path: "{{ tl_mgmt_ref }}"
+        tl_mgmt_ref: "{{ rcs_mgmt_kubeconfig_ref | default('', true) }}"
 
     - name: Write management cluster kubeconfig
       when: tl_mgmt_ref | length > 0
-      ansible.builtin.copy:
-        content: "{{ vault_kv_data.kubeconfig }}"
-        dest: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
-        mode: "0600"
-      no_log: true
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/cloudinfra_mgmt_kubeconfig.yml"
+      vars:
+        ci_kubeconfig_ref: "{{ tl_mgmt_ref }}"
+        ci_kubeconfig_dest: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
 
     - name: Read site gateway VMI
-      when: tl_mgmt_ref | length > 0
+      when:
+        - tl_mgmt_ref | length > 0
+        - ci_kubeconfig_ok | default(false) | bool
       kubernetes.core.k8s_info:
         kubeconfig: "/tmp/tl-{{ transportlink_cr_name }}-mgmt-kubeconfig"
         validate_certs: false
         api_version: kubevirt.io/v1
         kind: VirtualMachineInstance
-        name: "fabric-gw-{{ tl_gateway.spec.openstackCloudOSORef }}"
+        name: "fabric-gw-{{ rcs_site_name }}"
         namespace: "{{ tl_oso_namespace }}"
       register: tl_gw_vmi
   rescue:
@@ -132,14 +113,14 @@
 
 - name: Set restart note
   ansible.builtin.set_fact:
-    tl_restart_note: "{{ ', BGW restarted for new peer set' if (bgw_vmi_restarted | default(false) | bool) else '' }}"
+    tl_restart_note: "{{ (', BGW ' ~ bgw_apply_note) if (bgw_apply_note | default('') | length > 0) else '' }}"
 
 - name: Set WireGuard Ready facts
   ansible.builtin.set_fact:
     tl_tunnel_up: "{{ (tl_bgw_wg0 | bool) and (tl_gw_wg0 | bool) }}"
     tl_ready: true
     tl_border_endpoint: "{{ bgw_endpoint }}"
-    tl_cloud_endpoint: "{{ (tl_gateway.spec.wireguard | default({})).address | default('') }}"
+    tl_cloud_endpoint: "{{ (tl_gateway.spec.wireguard | default({})).address | default((bgw_wg_gateway_addresses | default({})).get(tl_gateway.metadata.name, ''), true) }}"
     tl_message: >-
       tunnelType=wireguard: {{ tl_gateway.metadata.name }} is peer
       {{ (bgw_peers | selectattr('name', 'equalto', tl_gateway.metadata.name) | first).wgIp }}

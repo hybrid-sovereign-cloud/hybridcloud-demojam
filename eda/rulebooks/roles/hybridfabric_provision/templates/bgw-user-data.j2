@@ -57,6 +57,13 @@ write_files:
 
     [ipv6]
     method=disabled
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+- path: /etc/NetworkManager/system-connections/hubleg.nmconnection
+  permissions: '0600'
+  owner: root:root
+  content: |
+    {{ bgw_hubleg_nm | indent(4) }}
+{% endif %}
 - path: /etc/NetworkManager/system-connections/management.nmconnection
   permissions: '0600'
   content: |
@@ -164,4 +171,8 @@ write_files:
   content: |
     {{ lookup('file', role_path ~ '/files/fabric-bgw-setup.sh') | indent(4) }}
 runcmd:
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+# Hub leg first (fabric-bgw-setup.sh enables the guest agent last = Ready signal).
+- [sh, -c, "nmcli -t -f NAME,DEVICE con show | awk -F: '$2==\"eth2\" && $1!=\"hubleg\"{print $1}' | while read -r c; do nmcli con delete \"$c\"; done; nmcli con reload; nmcli con up hubleg || true"]
+{% endif %}
 - /usr/local/sbin/fabric-bgw-setup.sh

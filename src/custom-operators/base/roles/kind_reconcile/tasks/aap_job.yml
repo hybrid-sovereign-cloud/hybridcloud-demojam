@@ -1,6 +1,36 @@
 ---
 # AAP job launch / reconcile — anti-loop + 3h stale cancel+relaunch
 # On delete: launch *-teardown and fail (keep finalizer) until deletionComplete.
+#
+# State machine (non-delete). G = metadata.generation (live read). The launch
+# patch records J = status.aapJob.generation = G of that run; EDA merge-patches
+# status without aapJob, so J survives the playbook. observedGeneration is NOT
+# a launch key: EDA provision roles stamp it from the CR they read.
+#   tracked job          ready  J vs G / reconcileNow   action
+#   none                 -      -                       launch(G)
+#   running, <= 3h       -      any                     wait (no cancel; a spec
+#                                                       change is applied by one
+#                                                       relaunch after it ends)
+#   running, > 3h        -      any                     cancel + launch(G)
+#   failed/canceled/404  -      any                     launch(G)
+#   successful           true   J == G, no reconcileNow "End after ready"
+#   successful           true   J != G                  launch(G)
+#   successful           true   reconcileNow consumed   launch(G)
+#   successful           false  any                     launch(G) (PendingPrereq
+#                                                       retry, unchanged)
+# A job launched for N that finishes while the CR is at N+1 (or N+5) relaunches
+# exactly once: that launch writes J = current G, so the next success with
+# ready=true matches and ends. reconcileNow only forces when main.yml removed
+# the annotation, so it fires once per set; it is dropped while a job runs.
+# Jobs launched by older images carry no J: they are adopted as J = G (old
+# behaviour, recorded on the next "End after ready") instead of relaunching
+# every ready CR at once on image rollout. A spec change applied before the new
+# image has adopted a CR still needs one reconcileNow.
+#
+# Delete path (unchanged decisions, J ignored): track/launch *-teardown, keep
+# the finalizer by failing the run, wait in-run for the teardown job
+# (wait_teardown.yml) and release once status.deletionComplete is true
+# (release_finalizer.yml).
 - name: Compute now UTC
   ansible.builtin.set_fact:
     now_epoch: "{{ now(utc=true, fmt='%s') | int }}"
@@ -41,21 +71,29 @@
     job_age_seconds: "{{ (now_epoch | int) - (cur_job_started | to_datetime('%Y-%m-%dT%H:%M:%SZ')).strftime('%s') | int }}"
   ignore_errors: true
 
+- name: Generation of the tracked job (legacy jobs without one are adopted as current)
+  ansible.builtin.set_fact:
+    cur_job_generation: "{{ (cur_job_generation_raw | int) if (cur_job_generation_raw | length > 0) else (hs_generation | int) }}"
+
 - name: Decide action
   ansible.builtin.set_fact:
+    job_generation_current: "{{ (cur_job_generation | int) == (hs_generation | int) }}"
     job_is_success: "{{ aap_job_status == 'successful' }}"
     job_is_running: "{{ aap_job_status in ['pending', 'waiting', 'running'] }}"
     job_is_failed: "{{ aap_job_status in ['failed', 'error', 'canceled', 'missing'] }}"
     tracked_is_teardown: "{{ (teardown_template_name in (aap_job_name | default(''))) | bool }}"
 
 # Playbook owns ready/message (PendingPrereq / EvpnPrepPending may exit 0 with ready=false).
-# Only treat AAP success as terminal when the CR is already ready from the playbook.
+# Only treat AAP success as terminal when the CR is already ready from the playbook
+# AND the job was launched for the current generation (see state machine above).
 # Use == true (not bare | bool) so string/bool false from the API never looks ready.
 - name: Record successful AAP job when playbook already marked CR ready
   when:
     - job_is_success | bool
     - not (is_delete | bool)
     - (hs_status.ready | default(false) | bool) == true
+    - job_generation_current | bool
+    - not (hs_reconcile_now | default(false) | bool)
   block:
     - name: Patch aapJob only (preserve playbook ready/message)
       operator_sdk.util.k8s_status:
@@ -63,29 +101,28 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': hs_generation | int} }}"
+        status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'generation': hs_generation | int, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': hs_generation | int} }}"
     - name: End after ready
       ansible.builtin.meta: end_play
 
-- name: Keep aapJob successful but allow relaunch when playbook left CR not ready
+- name: Keep aapJob successful but allow relaunch when playbook left CR not ready or spec moved on
   when:
     - job_is_success | bool
     - not (is_delete | bool)
-    - (hs_status.ready | default(false) | bool) != true
   operator_sdk.util.k8s_status:
     api_version: "{{ hs_api_version }}"
     kind: "{{ hs_kind }}"
     name: "{{ hs_name }}"
     namespace: "{{ hs_namespace }}"
-    status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': hs_generation | int} }}"
+    status: "{{ {'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'generation': cur_job_generation | int, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}, 'observedGeneration': cur_job_generation | int} }}"
 
+# main.yml already releases when deletionComplete was set at the start of the run;
+# kept for runs that reach here with it set (e.g. included without main.yml's check).
 - name: On delete — allow finalizer clear only after deletionComplete
   when:
     - is_delete | bool
     - deletion_complete | bool
-  block:
-    - name: Teardown complete — release finalizer
-      ansible.builtin.meta: end_play
+  ansible.builtin.include_tasks: release_finalizer.yml
 
 - name: No-op while job running within 3h window
   when:
@@ -93,19 +130,26 @@
     - (job_age_seconds | int) <= (job_stale_seconds | int)
     - (not (is_delete | bool)) or (tracked_is_teardown | bool)
   block:
+    # observedGeneration = generation the running job was launched for, so a spec
+    # change during the run is not reported as observed.
     - name: Keep reconciling status while AAP runs
       operator_sdk.util.k8s_status:
         api_version: "{{ hs_api_version }}"
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('Waiting for AAP teardown job ', 'Waiting for AAP job ')) ~ cur_job_id, 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': aap_job_status, 'startedAt': cur_job_started, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('Waiting for AAP teardown job ', 'Waiting for AAP job ')) ~ cur_job_id ~ (((is_delete | bool) or (job_generation_current | bool)) | ternary('', ' (launched for generation ' ~ cur_job_generation ~ '; generation ' ~ hs_generation ~ ' relaunches when it ends)')), 'observedGeneration': cur_job_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': aap_job_status, 'startedAt': cur_job_started, 'generation': cur_job_generation | int, 'url': aap_host ~ '/execution/jobs/playbook/' ~ cur_job_id ~ '/details'}} }}"
     - name: End while provision running
       ansible.builtin.meta: end_play
       when: not (is_delete | bool)
+    - name: Wait in-run for the teardown job and release if it completed
+      ansible.builtin.include_tasks: wait_teardown.yml
+      vars:
+        hs_wait_job_id: "{{ cur_job_id }}"
+      when: is_delete | bool
     - name: Keep finalizer while teardown running
       ansible.builtin.fail:
-        msg: "Waiting for AAP teardown job {{ cur_job_id }} ({{ aap_job_status }})"
+        msg: "Waiting for AAP teardown job {{ cur_job_id }} ({{ hs_wait_job_status | default(aap_job_status) }})"
       when: is_delete | bool
 
 - name: Decide whether to launch
@@ -132,8 +176,11 @@
             (aap_job_status == 'none') or
             (hs_force_hourly_retry | default(false) | bool) or
             (
-              job_is_success | bool and
-              not (hs_status.ready | default(false) | bool)
+              job_is_success | bool and (
+                not (hs_status.ready | default(false) | bool) or
+                not (job_generation_current | bool) or
+                (hs_reconcile_now | default(false) | bool)
+              )
             ) or
             (
               job_is_running | bool and
@@ -180,13 +227,21 @@
     - not (deletion_complete | bool)
     - not (need_launch | bool)
   block:
+    # The job usually finished after main.yml read the CR and EDA has written
+    # deletionComplete since: re-read and release now instead of failing into
+    # another backoff interval.
+    - name: Re-read CR for deletionComplete written after this run started
+      ansible.builtin.include_tasks: wait_teardown.yml
+      vars:
+        hs_wait_job_id: "{{ cur_job_id }}"
+        hs_wait_poll: false
     - name: Status awaiting deletionComplete
       operator_sdk.util.k8s_status:
         api_version: "{{ hs_api_version }}"
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'Teardown job succeeded; waiting for deletionComplete', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started}} }}"
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': 'Teardown job succeeded; waiting for deletionComplete', 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': cur_job_id | string, 'status': 'successful', 'startedAt': cur_job_started, 'generation': cur_job_generation | int}} }}"
     - name: Keep finalizer until deletionComplete
       ansible.builtin.fail:
         msg: Waiting for status.deletionComplete after teardown job {{ cur_job_id }}
@@ -268,11 +323,18 @@
         kind: "{{ hs_kind }}"
         name: "{{ hs_name }}"
         namespace: "{{ hs_namespace }}"
-        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('AAP teardown job launched', 'AAP job launched')), 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': jt_launch.json.id | string, 'status': jt_launch.json.status | default('pending'), 'startedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'url': aap_host ~ '/execution/jobs/playbook/' ~ (jt_launch.json.id | string) ~ '/details'}} }}"
+        # aapJob.generation is the launch key read back by the state machine above.
+        status: "{{ {'phase': 'reconciling', 'ready': false, 'message': ((is_delete | bool) | ternary('AAP teardown job launched', 'AAP job launched')), 'observedGeneration': hs_generation | int, 'aapJob': {'jobId': jt_launch.json.id | string, 'status': jt_launch.json.status | default('pending'), 'startedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'generation': hs_generation | int, 'url': aap_host ~ '/execution/jobs/playbook/' ~ (jt_launch.json.id | string) ~ '/details'}} }}"
 
     - name: End after provision launch
       ansible.builtin.meta: end_play
       when: not (is_delete | bool)
+
+    - name: Wait in-run for the new teardown job and release if it completed
+      ansible.builtin.include_tasks: wait_teardown.yml
+      vars:
+        hs_wait_job_id: "{{ jt_launch.json.id | string }}"
+      when: is_delete | bool
 
     - name: Keep finalizer after teardown launch
       ansible.builtin.fail:

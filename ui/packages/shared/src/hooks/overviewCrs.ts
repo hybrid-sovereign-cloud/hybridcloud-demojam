@@ -25,6 +25,7 @@ export const PLUGINS_NS = 'sovereign-cloud-plugins';
 
 const PLATFORM_KINDS: HybridSovereignKind[] = [
   'Entity',
+  'CloudInfrastructure',
   'HybridFabric',
   'CloudGateway',
   'TransportLink',

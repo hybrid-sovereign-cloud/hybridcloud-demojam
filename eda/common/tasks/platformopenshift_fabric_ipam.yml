@@ -1,78 +1,33 @@
 ---
-# PlatformOpenshift pod/service CIDRs (design/fabric.md §16). Cluster CIDR
-# selection is not a fabric concern: these CIDRs are never advertised into the
-# fabric. Candidates, in order: recorded status.networking (kept as-is), explicit
-# spec.networking, else a new block from the default ranges
-# (CloudVirt.spec.hostedClusterCidrDefaults, else role vars
-# po_default_cluster_network_pool / po_default_service_network_pool: CG-NAT
-# 100.64.0.0/11 /14 and 100.96.0.0/11 /16), else HyperShift defaults when
-# allocateFromFabric is false.
+# PlatformOpenshift pod/service CIDRs (design/fabric.md §16). Not a fabric
+# concern (hosted clusters do not join the HybridFabric, plan decision 6; the
+# file keeps its name because the eda/platformopenshift DE copy includes it).
+# Candidates, in order: recorded status.networking (kept as-is), explicit
+# spec.networking, else a new block from the default ranges:
+#   CloudVirt (spec.hosted.environment) -> spec.cloudRef -> CloudInfrastructure
+#   spec.openshift.hostedClusterCidrDefaults; deprecated: CloudVirt
+#   spec.hostedClusterCidrDefaults; else role vars po_default_cluster_network_pool /
+#   po_default_service_network_pool (CG-NAT 100.64.0.0/11 /14 and 100.96.0.0/11 /16),
+# else HyperShift defaults when spec.networking.allocateFromFabric (deprecated
+# name, means "allocate") is false.
 #
 # Overlap rules (common/files/fabric_cluster_ipam.py):
 #   - pod/service CIDRs must not overlap the hub's own pod/service CIDRs
 #   - pod/service CIDRs must not overlap other PlatformOpenshift pod/service CIDRs
 #     (role var po_deny_peer_cidr_overlap, default true)
-#   - no check against overlay (HybridNetwork) prefixes; NetworkPlacement does that
-#   - CIDRs outside the default ranges: ipamCondition LegacyClusterCidrs (still joins)
-# No node/machine blocks are allocated; status.networking.underlay reports the
-# fabric underlay segment (HybridFabric.spec.underlay) for visibility.
+#   - CIDRs outside the default ranges: ipamCondition LegacyClusterCidrs (kept)
 #
 # Sets facts: po_cluster_networks, po_service_networks, po_machine_networks,
-#   po_networking_fabric_ref, po_networking_allocation_source,
-#   po_networking_conflict_check (passed|failed), po_networking_legacy
+#   po_networking_allocation_source, po_networking_conflict_check (passed|failed),
+#   po_networking_legacy
 # Fails the play on conflict unless spec.networking.allowConflict.
 
-- name: Read PlatformOpenshift networking + fabric intent
+- name: Read PlatformOpenshift networking intent
   ansible.builtin.set_fact:
     _po_net: "{{ platformopenshift_cr.resources[0].spec.networking | default({}) }}"
-    _po_fabric: "{{ platformopenshift_cr.resources[0].spec.fabric | default({}) }}"
     _po_existing_net_status: "{{ platformopenshift_cr.resources[0].status.networking | default({}) }}"
     _po_allocate: "{{ (platformopenshift_cr.resources[0].spec.networking.allocateFromFabric | default(true)) | bool }}"
     _po_allow_conflict: "{{ (platformopenshift_cr.resources[0].spec.networking.allowConflict | default(false)) | bool }}"
-
-- name: List HybridFabric CRs on services cluster
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: hybridsovereign.redhat/v1alpha1
-    kind: HybridFabric
-    namespace: sovereign-cloud
-  register: _all_fabrics
-  failed_when: false
-
-- name: Select fabric for IPAM
-  ansible.builtin.set_fact:
-    po_networking_fabric_ref: >-
-      {{
-        _po_net.fabricRef
-        | default(_po_fabric.preferredFabricRef | default('', true), true)
-        | default((_po_fabric.fabricRefs | default([]) | first) | default('', true), true)
-        | default(
-            (
-              (_all_fabrics.resources | default([]))
-              | selectattr('status.ready', 'defined')
-              | selectattr('status.ready')
-              | map(attribute='metadata.name')
-              | list
-              | first
-            ) if (_all_fabrics.resources | default([]) | length) > 0 else '',
-            true
-          )
-      }}
-
-- name: Load selected HybridFabric underlay
-  ansible.builtin.set_fact:
-    _po_underlay: >-
-      {{
-        (
-          (_all_fabrics.resources | default([]))
-          | selectattr('metadata.name', 'equalto', po_networking_fabric_ref | default(''))
-          | list
-          | first
-          | default({}, true)
-        ).spec.underlay | default({})
-      }}
 
 - name: Read CloudVirt for hosted-cluster CIDR defaults (hosted clusters)
   when: (platform_spec.type | default('')) == 'hosted'
@@ -87,6 +42,19 @@
   register: _po_cloudvirt
   failed_when: false
 
+- name: Read the CloudVirt's CloudInfrastructure
+  when: (((_po_cloudvirt.resources | default([]) + [{}])[0].spec | default({})).cloudRef | default({}, true)).name | default('') | length > 0
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudInfrastructure
+    name: "{{ _po_cloudvirt.resources[0].spec.cloudRef.name }}"
+    namespace: sovereign-cloud
+  register: _po_cloudinfra
+  failed_when: false
+
 - name: Resolve default pod/service ranges
   ansible.builtin.set_fact:
     _po_pools: >-
@@ -96,6 +64,7 @@
           'serviceNetworkPool': po_default_service_network_pool | default({'cidr': '100.96.0.0/11', 'blockPrefixLength': 16})
         }
         | combine(((_po_cloudvirt.resources | default([]) + [{}])[0].spec | default({})).hostedClusterCidrDefaults | default({}), recursive=True)
+        | combine((((_po_cloudinfra.resources | default([]) + [{}])[0].spec | default({})).openshift | default({})).hostedClusterCidrDefaults | default({}), recursive=True)
       }}
 
 # (a) HyperShift on KubeVirt: hosted cluster CIDRs must not overlap the hub's.
@@ -177,10 +146,9 @@
         clusterNetwork: "{{ po_cluster_networks }}"
         serviceNetwork: "{{ po_service_networks }}"
         machineNetwork: "{{ po_machine_networks | default([]) }}"
-        underlay:
-          nadName: "{{ _po_underlay.nadName | default('') }}"
-          cidr: "{{ _po_underlay.cidr | default('') }}"
-        fabricRef: "{{ po_networking_fabric_ref | default('') }}"
+        # No fabric join any more: clear the fields the fabric-join era wrote.
+        underlay: null
+        fabricRef: null
         allocationSource: "{{ po_networking_allocation_source }}"
         conflictCheck: "{{ po_networking_conflict_check }}"
         conflictMessage: "{{ _po_plan.conflicts | join('; ') }}"

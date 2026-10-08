@@ -12,6 +12,7 @@ export const ADMIN_LIST_PATH: Partial<Record<HybridSovereignKind, string>> = {
   CloudOSO: `${PREFIX}/clouds/cloudoso`,
   CloudAWS: `${PREFIX}/clouds/cloudaws`,
   CloudVirt: `${PREFIX}/clouds/cloudvirt`,
+  CloudInfrastructure: `${PREFIX}/clouds/infrastructure`,
   Persona: `${PREFIX}/personas`,
   Rbac: `${PREFIX}/operators/rbacs`,
   RbacConfig: `${PREFIX}/operators/rbacconfigs`,
@@ -29,6 +30,7 @@ export const ADMIN_LIST_PATH: Partial<Record<HybridSovereignKind, string>> = {
 
 const CLUSTER_SCOPED: HybridSovereignKind[] = [
   'Entity',
+  'CloudInfrastructure',
   'HybridFabric',
   'CloudGateway',
   'TransportLink',

@@ -90,7 +90,7 @@ export default AdminEntitiesPage;
 export const makeKindListPage = (
   kind: HybridSovereignKind,
   title: string,
-  opts?: { createKind?: string; listPath?: string },
+  opts?: { createKind?: string; listPath?: string; namespace?: string },
 ): React.FC => {
   const listPath = opts?.listPath ?? `/hybridsovereign/${KIND_PLURALS[kind] ?? kind.toLowerCase()}`;
   const Page: React.FC = () => {
@@ -99,7 +99,7 @@ export const makeKindListPage = (
     const [search, setSearch] = React.useState('');
     const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
     const { items, loading, error, refresh } = useK8sResourceList<SovereignResource>(kind, {
-      ...(kind === 'Entity' ? { namespace: ENTITY_NS } : {}),
+      ...(kind === 'Entity' ? { namespace: ENTITY_NS } : opts?.namespace ? { namespace: opts.namespace } : {}),
     });
     const kindTitle = t(`kinds.${kind}`, { defaultValue: title });
 
@@ -117,7 +117,7 @@ export const makeKindListPage = (
         return `/hybridsovereign/entities/${encodeURIComponent(n)}`;
       }
       if (
-        kind === 'HybridFabric' ||
+        kind === 'CloudInfrastructure' || kind === 'HybridFabric' ||
         kind === 'CloudGateway' ||
         kind === 'TransportLink' ||
         kind === 'UIHealthChecker'

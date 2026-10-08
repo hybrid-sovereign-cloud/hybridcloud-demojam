@@ -6,8 +6,9 @@
 #
 # Border gateway fabrics (spec.borderGateway.loopback): the BGW is a VM, so the
 # probe runs on the spoke side instead:
-#   OpenShift backends: `show bgp neighbor <loopback> json` in an frr-k8s pod
-#   on the spoke must report Established.
+#   CloudVirt (hub CNV): `show bgp l2vpn evpn summary json` in every hub frr-k8s
+#   pod must show the loopback Established (every hub node is a VTEP); a remote
+#   spoke (np_spoke_kubeconfig_file) uses `show bgp neighbor <loopback> json`.
 #   CloudOSO: the EVPN router's HA chassis group must be populated
 #   (np_evpn_ha_chassis_ok from backend_rhoso_ovn_evpn.yml).
 # Legacy fabrics (routeReflectors[]): hub RR `show bgp l2vpn evpn summary`,
@@ -42,11 +43,88 @@
     np_validated: false
     np_validated_message: "Not validated: backend was not applied."
 
+# CloudVirt (hub CNV): the spoke is the hub itself (services cluster). Every hub
+# node is a VTEP, so every frr-k8s pod must have its l2vpn evpn session to the
+# BGW Established. Hub nodes peer with the BGW hub-leg address (on-link), not the
+# loopback (cloudgateway_provision hub-vtep-frr.yaml.j2).
+- name: Probe BGW EVPN sessions from the hub frr-k8s pods
+  when:
+    - np_backend_applied | default(false) | bool
+    - np_probe_bgw | length > 0
+    - np_spec.backend.kind == 'CloudVirt'
+    - (np_spoke_kubeconfig_file | default('')) | length == 0
+  block:
+    - name: Resolve the hub BGP peer (BGW hub-leg address)
+      ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/hub_evpn_names.yml"
+      vars:
+        hen_fabric: "{{ hn_all_fabrics_detail }}"
+
+    - name: List frr-k8s pods on the hub
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Pod
+        namespace: openshift-frr-k8s
+        label_selectors:
+          - app=frr-k8s
+        field_selectors:
+          - status.phase=Running
+      register: np_hub_frr_pods
+      failed_when: false
+
+    - name: Show the l2vpn evpn summary in each hub frr-k8s pod
+      kubernetes.core.k8s_exec:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        namespace: openshift-frr-k8s
+        pod: "{{ item.metadata.name }}"
+        container: frr
+        command: vtysh -c 'show bgp l2vpn evpn summary json'
+      loop: "{{ np_hub_frr_pods.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.spec.nodeName | default(item.metadata.name) }}"
+      register: np_hub_evpn_summary
+      failed_when: false
+
+    # FRR prints {"peers": {...}} for one address family; some builds nest it per
+    # family ({"l2VpnEvpn": {"peers": ...}}). Non-JSON output counts as unknown.
+    - name: Evaluate the BGW session state per hub node
+      ansible.builtin.set_fact:
+        np_hub_bgw_states: >-
+          {%- set out = {} -%}
+          {%- for r in np_hub_evpn_summary.results | default([]) -%}
+          {%-   set node = r.item.spec.nodeName | default(r.item.metadata.name) -%}
+          {%-   set txt = (r.stdout | default('') | trim) -%}
+          {%-   if txt is match('^\{') -%}
+          {%-     set d = txt | from_json -%}
+          {%-     set peers = d.peers | default((d.l2VpnEvpn | default({})).peers | default({}, true), true) -%}
+          {%-     set _ = out.update({node: (peers.get(hen_hub_peer, {})).state | default('NoSession', true)}) -%}
+          {%-   else -%}
+          {%-     set _ = out.update({node: 'unknown'}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Set validation result from the hub sessions
+      vars:
+        _down: "{{ np_hub_bgw_states | dict2items | rejectattr('value', 'equalto', 'Established') | map(attribute='key') | list }}"
+      ansible.builtin.set_fact:
+        np_validated: "{{ (np_hub_bgw_states | length > 0) and (_down | length == 0) }}"
+        np_validated_message: >-
+          BGP probe {{ 'PASS' if ((np_hub_bgw_states | length > 0) and (_down | length == 0)) else 'FAIL' }}:
+          l2vpn evpn session to the border gateway hub leg {{ hen_hub_peer }} Established on
+          {{ (np_hub_bgw_states | length) - (_down | length) }}/{{ np_hub_bgw_states | length }} hub frr-k8s pods
+          {{- (' (not Established: ' ~ (_down | join(', ')) ~ ' '
+               ~ (np_hub_bgw_states | to_json) ~ ')') if (_down | length > 0) else '' }}.
+
 - name: Probe BGW session from the OpenShift spoke (frr-k8s)
   when:
     - np_backend_applied | default(false) | bool
     - np_probe_bgw | length > 0
-    - np_spec.backend.kind in ['PlatformOpenshift', 'CloudVirt']
+    - np_spec.backend.kind == 'CloudVirt'
     - (np_spoke_kubeconfig_file | default('')) | length > 0
   block:
     - name: List frr-k8s pods on the spoke

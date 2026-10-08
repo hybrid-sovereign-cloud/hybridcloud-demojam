@@ -73,6 +73,12 @@ spec:
     nodePoolReplicas: 2
 ```
 
+## Networking
+
+`spec.networking.clusterNetwork` / `serviceNetwork` are used as given. When omitted, the pod and service CIDRs are allocated from the CloudInfrastructure's `hostedClusterCidrDefaults` (CG-NAT `100.64.0.0/10` by default) and checked against the hub and the other clusters. `status.networking` shows the result.
+
+Clusters do not join the hybrid fabric: `spec.fabric`, `spec.networking.allocateFromFabric` and `spec.networking.fabricRef` are deprecated, ignored, and removed when validation is tightened. To connect tenant workloads to a HybridNetwork, place it on a CloudOSO, CloudVirt or CloudAWS project ([fabric.md](fabric.md#networkplacement)).
+
 ## Status to watch
 
 ```bash

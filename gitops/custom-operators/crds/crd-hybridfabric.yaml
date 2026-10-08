@@ -1,3 +1,9 @@
+# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
+# permissive: deprecated fields are still accepted. Tightening markers:
+#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
+#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
+#   TIGHTEN-LATER-REMOVE at end of line               line to delete
+# Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -26,7 +32,9 @@ spec:
       storage: true
       schema:
         openAPIV3Schema:
-          description: Platform EVPN fabric configuration for Hybrid VPC.
+          description: >-
+            Platform EVPN fabric: one per hub. Tenants are VRFs on it (HybridNetwork: VNI + route target);
+            sites attach through CloudGateways.
           type: object
           properties:
             apiVersion:
@@ -37,14 +45,27 @@ spec:
               type: object
             spec:
               type: object
+              # >>> TIGHTEN-LATER-ADD
+              # required: [domainAsn, vniPool, underlay, borderGateway]
+              # x-kubernetes-validations:
+              #   - rule: "self.domainAsn <= 65535 || self.vniPool.end <= 65535"
+              #     message: with a 4-byte domainAsn the route target (ASN:VNI) limits vniPool.end to 65535
+              # <<< TIGHTEN-LATER-ADD
               properties:
                 enabled:
                   type: boolean
                   default: false
                 domainAsn:
                   type: integer
+                  description: Fabric BGP autonomous system (iBGP between the border gateway and all sites).
                   minimum: 1
                   maximum: 4294967295
+                  # >>> TIGHTEN-LATER-ADD
+                  # x-kubernetes-validations:
+                  #   - rule: self == oldSelf
+                  #     message: domainAsn is immutable
+                  # <<< TIGHTEN-LATER-ADD
+                # >>> TIGHTEN-LATER-DROP
                 routeReflectors:
                   type: array
                   description: >-
@@ -61,22 +82,66 @@ spec:
                         type: string
                         description: >-
                           Optional node pin for the route-reflector pod (deprecated).
+                # <<< TIGHTEN-LATER-DROP
                 vniPool:
                   type: object
+                  description: VNI range allocated to HybridNetworks (one VNI per tenant VRF).
                   required: [start, end]
+                  # >>> TIGHTEN-LATER-ADD
+                  # x-kubernetes-validations:
+                  #   - rule: self.start <= self.end
+                  #     message: vniPool.start must not exceed vniPool.end
+                  #   - rule: self == oldSelf
+                  #     message: vniPool is immutable
+                  # <<< TIGHTEN-LATER-ADD
                   properties:
                     start:
                       type: integer
+                      # >>> TIGHTEN-LATER-ADD
+                      # minimum: 1
+                      # maximum: 16777215
+                      # <<< TIGHTEN-LATER-ADD
                     end:
                       type: integer
-                # Platform-owned CIDR pools so each PlatformOpenshift (and VTEP underlay)
-                # on this fabric gets non-overlapping address space.
+                      # >>> TIGHTEN-LATER-ADD
+                      # minimum: 1
+                      # maximum: 16777215
+                      # <<< TIGHTEN-LATER-ADD
                 underlay:
                   type: object
                   description: >-
-                    Hub underlay segment shared by the border gateway and member cluster nodes (OVN-K layer2
-                    network without IPAM). Fabric-wide unique.
+                    Fabric underlay address plan and the border gateway's underlay leg on the hub. Site underlays
+                    and hub VTEP addresses are carved from cidr; fabric-wide unique.
+                  # >>> TIGHTEN-LATER-ADD
+                  # required: [cidr]
+                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: "(has(self.type) && self.type == 'localnet') || (!has(self.hubVtepBlock) && !has(self.hubLegAddress))"
+                      message: underlay.hubVtepBlock and underlay.hubLegAddress require underlay.type localnet
+                    - rule: "!(has(self.type) && self.type == 'localnet' && has(self.dhcpRange))"
+                      message: underlay.dhcpRange is not allowed with type localnet (DHCP would be served on the node network)
+                    - rule: "!has(self.hubVtepBlock) || !has(self.cidr) || !isCIDR(self.cidr) || !isCIDR(self.hubVtepBlock) || (cidr(self.cidr).containsIP(cidr(self.hubVtepBlock).masked().ip()) && cidr(self.hubVtepBlock).prefixLength() >= cidr(self.cidr).prefixLength())"
+                      message: underlay.hubVtepBlock must lie inside underlay.cidr
+                    - rule: "!has(self.hubLegAddress) || !has(self.cidr) || !isCIDR(self.cidr) || !isCIDR(self.hubLegAddress) || cidr(self.cidr).containsIP(cidr(self.hubLegAddress).ip())"
+                      message: underlay.hubLegAddress must lie inside underlay.cidr
                   properties:
+                    type:
+                      type: string
+                      description: >-
+                        How the border gateway's underlay NIC (network attachment nadName) attaches on the hub.
+                        ovn-layer2: OVN-Kubernetes layer2 network without IPAM; the gateway holds gatewayAddress and
+                        serves dhcpRange. localnet: OVN-Kubernetes localnet network on the node bridge mapped to
+                        physicalNetworkName; the gateway holds hubLegAddress, hub nodes use addresses from
+                        hubVtepBlock as EVPN VTEPs, and no DHCP is served.
+                      enum: [ovn-layer2, localnet]
+                      default: ovn-layer2
+                    physicalNetworkName:
+                      type: string
+                      maxLength: 253
+                      default: physnet
+                      description: >-
+                        type localnet only. OVN bridge mapping name; physnet maps to the node's external bridge
+                        (br-ex) by default.
                     nadName:
                       type: string
                       description: Network attachment name; unique per fabric.
@@ -84,12 +149,47 @@ spec:
                     cidr:
                       type: string
                       description: Underlay CIDR, e.g. 192.168.64.0/18
+                      # Bounded now so the underlay CEL rules stay within the cost budget.
+                      maxLength: 64
+                      # >>> TIGHTEN-LATER-ADD
+                      # x-kubernetes-validations:
+                      #   - rule: isCIDR(self)
+                      #     message: must be a CIDR
+                      #   - rule: self == oldSelf
+                      #     message: underlay.cidr is immutable
+                      # <<< TIGHTEN-LATER-ADD
                     gatewayAddress:
                       type: string
-                      description: Border gateway address on the underlay. Defaults to the first host of cidr.
+                      description: >-
+                        type ovn-layer2: border gateway address on the underlay. Defaults to the first host of cidr.
+                      # >>> TIGHTEN-LATER-ADD
+                      # maxLength: 64
+                      # x-kubernetes-validations:
+                      #   - rule: isIP(self)
+                      #     message: must be an IP address
+                      # <<< TIGHTEN-LATER-ADD
+                    hubVtepBlock:
+                      type: string
+                      maxLength: 64
+                      description: >-
+                        type localnet only. CIDR inside cidr reserved for hub node VTEP addresses (hub-side
+                        CloudVirt attachment) and the gateway's hub leg; never handed out by DHCP. E.g.
+                        192.168.65.0/24.
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be a CIDR
+                    hubLegAddress:
+                      type: string
+                      maxLength: 64
+                      description: >-
+                        type localnet only. Border gateway address with prefix length on the localnet leg, e.g.
+                        192.168.65.1/24. Defaults to the first host of hubVtepBlock.
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be an address with prefix length
                     dhcpRange:
                       type: object
-                      description: Dynamic address range served to member cluster nodes.
+                      description: type ovn-layer2 only. Dynamic address range served on the underlay.
                       properties:
                         start:
                           type: string
@@ -101,12 +201,19 @@ spec:
                     mtu:
                       type: integer
                       default: 1400
+                      # >>> TIGHTEN-LATER-ADD
+                      # minimum: 1280
+                      # maximum: 9216
+                      # <<< TIGHTEN-LATER-ADD
                 borderGateway:
                   type: object
                   description: >-
                     Border gateway virtual machine on the hub: fabric route reflector (l2vpn evpn, ipv4
                     unicast), DHCP server and router for spec.underlay, and tunnel endpoint for remote site
                     gateways.
+                  # >>> TIGHTEN-LATER-ADD
+                  # required: [loopback]
+                  # <<< TIGHTEN-LATER-ADD
                   properties:
                     name:
                       type: string
@@ -114,6 +221,14 @@ spec:
                     loopback:
                       type: string
                       description: BGP router ID and the address all spokes peer with, e.g. 10.255.10.10
+                      # >>> TIGHTEN-LATER-ADD
+                      # maxLength: 64
+                      # x-kubernetes-validations:
+                      #   - rule: isIP(self)
+                      #     message: must be an IP address
+                      #   - rule: self == oldSelf
+                      #     message: borderGateway.loopback is immutable
+                      # <<< TIGHTEN-LATER-ADD
                     vaultCredentialRef:
                       type: string
                       description: >-
@@ -126,12 +241,26 @@ spec:
                           type: string
                           default: 10.254.254.1/24
                           description: Tunnel interface address with prefix length.
+                          # >>> TIGHTEN-LATER-ADD
+                          # maxLength: 64
+                          # x-kubernetes-validations:
+                          #   - rule: isCIDR(self)
+                          #     message: must be an address with prefix length
+                          # <<< TIGHTEN-LATER-ADD
                         listenPort:
                           type: integer
                           default: 51820
+                          # >>> TIGHTEN-LATER-ADD
+                          # minimum: 1
+                          # maximum: 65535
+                          # <<< TIGHTEN-LATER-ADD
                         mtu:
                           type: integer
                           default: 1380
+                          # >>> TIGHTEN-LATER-ADD
+                          # minimum: 1280
+                          # maximum: 9216
+                          # <<< TIGHTEN-LATER-ADD
                     ingressHost:
                       type: string
                       description: >-
@@ -152,27 +281,50 @@ spec:
                     storageClass:
                       type: string
                       description: StorageClass for the root disk.
+                bgp:
+                  type: object
+                  description: Fabric-wide BGP session settings.
+                  properties:
+                    authentication:
+                      type: object
+                      description: Optional TCP MD5 authentication for every BGP session on the fabric.
+                      properties:
+                        secretRef:
+                          type: object
+                          description: Secret in the HybridFabric namespace; key password.
+                          required: [name]
+                          properties:
+                            name:
+                              type: string
+                              maxLength: 253
                 transportDefaults:
                   type: object
                   properties:
                     mtu:
                       type: integer
                       default: 1442
-                    innerMssClamp:
-                      type: integer
-                      default: 1360
+                      # >>> TIGHTEN-LATER-ADD
+                      # minimum: 1280
+                      # maximum: 9216
+                      # <<< TIGHTEN-LATER-ADD
                     defaultTunnelType:
                       type: string
-                      enum: [wireguard, ipsec, macsec, none]
+                      description: Transport used by CloudGateways that do not set spec.transport.type.
+                      enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
+                      # >>> TIGHTEN-LATER-ADD
+                      # enum: [none, wireguard]
+                      # <<< TIGHTEN-LATER-ADD
                       default: wireguard
+                # >>> TIGHTEN-LATER-DROP
                 numberingAuthority:
                   type: object
+                  description: Deprecated; unused.
                   x-kubernetes-preserve-unknown-fields: true
+                # <<< TIGHTEN-LATER-DROP
                 entityRefs:
                   type: array
                   description: >-
-                    Entities tagged to consume this fabric (admin multi-select).
-                    PlatformOpenshift joined to this fabric must belong to one of these Entities.
+                    Entities allowed to place their HybridNetworks on this fabric (admin multi-select).
                   items:
                     type: object
                     required: [name]
@@ -197,6 +349,22 @@ spec:
                 bgwAddress:
                   type: string
                   description: Border gateway underlay address.
+                peers:
+                  type: array
+                  description: BGP peers of the border gateway (sites and hub VTEPs).
+                  items:
+                    type: object
+                    properties:
+                      address:
+                        type: string
+                      site:
+                        type: string
+                        description: CloudGateway (or hub node) the peer belongs to.
+                      state:
+                        type: string
+                        description: BGP session state, e.g. Established, Active, Idle.
+                      prefixesReceived:
+                        type: integer
                 hubRrReady:
                   type: boolean
                   description: >-

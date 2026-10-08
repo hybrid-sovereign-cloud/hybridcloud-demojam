@@ -1,3 +1,9 @@
+# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
+# permissive: deprecated fields are still accepted. Tightening markers:
+#   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
+#   >>> TIGHTEN-LATER-DROP .. <<< TIGHTEN-LATER-DROP  deprecated fields to delete
+#   TIGHTEN-LATER-REMOVE at end of line               line to delete
+# Command: docs/usage/crds/README.md, section "Tightening validation".
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -25,9 +31,9 @@ spec:
       schema:
         openAPIV3Schema:
           description: >-
-            CloudOSO declares OpenStack/Routed53 environment prerequisites and
-            creates an OSOHelper (type environmentprep) on the central cluster
-            while exposing observed helper outputs and Namespace entity metadata on status.
+            Tenant OpenStack project on a platform CloudInfrastructure (type openstack): creates the
+            Keystone project, application credential and per-project clouds.yaml, plus DNS
+            prerequisites, and exposes the observed outputs and Namespace entity metadata on status.
           type: object
           required:
             - spec
@@ -43,19 +49,37 @@ spec:
                 Desired helper inputs forwarded to OSOHelper spec.environmentprep
                 on the central cluster.
               type: object
+              # >>> TIGHTEN-LATER-ADD
+              # required: [cloudRef]
+              # <<< TIGHTEN-LATER-ADD
               properties:
+                cloudRef:
+                  type: object
+                  description: >-
+                    Platform CloudInfrastructure (type openstack) this project is created on, in the platform
+                    namespace (sovereign-cloud). Supplies the cloud credentials and site settings.
+                  required: [name]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [CloudInfrastructure]
+                      default: CloudInfrastructure
+                    name:
+                      type: string
+                      maxLength: 253
                 project:
                   type: string
                   description: OpenStack project name hint (required)
                 vaultPath:
                   type: string
-                  description: Vault path for OpenStack admin credentials (optional when credentialsSecretRef is set)
+                  description: >-
+                    Deprecated; set spec.cloudRef (credentials come from the CloudInfrastructure). Vault path for
+                    OpenStack admin credentials, used only when cloudRef is unset.
                 credentialsSecretRef:
                   type: object
                   description: >-
-                    Reference to a Secret in the same namespace holding key clouds.yaml
-                    (OpenStack clouds.yaml content). Preferred over vaultPath when
-                    credentials are supplied via UI.
+                    Deprecated; set spec.cloudRef. Secret in the same namespace holding key clouds.yaml, used only
+                    when cloudRef is unset.
                   required: [name]
                   properties:
                     name:
@@ -66,12 +90,12 @@ spec:
                   description: Base DNS domain
                 projectDomain:
                   type: string
-                  description: "Keystone domain name"
-                  default: shc_domain
+                  description: Keystone domain name. Unset falls back to the CloudInfrastructure value.
+                  default: shc_domain  # TIGHTEN-LATER-REMOVE
                 externalNetwork:
                   type: string
-                  description: External Neutron network
-                  default: ext-net
+                  description: External Neutron network. Unset falls back to the CloudInfrastructure value.
+                  default: ext-net  # TIGHTEN-LATER-REMOVE
                 route53VaultPath:
                   type: string
                   description: Vault path for Route53 credentials (e.g. oso/accounts/route53-openstack)
@@ -81,32 +105,32 @@ spec:
                   default: default
                 designateZoneId:
                   type: string
-                  description: Designate zone UUID
-                  default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"
+                  description: Designate zone UUID. Unset falls back to the CloudInfrastructure value.
+                  default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"  # TIGHTEN-LATER-REMOVE
                 designateProjectId:
                   type: string
-                  description: OpenStack project ID owning the Designate zone
-                  default: "4cdae8e2b49c4f1fa4b4a69be8ea43e7"
+                  description: OpenStack project ID owning the Designate zone. Unset falls back to the CloudInfrastructure value.
+                  default: "4cdae8e2b49c4f1fa4b4a69be8ea43e7"  # TIGHTEN-LATER-REMOVE
+                # >>> TIGHTEN-LATER-DROP
                 enableVRF:
                   type: boolean
-                  description: Enable VRF networking for this environment (passed to provisioning; no effect until implemented)
+                  description: Deprecated; unused (fabric attachment is a NetworkPlacement).
                   default: false
                 vrfId:
                   type: string
-                  description: VRF identifier when enableVRF is true
+                  description: Deprecated; unused.
                 managementClusterKubeconfigRef:
                   type: string
-                  description: >-
-                    Vault KV path (key kubeconfig) for the OpenStack management cluster. Defaults to
-                    oso/<name>/mgmt-kubeconfig.
+                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.managementClusterKubeconfigRef.
                 dataplaneNodeSetRefs:
                   type: array
-                  description: OpenStackDataPlaneNodeSets that receive the fabric EVPN configuration, rolled out one at a time in this order
+                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.dataplaneNodeSetRefs.
                   items:
                     type: string
                 netConfigRef:
                   type: string
-                  description: NetConfig that receives the fabric network. Defaults to openstacknetconfig.
+                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.netConfigRef.
+                # <<< TIGHTEN-LATER-DROP
             status:
               description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
               type: object

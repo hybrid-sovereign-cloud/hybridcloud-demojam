@@ -1,0 +1,94 @@
+---
+# Read a CloudInfrastructure secret reference into a dict, from Vault or from a
+# Kubernetes Secret. Reference shapes accepted (CloudInfrastructure.spec):
+#   "oso/oso1/mgmt-kubeconfig"                    plain string = Vault KV path
+#   {vaultPath: "oso/oso1/mgmt-kubeconfig"}
+#   {secretRef: {name, namespace?}}  or  {secretRef: "<name>"}
+# Secret namespace defaults to the CloudInfrastructure namespace (sovereign-cloud).
+#
+# Required vars: cisr_ref (the reference), cisr_what (label for messages)
+# Optional: cisr_namespace (default sovereign-cloud)
+# Sets: cisr_data (dict of decoded fields, {} when unreadable),
+#       cisr_source ('vault:<path>' | 'secret:<ns>/<name>' | ''), cisr_error
+
+- name: Normalize {{ cisr_what | default('secret') }} reference
+  ansible.builtin.set_fact:
+    cisr_data: {}
+    cisr_source: ""
+    cisr_error: ""
+    _cisr_vault_path: >-
+      {{
+        cisr_ref if (cisr_ref is string)
+        else ((cisr_ref | default({}, true)).vaultPath | default('', true))
+      }}
+    _cisr_secret: >-
+      {{
+        {}
+        if (cisr_ref is string)
+        else (
+          {'name': (cisr_ref | default({}, true)).secretRef}
+          if ((cisr_ref | default({}, true)).secretRef | default('') is string)
+          else ((cisr_ref | default({}, true)).secretRef | default({}, true))
+        )
+      }}
+  no_log: true
+
+- name: Read {{ cisr_what | default('secret') }} from Vault
+  when: _cisr_vault_path | length > 0
+  block:
+    - name: Vault KV read
+      ansible.builtin.include_tasks: vault_kv_read.yml
+      vars:
+        vault_kv_path: "{{ _cisr_vault_path }}"
+
+    - name: Keep Vault data
+      ansible.builtin.set_fact:
+        cisr_data: "{{ vault_kv_data | default({}) }}"
+        cisr_source: "vault:{{ _cisr_vault_path }}"
+      no_log: true
+  rescue:
+    - name: Record unreadable Vault path
+      ansible.builtin.set_fact:
+        cisr_error: "{{ cisr_what | default('secret') }}: Vault path {{ _cisr_vault_path }} unreadable"
+
+- name: Read {{ cisr_what | default('secret') }} from a Kubernetes Secret
+  when:
+    - _cisr_vault_path | length == 0
+    - (_cisr_secret.name | default('')) | length > 0
+  block:
+    - name: Read Secret
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ _cisr_secret.name }}"
+        namespace: "{{ _cisr_secret.namespace | default(cisr_namespace | default('sovereign-cloud', true), true) }}"
+      register: _cisr_k8s
+      no_log: true
+
+    - name: Decode Secret data
+      when: (_cisr_k8s.resources | default([])) | length > 0
+      ansible.builtin.set_fact:
+        cisr_data: >-
+          {{
+            dict(
+              (_cisr_k8s.resources[0].data | default({})).keys()
+              | zip((_cisr_k8s.resources[0].data | default({})).values() | map('b64decode'))
+            )
+          }}
+        cisr_source: "secret:{{ _cisr_secret.namespace | default(cisr_namespace | default('sovereign-cloud', true), true) }}/{{ _cisr_secret.name }}"
+      no_log: true
+
+    - name: Record missing Secret
+      when: (_cisr_k8s.resources | default([])) | length == 0
+      ansible.builtin.set_fact:
+        cisr_error: "{{ cisr_what | default('secret') }}: Secret {{ _cisr_secret.name }} not found"
+
+- name: Record missing reference
+  when:
+    - _cisr_vault_path | length == 0
+    - (_cisr_secret.name | default('')) | length == 0
+  ansible.builtin.set_fact:
+    cisr_error: "{{ cisr_what | default('secret') }}: no vaultPath or secretRef set"
