@@ -79,7 +79,7 @@ router bgp {{ bgw_asn }}
   neighbor {{ g.name }} route-reflector-client
   neighbor {{ g.name }} attribute-unchanged next-hop
 {% if bgw_rt_policy_per_site | bool %}
-  neighbor {{ g.name }} soft-reconfiguration inbound
+  {# no soft-reconfiguration inbound: FRR 8.5 replays EVPN routes without their VNI label, hub nodes then install Type-5 routes with encap id 0 (seen 2026-10-08) #}
   neighbor {{ g.name }} route-map {{ g.name }}-EVPN-IN in
   neighbor {{ g.name }} route-map {{ g.name }}-EVPN-OUT out
 {% elif bgw_rt_filter_enabled | bool %}
