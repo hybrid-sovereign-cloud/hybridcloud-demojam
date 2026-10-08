@@ -693,9 +693,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-cloudgateway.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1287,9 +1287,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-cloudoso.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1521,9 +1521,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-cloudvirt.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1921,9 +1921,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-hybridfabric.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -2302,9 +2302,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-hybridnetwork.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -2605,9 +2605,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-networkplacement.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -3213,9 +3213,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-platformopenshift.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -4524,9 +4524,9 @@ spec:
           jsonPath: .metadata.creationTimestamp
 ---
 # Source: gitops/custom-operators/crds/crd-transportlink.yaml
-# Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
-# permissive: deprecated fields are still accepted. Tightening markers:
-# Command: docs/usage/crds/README.md, section "Tightening validation".
+# Validation tightened on 2026-10-08 (restructure cutover, plan §5b step 6):
+# required fields, immutables, CEL rules and narrowed enums are active and the
+# deprecated pre-CloudInfrastructure fields are gone.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
