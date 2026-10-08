@@ -15,6 +15,7 @@ import '@hybridsovereign/shared/styles/openshift.css';
 const PLATFORM_NS_FORMS = new Set<SelfServiceFormType>([
   'entity',
   'hybridfabric',
+  'cloudinfrastructure',
   'cloudgateway',
   'transportlink',
   'uihealthchecker',
@@ -39,6 +40,7 @@ const LIST_PATH: Partial<Record<SelfServiceFormType, string>> = {
   hybridnetwork: '/hybridsovereign/tenant/networks',
   networkplacement: '/hybridsovereign/tenant/placements',
   hybridfabric: '/hybridsovereign/networking/fabrics',
+  cloudinfrastructure: '/hybridsovereign/clouds/infrastructure',
   cloudgateway: '/hybridsovereign/networking/gateways',
   transportlink: '/hybridsovereign/networking/transport',
   uihealthchecker: '/hybridsovereign/networking/uihealth',

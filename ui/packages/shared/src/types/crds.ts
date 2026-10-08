@@ -144,12 +144,6 @@ export interface PlatformOpenshiftSpec {
   networking?: PlatformOpenshiftNetworkingSpec;
 }
 
-/**
- * @deprecated Transitional: PlatformOpenshift no longer joins a fabric. Kept only until
- * CreateResourceForm / JoinPolicySelect drop the fabric-join UI (restructure plan §3.4).
- */
-export type JoinPolicy = 'None' | 'AutoWhenFabricReady' | 'ExplicitOnly';
-
 /** Observed cluster CIDR plan; used for hub-overlap checks. */
 export interface PlatformOpenshiftNetworkingStatus {
   clusterNetwork?: string[];

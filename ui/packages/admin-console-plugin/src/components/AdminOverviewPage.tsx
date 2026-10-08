@@ -299,6 +299,17 @@ const AdminOverviewPage: React.FC = () => {
                 </SectionErrorBoundary>
               </CardBody>
             </Card>
+
+            <div className="sc-inventory-grid" style={{ marginTop: '1rem' }}>
+              <InventoryCard
+                title={t('nav.cloudInfrastructure')}
+                count={(byKind.get('CloudInfrastructure') ?? []).length}
+                hint={`${bucket(byKind.get('CloudInfrastructure') ?? []).ready} ready`}
+                kind="CloudInfrastructure"
+                href="/hybridsovereign/clouds/infrastructure"
+                status={bucket(byKind.get('CloudInfrastructure') ?? []).failed ? 'danger' : 'default'}
+              />
+            </div>
           </>
         )}
       </div>

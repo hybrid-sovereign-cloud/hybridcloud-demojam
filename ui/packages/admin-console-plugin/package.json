@@ -34,6 +34,8 @@
       "AdminCloudOSODetailPage": "./src/components/AdminCloudOSODetailPage.tsx",
       "AdminCloudAWSDetailPage": "./src/components/AdminCloudAWSDetailPage.tsx",
       "AdminCloudVirtDetailPage": "./src/components/AdminCloudVirtDetailPage.tsx",
+      "AdminCloudInfrastructuresPage": "./src/components/AdminCloudInfrastructuresPage.tsx",
+      "AdminCloudInfrastructureDetailPage": "./src/components/AdminCloudInfrastructureDetailPage.tsx",
       "AdminRbacDetailPage": "./src/components/AdminRbacDetailPage.tsx",
       "AdminAAPOrgDetailPage": "./src/components/AdminAAPOrgDetailPage.tsx",
       "AdminAAPConfigDetailPage": "./src/components/AdminAAPConfigDetailPage.tsx",

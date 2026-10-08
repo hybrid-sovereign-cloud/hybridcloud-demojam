@@ -31,6 +31,8 @@ interface ResourceListPageProps {
   enabled?: boolean;
   /** Hide page header when embedded in a parent tab strip */
   hideHeader?: boolean;
+  /** List the primary kind in this namespace only (platform kinds live in sovereign-cloud) */
+  namespace?: string;
 }
 
 function matchesStatus(item: K8sResource, statusFilter: StatusFilter): boolean {
@@ -47,6 +49,7 @@ export function adminDetailHref(
   const name = encodeURIComponent(item.metadata.name);
   if (
     kind === 'Entity' ||
+    kind === 'CloudInfrastructure' ||
     kind === 'HybridFabric' ||
     kind === 'CloudGateway' ||
     kind === 'TransportLink' ||
@@ -70,13 +73,14 @@ export function ResourceListPage({
   createPath,
   enabled = true,
   hideHeader = false,
+  namespace,
 }: ResourceListPageProps): React.ReactElement {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  const primary = useK8sResourceList<K8sResource>(kind, { enabled });
+  const primary = useK8sResourceList<K8sResource>(kind, { enabled, namespace });
   const secondary = useK8sResourceList<K8sResource>(secondaryKind ?? kind, {
     enabled: enabled && !!secondaryKind,
   });

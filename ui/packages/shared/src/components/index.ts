@@ -28,16 +28,12 @@ export { EntityMultiSelect } from './EntityMultiSelect';
 export type { EntityMultiSelectProps, EntityMultiSelectOption } from './EntityMultiSelect';
 export { FabricSelect } from './FabricSelect';
 export type { FabricSelectProps, FabricSelectOption } from './FabricSelect';
-export { FabricMultiSelect } from './FabricMultiSelect';
-export type { FabricMultiSelectProps, FabricMultiSelectOption } from './FabricMultiSelect';
-export { JoinPolicySelect } from './JoinPolicySelect';
-export type { JoinPolicySelectProps } from './JoinPolicySelect';
 export {
-  PlatformOpenshiftSelect,
-  filterFabricCapablePlatformOpenshifts,
-  platformOpenshiftSelectOptions,
-} from './PlatformOpenshiftSelect';
-export type { PlatformOpenshiftSelectProps, PlatformOpenshiftSelectOption } from './PlatformOpenshiftSelect';
+  CloudInfrastructureSelect,
+  filterCloudInfrastructures,
+  CLOUD_INFRASTRUCTURE_NS,
+} from './CloudInfrastructureSelect';
+export type { CloudInfrastructureSelectProps, CloudInfrastructureFilter } from './CloudInfrastructureSelect';
 export { BackendSelect, buildBackendOptions } from './BackendSelect';
 export type { BackendSelectProps, BackendSelectOption, BackendSelectValue, BackendKind } from './BackendSelect';
 export { CloudOSOSelect } from './CloudOSOSelect';
