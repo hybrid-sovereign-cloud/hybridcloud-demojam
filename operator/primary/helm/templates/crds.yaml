@@ -3,15 +3,16 @@
 # operator/config/crd/bases is a plain mirror of the same files.
 {{- if .Values.installCRDs }}
 ---
-# Source: gitops/custom-operators/crds/crd-aapconfig.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: aapconfigs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/aapconfigs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -135,15 +136,16 @@ spec:
                         type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
-# Source: gitops/custom-operators/crds/crd-aaporg.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: aaporgs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/aaporgs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -307,15 +309,16 @@ spec:
                   description: Entity this org belongs to.
               x-kubernetes-preserve-unknown-fields: true
 ---
-# Source: gitops/custom-operators/crds/crd-assignment.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: assignments.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/assignments.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -497,15 +500,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-cloudaws.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: cloudawss.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/cloudawss.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -684,7 +688,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-cloudgateway.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -727,9 +730,7 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [fabricRef, cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [fabricRef, cloudRef]
               properties:
                 enabled:
                   type: boolean
@@ -760,10 +761,7 @@ spec:
                         none: the site peers with the border gateway over the underlay. wireguard: a site gateway
                         VM tunnels to the border gateway (WireGuard carried over TLS through the hub ingress).
                         Defaults to the fabric's transportDefaults.defaultTunnelType.
-                      enum: [none, wireguard, ipsec, macsec]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [none, wireguard]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [none, wireguard]
                     vaultPeerConfigRef:
                       type: string
                       description: >-
@@ -778,12 +776,10 @@ spec:
                       description: >-
                         Site gateway tunnel address with prefix length, e.g. 10.254.254.12/32. Allocated from the
                         border gateway's tunnel subnet when omitted.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be an address with prefix length
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be an address with prefix length
                 siteUnderlay:
                   type: object
                   description: >-
@@ -804,44 +800,22 @@ spec:
                     cidr:
                       type: string
                       description: Site underlay CIDR, e.g. 192.168.80.0/24
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be a CIDR
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be a CIDR
                     gatewayAddress:
                       type: string
                       description: Site gateway address. Defaults to the first host of cidr.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
                     mtu:
                       type: integer
                       default: 1442
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
-                    # >>> TIGHTEN-LATER-DROP
-                    macNatShim:
-                      type: object
-                      description: Deprecated; use spec.macNatShim.
-                      properties:
-                        enabled:
-                          type: boolean
-                          default: false
-                        vmMac:
-                          type: string
-                          default: "02:fa:b0:50:00:01"
-                          description: MAC address of the site gateway VM underlay interface.
-                        interface:
-                          type: string
-                          description: Node NIC to translate on. Defaults to siteUnderlay.interface.
-                    # <<< TIGHTEN-LATER-DROP
+                      minimum: 1280
+                      maximum: 9216
                 macNatShim:
                   type: object
                   description: >-
@@ -859,37 +833,6 @@ spec:
                       description: >-
                         Node NIC to translate on. Defaults to siteUnderlay.interface (openstack) or the node's
                         primary NIC (openshift).
-                # >>> TIGHTEN-LATER-DROP
-                cloud:
-                  type: string
-                  description: Deprecated; derived from the CloudInfrastructure type.
-                  enum: [aws, openstack, openshift]
-                region:
-                  type: string
-                  description: Deprecated; comes from the CloudInfrastructure.
-                domainAsn:
-                  type: integer
-                  description: Deprecated; the fabric ASN (HybridFabric.spec.domainAsn) is used.
-                landingZoneTemplate:
-                  type: string
-                  description: Deprecated; unused.
-                  default: default
-                managementClusterKubeconfigRef:
-                  type: string
-                  description: Deprecated; use CloudInfrastructure.spec.openstack.managementClusterKubeconfigRef.
-                awsAccountId:
-                  type: string
-                  description: Deprecated; use CloudInfrastructure.spec.aws.accountId.
-                openstackCloudOSORef:
-                  type: string
-                  description: Deprecated; use spec.cloudRef.
-                platformOpenshiftRef:
-                  type: string
-                  description: Deprecated; hosted clusters no longer attach to the fabric.
-                virtCloudVirtRef:
-                  type: string
-                  description: Deprecated; use spec.cloudRef.
-                # <<< TIGHTEN-LATER-DROP
             status:
               type: object
               properties:
@@ -999,7 +942,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-cloudinfrastructure.yaml
 # CloudInfrastructure: platform-owned registration of a cloud site (bring-your-own
 # cloud). Lives in sovereign-cloud. Tenant cloud projects (CloudOSO, CloudVirt,
 # CloudAWS) and CloudGateways reference it by name through spec.cloudRef.
@@ -1341,7 +1283,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-cloudoso.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -1353,9 +1294,11 @@ kind: CustomResourceDefinition
 metadata:
   name: cloudosos.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/cloudosos.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -1391,9 +1334,7 @@ spec:
                 Desired helper inputs forwarded to OSOHelper spec.environmentprep
                 on the central cluster.
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [cloudRef]
               properties:
                 cloudRef:
                   type: object
@@ -1433,11 +1374,9 @@ spec:
                 projectDomain:
                   type: string
                   description: Keystone domain name. Unset falls back to the CloudInfrastructure value.
-                  default: shc_domain  # TIGHTEN-LATER-REMOVE
                 externalNetwork:
                   type: string
                   description: External Neutron network. Unset falls back to the CloudInfrastructure value.
-                  default: ext-net  # TIGHTEN-LATER-REMOVE
                 route53VaultPath:
                   type: string
                   description: Vault path for Route53 credentials (e.g. oso/accounts/route53-openstack)
@@ -1448,31 +1387,9 @@ spec:
                 designateZoneId:
                   type: string
                   description: Designate zone UUID. Unset falls back to the CloudInfrastructure value.
-                  default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"  # TIGHTEN-LATER-REMOVE
                 designateProjectId:
                   type: string
                   description: OpenStack project ID owning the Designate zone. Unset falls back to the CloudInfrastructure value.
-                  default: "4cdae8e2b49c4f1fa4b4a69be8ea43e7"  # TIGHTEN-LATER-REMOVE
-                # >>> TIGHTEN-LATER-DROP
-                enableVRF:
-                  type: boolean
-                  description: Deprecated; unused (fabric attachment is a NetworkPlacement).
-                  default: false
-                vrfId:
-                  type: string
-                  description: Deprecated; unused.
-                managementClusterKubeconfigRef:
-                  type: string
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.managementClusterKubeconfigRef.
-                dataplaneNodeSetRefs:
-                  type: array
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.dataplaneNodeSetRefs.
-                  items:
-                    type: string
-                netConfigRef:
-                  type: string
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.netConfigRef.
-                # <<< TIGHTEN-LATER-DROP
             status:
               description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
               type: object
@@ -1602,7 +1519,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-cloudvirt.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -1614,9 +1530,11 @@ kind: CustomResourceDefinition
 metadata:
   name: cloudvirts.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/cloudvirts.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -1651,10 +1569,7 @@ spec:
               type: object
             spec:
               type: object
-              required: [baseDomain]  # TIGHTEN-LATER-REMOVE
-              # >>> TIGHTEN-LATER-ADD
-              # required: [baseDomain, cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [baseDomain, cloudRef]
               properties:
                 cloudRef:
                   type: object
@@ -1683,11 +1598,6 @@ spec:
                           - type: integer
                           - type: string
                         x-kubernetes-int-or-string: true
-                # >>> TIGHTEN-LATER-DROP
-                vaultPath:
-                  type: string
-                  description: Deprecated; set spec.cloudRef. Vault KV path for virt environment credentials.
-                # <<< TIGHTEN-LATER-DROP
                 baseDomain:
                   type: string
                   description: Parent DNS domain for virt workloads (no cluster URL)
@@ -1698,40 +1608,6 @@ spec:
                 networkAttachment:
                   type: string
                   description: Optional NAD name for secondary networking
-                # >>> TIGHTEN-LATER-DROP
-                hostedClusterCidrDefaults:
-                  type: object
-                  description: >-
-                    Deprecated; moved to CloudInfrastructure.spec.openshift.hostedClusterCidrDefaults.
-                  properties:
-                    clusterNetworkPool:
-                      type: object
-                      description: Pod CIDR range, carved per cluster.
-                      properties:
-                        cidr:
-                          type: string
-                          default: 100.64.0.0/11
-                        blockPrefixLength:
-                          type: integer
-                          default: 14
-                    serviceNetworkPool:
-                      type: object
-                      description: Service CIDR range, carved per cluster.
-                      properties:
-                        cidr:
-                          type: string
-                          default: 100.96.0.0/11
-                        blockPrefixLength:
-                          type: integer
-                          default: 16
-                enableVRF:
-                  type: boolean
-                  description: Deprecated; unused (fabric attachment is a NetworkPlacement).
-                  default: false
-                vrfId:
-                  type: string
-                  description: Deprecated; unused.
-                # <<< TIGHTEN-LATER-DROP
                 toolRbac:
                   type: object
                   properties:
@@ -1829,15 +1705,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-entity.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: entities.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/entities.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -2043,7 +1920,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-hybridfabric.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -2055,9 +1931,11 @@ kind: CustomResourceDefinition
 metadata:
   name: hybridfabrics.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/hybridfabrics.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -2089,12 +1967,10 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [domainAsn, vniPool, underlay, borderGateway]
-              # x-kubernetes-validations:
-              #   - rule: "self.domainAsn <= 65535 || self.vniPool.end <= 65535"
-              #     message: with a 4-byte domainAsn the route target (ASN:VNI) limits vniPool.end to 65535
-              # <<< TIGHTEN-LATER-ADD
+              required: [domainAsn, vniPool, underlay, borderGateway]
+              x-kubernetes-validations:
+                - rule: "self.domainAsn <= 65535 || self.vniPool.end <= 65535"
+                  message: with a 4-byte domainAsn the route target (ASN:VNI) limits vniPool.end to 65535
               properties:
                 enabled:
                   type: boolean
@@ -2104,61 +1980,33 @@ spec:
                   description: Fabric BGP autonomous system (iBGP between the border gateway and all sites).
                   minimum: 1
                   maximum: 4294967295
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: domainAsn is immutable
-                  # <<< TIGHTEN-LATER-ADD
-                # >>> TIGHTEN-LATER-DROP
-                routeReflectors:
-                  type: array
-                  description: >-
-                    Deprecated. Hub route-reflector pods; superseded by spec.borderGateway. Leave empty for new fabrics.
-                  items:
-                    type: object
-                    required: [name, address]
-                    properties:
-                      name:
-                        type: string
-                      address:
-                        type: string
-                      nodeName:
-                        type: string
-                        description: >-
-                          Optional node pin for the route-reflector pod (deprecated).
-                # <<< TIGHTEN-LATER-DROP
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: domainAsn is immutable
                 vniPool:
                   type: object
                   description: VNI range allocated to HybridNetworks (one VNI per tenant VRF).
                   required: [start, end]
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self.start <= self.end
-                  #     message: vniPool.start must not exceed vniPool.end
-                  #   - rule: self == oldSelf
-                  #     message: vniPool is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self.start <= self.end
+                      message: vniPool.start must not exceed vniPool.end
+                    - rule: self == oldSelf
+                      message: vniPool is immutable
                   properties:
                     start:
                       type: integer
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1
-                      # maximum: 16777215
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1
+                      maximum: 16777215
                     end:
                       type: integer
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1
-                      # maximum: 16777215
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1
+                      maximum: 16777215
                 underlay:
                   type: object
                   description: >-
                     Fabric underlay address plan and the border gateway's underlay leg on the hub. Site underlays
                     and hub VTEP addresses are carved from cidr; fabric-wide unique.
-                  # >>> TIGHTEN-LATER-ADD
-                  # required: [cidr]
-                  # <<< TIGHTEN-LATER-ADD
+                  required: [cidr]
                   x-kubernetes-validations:
                     - rule: "(has(self.type) && self.type == 'localnet') || (!has(self.hubVtepBlock) && !has(self.hubLegAddress))"
                       message: underlay.hubVtepBlock and underlay.hubLegAddress require underlay.type localnet
@@ -2195,23 +2043,19 @@ spec:
                       description: Underlay CIDR, e.g. 192.168.64.0/18
                       # Bounded now so the underlay CEL rules stay within the cost budget.
                       maxLength: 64
-                      # >>> TIGHTEN-LATER-ADD
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be a CIDR
-                      #   - rule: self == oldSelf
-                      #     message: underlay.cidr is immutable
-                      # <<< TIGHTEN-LATER-ADD
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be a CIDR
+                        - rule: self == oldSelf
+                          message: underlay.cidr is immutable
                     gatewayAddress:
                       type: string
                       description: >-
                         type ovn-layer2: border gateway address on the underlay. Defaults to the first host of cidr.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
                     hubVtepBlock:
                       type: string
                       maxLength: 64
@@ -2245,19 +2089,15 @@ spec:
                     mtu:
                       type: integer
                       default: 1400
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1280
+                      maximum: 9216
                 borderGateway:
                   type: object
                   description: >-
                     Border gateway virtual machine on the hub: fabric route reflector (l2vpn evpn, ipv4
                     unicast), DHCP server and router for spec.underlay, and tunnel endpoint for remote site
                     gateways.
-                  # >>> TIGHTEN-LATER-ADD
-                  # required: [loopback]
-                  # <<< TIGHTEN-LATER-ADD
+                  required: [loopback]
                   properties:
                     name:
                       type: string
@@ -2265,14 +2105,12 @@ spec:
                     loopback:
                       type: string
                       description: BGP router ID and the address all spokes peer with, e.g. 10.255.10.10
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      #   - rule: self == oldSelf
-                      #     message: borderGateway.loopback is immutable
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
+                        - rule: self == oldSelf
+                          message: borderGateway.loopback is immutable
                     vaultCredentialRef:
                       type: string
                       description: >-
@@ -2285,26 +2123,20 @@ spec:
                           type: string
                           default: 10.254.254.1/24
                           description: Tunnel interface address with prefix length.
-                          # >>> TIGHTEN-LATER-ADD
-                          # maxLength: 64
-                          # x-kubernetes-validations:
-                          #   - rule: isCIDR(self)
-                          #     message: must be an address with prefix length
-                          # <<< TIGHTEN-LATER-ADD
+                          maxLength: 64
+                          x-kubernetes-validations:
+                            - rule: isCIDR(self)
+                              message: must be an address with prefix length
                         listenPort:
                           type: integer
                           default: 51820
-                          # >>> TIGHTEN-LATER-ADD
-                          # minimum: 1
-                          # maximum: 65535
-                          # <<< TIGHTEN-LATER-ADD
+                          minimum: 1
+                          maximum: 65535
                         mtu:
                           type: integer
                           default: 1380
-                          # >>> TIGHTEN-LATER-ADD
-                          # minimum: 1280
-                          # maximum: 9216
-                          # <<< TIGHTEN-LATER-ADD
+                          minimum: 1280
+                          maximum: 9216
                     ingressHost:
                       type: string
                       description: >-
@@ -2347,24 +2179,13 @@ spec:
                     mtu:
                       type: integer
                       default: 1442
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1280
+                      maximum: 9216
                     defaultTunnelType:
                       type: string
                       description: Transport used by CloudGateways that do not set spec.transport.type.
-                      enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [none, wireguard]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [none, wireguard]
                       default: wireguard
-                # >>> TIGHTEN-LATER-DROP
-                numberingAuthority:
-                  type: object
-                  description: Deprecated; unused.
-                  x-kubernetes-preserve-unknown-fields: true
-                # <<< TIGHTEN-LATER-DROP
                 entityRefs:
                   type: array
                   description: >-
@@ -2482,7 +2303,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-hybridnetwork.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -2494,9 +2314,11 @@ kind: CustomResourceDefinition
 metadata:
   name: hybridnetworks.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/hybridnetworks.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -2537,11 +2359,9 @@ spec:
                   description: >-
                     Optional HybridFabric name in sovereign-cloud. When set, VNI/RT
                     allocation uses this fabric; must be entity-visible and Ready.
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: fabricRef is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: fabricRef is immutable
                 overlayMtu:
                   type: integer
                   minimum: 1280
@@ -2664,15 +2484,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-iaac.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: iaacs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/iaacs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -2786,7 +2607,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-networkplacement.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -2798,9 +2618,11 @@ kind: CustomResourceDefinition
 metadata:
   name: networkplacements.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/networkplacements.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -2832,9 +2654,7 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [network, backend]
-              # <<< TIGHTEN-LATER-ADD
+              required: [network, backend]
               x-kubernetes-validations:
                 - rule: "!has(self.vmNamespaces) || (has(self.backend) && self.backend.kind == 'CloudVirt')"
                   message: vmNamespaces is only valid for backend kind CloudVirt
@@ -2842,28 +2662,21 @@ spec:
                 network:
                   type: string
                   description: HybridNetwork name in the same namespace.
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: network is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: network is immutable
                 backend:
                   type: object
                   description: Tenant cloud project the network is placed on, in the same namespace.
                   required: [kind, name]
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: backend is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: backend is immutable
                   properties:
                     kind:
                       type: string
                       description: PlatformOpenshift is deprecated (hosted clusters do not attach to the fabric).
-                      enum: [CloudAWS, CloudOSO, CloudVirt, PlatformOpenshift]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [CloudAWS, CloudOSO, CloudVirt]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [CloudAWS, CloudOSO, CloudVirt]
                     name:
                       type: string
                 prefixes:
@@ -2871,17 +2684,13 @@ spec:
                   description: >-
                     Overlay prefixes for this placement. Unique within the HybridNetwork. CloudVirt prefixes must
                     not overlap the hub's cluster, service or node networks.
-                  # >>> TIGHTEN-LATER-ADD
-                  # maxItems: 64
-                  # <<< TIGHTEN-LATER-ADD
+                  maxItems: 64
                   items:
                     type: string
-                    # >>> TIGHTEN-LATER-ADD
-                    # maxLength: 64
-                    # x-kubernetes-validations:
-                    #   - rule: isCIDR(self)
-                    #     message: must be a CIDR
-                    # <<< TIGHTEN-LATER-ADD
+                    maxLength: 64
+                    x-kubernetes-validations:
+                      - rule: isCIDR(self)
+                        message: must be a CIDR
                 vmNamespaces:
                   type: array
                   description: >-
@@ -2895,13 +2704,6 @@ spec:
                     type: string
                     maxLength: 63
                     pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
-                # >>> TIGHTEN-LATER-DROP
-                state:
-                  type: string
-                  description: Deprecated; delete the NetworkPlacement to remove it.
-                  enum: [present, absent]
-                  default: present
-                # <<< TIGHTEN-LATER-DROP
             status:
               type: object
               properties:
@@ -3021,15 +2823,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-openstackmigration.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: openstackmigrations.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/openstackmigrations.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -3274,15 +3077,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-persona.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: personas.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/personas.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -3411,7 +3215,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-platformopenshift.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -3423,9 +3226,11 @@ kind: CustomResourceDefinition
 metadata:
   name: platformopenshifts.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/platformopenshifts.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -3584,15 +3389,6 @@ spec:
                     (CG-NAT 100.64.0.0/10 space by default). Either way they are checked against the hub and the
                     other clusters on the same infrastructure.
                   properties:
-                    # >>> TIGHTEN-LATER-DROP
-                    allocateFromFabric:
-                      type: boolean
-                      description: Deprecated; CIDRs are allocated whenever clusterNetwork/serviceNetwork are omitted.
-                      default: true
-                    fabricRef:
-                      type: string
-                      description: Deprecated; clusters do not join a fabric.
-                    # <<< TIGHTEN-LATER-DROP
                     clusterNetwork:
                       type: array
                       items:
@@ -3612,30 +3408,6 @@ spec:
                       type: boolean
                       default: false
                       description: Accept CIDRs that conflict with the hub or other clusters.
-                # >>> TIGHTEN-LATER-DROP
-                fabric:
-                  type: object
-                  description: >-
-                    Deprecated and ignored. Clusters no longer join a HybridFabric; attach tenant workloads with a
-                    NetworkPlacement on a CloudOSO, CloudVirt or CloudAWS backend.
-                  properties:
-                    joinPolicy:
-                      type: string
-                      enum: [None, AutoWhenFabricReady, ExplicitOnly]
-                      default: AutoWhenFabricReady
-                    fabricRefs:
-                      type: array
-                      items:
-                        type: string
-                    preferredFabricRef:
-                      type: string
-                    manageGatewayAndLink:
-                      type: boolean
-                      default: true
-                    tunnelType:
-                      type: string
-                      enum: [wireguard, ipsec, macsec, none]
-                # <<< TIGHTEN-LATER-DROP
             status:
               description: Observed state
               type: object
@@ -3860,15 +3632,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-project.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: projects.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/projects.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4011,15 +3784,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-quayconfig.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: quayconfigs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/quayconfigs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4137,15 +3911,16 @@ spec:
                         type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
-# Source: gitops/custom-operators/crds/crd-quayorg.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: quayorgs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/quayorgs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4306,15 +4081,140 @@ spec:
                   description: Entity this org belongs to.
               x-kubernetes-preserve-unknown-fields: true
 ---
-# Source: gitops/custom-operators/crds/crd-rbac.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rbacconfigs.hybridsovereign.redhat
+  labels:
+    app.kubernetes.io/instance: hs-crds
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/rbacconfigs.hybridsovereign.redhat"
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: RbacConfig
+    listKind: RbacConfigList
+    plural: rbacconfigs
+    singular: rbacconfig
+    shortNames:
+      - rbc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            RbacConfig connects the operator to a Keycloak deployment and provisions realm clients
+            used by tenant-scoped Rbac resources.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired Keycloak linkage configuration
+              type: object
+              required:
+                - type
+                - secret
+              properties:
+                type:
+                  description: Authentication backend type (must be keycloak)
+                  type: string
+                secret:
+                  description: >-
+                    Name of a Secret (in the same namespace as this CR) containing Keycloak admin credentials
+                  type: string
+            status:
+              description: Observed state after reconciliation
+              type: object
+              properties:
+                clientId:
+                  type: string
+                clientSecretName:
+                  type: string
+                ready:
+                  type: boolean
+                status:
+                  type: string
+                deletionComplete:
+                  type: boolean
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: rbacs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/rbacs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4453,138 +4353,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-rbacconfig.yaml
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: rbacconfigs.hybridsovereign.redhat
-  labels:
-    app.kubernetes.io/part-of: hybridsovereign-gitops
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-    argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
-spec:
-  group: hybridsovereign.redhat
-  names:
-    kind: RbacConfig
-    listKind: RbacConfigList
-    plural: rbacconfigs
-    singular: rbacconfig
-    shortNames:
-      - rbc
-  scope: Namespaced
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          description: >-
-            RbacConfig connects the operator to a Keycloak deployment and provisions realm clients
-            used by tenant-scoped Rbac resources.
-          type: object
-          required:
-            - spec
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: Desired Keycloak linkage configuration
-              type: object
-              required:
-                - type
-                - secret
-              properties:
-                type:
-                  description: Authentication backend type (must be keycloak)
-                  type: string
-                secret:
-                  description: >-
-                    Name of a Secret (in the same namespace as this CR) containing Keycloak admin credentials
-                  type: string
-            status:
-              description: Observed state after reconciliation
-              type: object
-              properties:
-                clientId:
-                  type: string
-                clientSecretName:
-                  type: string
-                ready:
-                  type: boolean
-                status:
-                  type: string
-                deletionComplete:
-                  type: boolean
-                lastReconciledAt:
-                  type: string
-                  format: date-time
-                message:
-                  type: string
-                observedGeneration:
-                  type: integer
-                  format: int64
-                edaJobs:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                      url:
-                        type: string
-                      status:
-                        type: string
-                      timestamp:
-                        type: string
-                    x-kubernetes-preserve-unknown-fields: true
-                conditions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string
-              x-kubernetes-preserve-unknown-fields: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Name
-          type: string
-          jsonPath: .metadata.name
-        - name: Type
-          type: string
-          jsonPath: .spec.type
-        - name: Ready
-          type: boolean
-          jsonPath: .status.ready
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
----
-# Source: gitops/custom-operators/crds/crd-team.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: teams.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/teams.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4744,7 +4522,6 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-transportlink.yaml
 # Validation is staged (restructure plan §2.3, cutover §5b step 6). This pass is
 # permissive: deprecated fields are still accepted. Tightening markers:
 #   >>> TIGHTEN-LATER-ADD  .. <<< TIGHTEN-LATER-ADD   commented rules to uncomment
@@ -4756,9 +4533,11 @@ kind: CustomResourceDefinition
 metadata:
   name: transportlinks.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/transportlinks.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -4804,10 +4583,7 @@ spec:
                 tunnelType:
                   type: string
                   description: Copied from CloudGateway.spec.transport.type.
-                  enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
-                  # >>> TIGHTEN-LATER-ADD
-                  # enum: [none, wireguard]
-                  # <<< TIGHTEN-LATER-ADD
+                  enum: [none, wireguard]
             status:
               type: object
               properties:
@@ -4885,15 +4661,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-uihealthchecker.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: uihealthcheckers.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/uihealthcheckers.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -5017,162 +4794,16 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
 ---
-# Source: gitops/custom-operators/crds/crd-vault.yaml
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: vaults.hybridsovereign.redhat
-  labels:
-    app.kubernetes.io/part-of: hybridsovereign-gitops
-    hybridsovereign.redhat/gitops-owned: "true"
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-    argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
-spec:
-  group: hybridsovereign.redhat
-  names:
-    kind: Vault
-    listKind: VaultList
-    plural: vaults
-    singular: vault
-    shortNames:
-      - vlt
-  scope: Namespaced
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          description: >-
-            Vault provisions a dedicated HashiCorp Vault instance for a tenant entity.
-          type: object
-          required:
-            - spec
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: Desired Vault installation configuration
-              type: object
-              required:
-                - rbacConfig
-              properties:
-                ha:
-                  description: Deploy Vault in HA mode (default true)
-                  type: boolean
-                  default: true
-                rbacConfig:
-                  description: Name of an RbacConfig in sovereign-cloud-plugins used for OIDC
-                  type: string
-            status:
-              description: Observed state after reconciliation
-              type: object
-              properties:
-                status:
-                  type: string
-                  description: Lifecycle status (reconciling, ready, failed)
-                lastReconciledAt:
-                  type: string
-                  format: date-time
-                  description: Timestamp of the last reconciliation attempt
-                message:
-                  type: string
-                  description: Human-readable status message (set on failure)
-                ready:
-                  type: boolean
-                vaultUrl:
-                  description: URL of the Vault instance
-                  type: string
-                vaultInternalUrl:
-                  description: In-cluster service URL
-                  type: string
-                adminSecretName:
-                  description: Name of Secret containing root token and unseal keys
-                  type: string
-                adminSecretNamespace:
-                  description: Namespace of admin secret
-                  type: string
-                oidcClientId:
-                  description: OIDC client ID configured in Keycloak
-                  type: string
-                entity:
-                  description: Entity this Vault belongs to
-                  type: string
-                deletionComplete:
-                  type: boolean
-                observedGeneration:
-                  type: integer
-                  format: int64
-                edaJobs:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                      url:
-                        type: string
-                      status:
-                        type: string
-                      timestamp:
-                        type: string
-                    x-kubernetes-preserve-unknown-fields: true
-                conditions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string
-              x-kubernetes-preserve-unknown-fields: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Name
-          type: string
-          jsonPath: .metadata.name
-        - name: URL
-          type: string
-          jsonPath: .status.vaultUrl
-        - name: Entity
-          type: string
-          jsonPath: .status.entity
-        - name: Status
-          type: string
-          jsonPath: .status.status
-        - name: Last-Reconciled
-          type: string
-          jsonPath: .status.lastReconciledAt
-        - name: Ready
-          type: boolean
-          jsonPath: .status.ready
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
----
-# Source: gitops/custom-operators/crds/crd-vaultkv.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: vaultkvs.hybridsovereign.redhat
   labels:
+    app.kubernetes.io/instance: hs-crds
     app.kubernetes.io/part-of: hybridsovereign-gitops
     hybridsovereign.redhat/gitops-owned: "true"
   annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/vaultkvs.hybridsovereign.redhat"
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
 spec:
@@ -5344,4 +4975,151 @@ spec:
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
-{{- end }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vaults.hybridsovereign.redhat
+  labels:
+    app.kubernetes.io/instance: hs-crds
+    app.kubernetes.io/part-of: hybridsovereign-gitops
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/tracking-id: "hs-crds:apiextensions.k8s.io/CustomResourceDefinition:sovereign-cloud/vaults.hybridsovereign.redhat"
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: "ServerSideApply=false,Replace=true"
+spec:
+  group: hybridsovereign.redhat
+  names:
+    kind: Vault
+    listKind: VaultList
+    plural: vaults
+    singular: vault
+    shortNames:
+      - vlt
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: >-
+            Vault provisions a dedicated HashiCorp Vault instance for a tenant entity.
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Desired Vault installation configuration
+              type: object
+              required:
+                - rbacConfig
+              properties:
+                ha:
+                  description: Deploy Vault in HA mode (default true)
+                  type: boolean
+                  default: true
+                rbacConfig:
+                  description: Name of an RbacConfig in sovereign-cloud-plugins used for OIDC
+                  type: string
+            status:
+              description: Observed state after reconciliation
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: Lifecycle status (reconciling, ready, failed)
+                lastReconciledAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last reconciliation attempt
+                message:
+                  type: string
+                  description: Human-readable status message (set on failure)
+                ready:
+                  type: boolean
+                vaultUrl:
+                  description: URL of the Vault instance
+                  type: string
+                vaultInternalUrl:
+                  description: In-cluster service URL
+                  type: string
+                adminSecretName:
+                  description: Name of Secret containing root token and unseal keys
+                  type: string
+                adminSecretNamespace:
+                  description: Namespace of admin secret
+                  type: string
+                oidcClientId:
+                  description: OIDC client ID configured in Keycloak
+                  type: string
+                entity:
+                  description: Entity this Vault belongs to
+                  type: string
+                deletionComplete:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                edaJobs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                      status:
+                        type: string
+                      timestamp:
+                        type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .metadata.name
+        - name: URL
+          type: string
+          jsonPath: .status.vaultUrl
+        - name: Entity
+          type: string
+          jsonPath: .status.entity
+        - name: Status
+          type: string
+          jsonPath: .status.status
+        - name: Last-Reconciled
+          type: string
+          jsonPath: .status.lastReconciledAt
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

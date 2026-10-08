@@ -49,9 +49,7 @@ spec:
                 Desired helper inputs forwarded to OSOHelper spec.environmentprep
                 on the central cluster.
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [cloudRef]
               properties:
                 cloudRef:
                   type: object
@@ -91,11 +89,9 @@ spec:
                 projectDomain:
                   type: string
                   description: Keystone domain name. Unset falls back to the CloudInfrastructure value.
-                  default: shc_domain  # TIGHTEN-LATER-REMOVE
                 externalNetwork:
                   type: string
                   description: External Neutron network. Unset falls back to the CloudInfrastructure value.
-                  default: ext-net  # TIGHTEN-LATER-REMOVE
                 route53VaultPath:
                   type: string
                   description: Vault path for Route53 credentials (e.g. oso/accounts/route53-openstack)
@@ -106,31 +102,9 @@ spec:
                 designateZoneId:
                   type: string
                   description: Designate zone UUID. Unset falls back to the CloudInfrastructure value.
-                  default: "895a1406-9ad2-4372-80f9-4e23fe1fd9ef"  # TIGHTEN-LATER-REMOVE
                 designateProjectId:
                   type: string
                   description: OpenStack project ID owning the Designate zone. Unset falls back to the CloudInfrastructure value.
-                  default: "4cdae8e2b49c4f1fa4b4a69be8ea43e7"  # TIGHTEN-LATER-REMOVE
-                # >>> TIGHTEN-LATER-DROP
-                enableVRF:
-                  type: boolean
-                  description: Deprecated; unused (fabric attachment is a NetworkPlacement).
-                  default: false
-                vrfId:
-                  type: string
-                  description: Deprecated; unused.
-                managementClusterKubeconfigRef:
-                  type: string
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.managementClusterKubeconfigRef.
-                dataplaneNodeSetRefs:
-                  type: array
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.dataplaneNodeSetRefs.
-                  items:
-                    type: string
-                netConfigRef:
-                  type: string
-                  description: Deprecated; moved to CloudInfrastructure.spec.openstack.netConfigRef.
-                # <<< TIGHTEN-LATER-DROP
             status:
               description: Observed OSOHelper outputs, Namespace labels/annotations, and readiness.
               type: object

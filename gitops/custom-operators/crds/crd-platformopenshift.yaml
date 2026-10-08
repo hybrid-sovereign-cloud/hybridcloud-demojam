@@ -172,15 +172,6 @@ spec:
                     (CG-NAT 100.64.0.0/10 space by default). Either way they are checked against the hub and the
                     other clusters on the same infrastructure.
                   properties:
-                    # >>> TIGHTEN-LATER-DROP
-                    allocateFromFabric:
-                      type: boolean
-                      description: Deprecated; CIDRs are allocated whenever clusterNetwork/serviceNetwork are omitted.
-                      default: true
-                    fabricRef:
-                      type: string
-                      description: Deprecated; clusters do not join a fabric.
-                    # <<< TIGHTEN-LATER-DROP
                     clusterNetwork:
                       type: array
                       items:
@@ -200,30 +191,6 @@ spec:
                       type: boolean
                       default: false
                       description: Accept CIDRs that conflict with the hub or other clusters.
-                # >>> TIGHTEN-LATER-DROP
-                fabric:
-                  type: object
-                  description: >-
-                    Deprecated and ignored. Clusters no longer join a HybridFabric; attach tenant workloads with a
-                    NetworkPlacement on a CloudOSO, CloudVirt or CloudAWS backend.
-                  properties:
-                    joinPolicy:
-                      type: string
-                      enum: [None, AutoWhenFabricReady, ExplicitOnly]
-                      default: AutoWhenFabricReady
-                    fabricRefs:
-                      type: array
-                      items:
-                        type: string
-                    preferredFabricRef:
-                      type: string
-                    manageGatewayAndLink:
-                      type: boolean
-                      default: true
-                    tunnelType:
-                      type: string
-                      enum: [wireguard, ipsec, macsec, none]
-                # <<< TIGHTEN-LATER-DROP
             status:
               description: Observed state
               type: object

@@ -40,9 +40,7 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [fabricRef, cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [fabricRef, cloudRef]
               properties:
                 enabled:
                   type: boolean
@@ -73,10 +71,7 @@ spec:
                         none: the site peers with the border gateway over the underlay. wireguard: a site gateway
                         VM tunnels to the border gateway (WireGuard carried over TLS through the hub ingress).
                         Defaults to the fabric's transportDefaults.defaultTunnelType.
-                      enum: [none, wireguard, ipsec, macsec]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [none, wireguard]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [none, wireguard]
                     vaultPeerConfigRef:
                       type: string
                       description: >-
@@ -91,12 +86,10 @@ spec:
                       description: >-
                         Site gateway tunnel address with prefix length, e.g. 10.254.254.12/32. Allocated from the
                         border gateway's tunnel subnet when omitted.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be an address with prefix length
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be an address with prefix length
                 siteUnderlay:
                   type: object
                   description: >-
@@ -117,44 +110,22 @@ spec:
                     cidr:
                       type: string
                       description: Site underlay CIDR, e.g. 192.168.80.0/24
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be a CIDR
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be a CIDR
                     gatewayAddress:
                       type: string
                       description: Site gateway address. Defaults to the first host of cidr.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
                     mtu:
                       type: integer
                       default: 1442
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
-                    # >>> TIGHTEN-LATER-DROP
-                    macNatShim:
-                      type: object
-                      description: Deprecated; use spec.macNatShim.
-                      properties:
-                        enabled:
-                          type: boolean
-                          default: false
-                        vmMac:
-                          type: string
-                          default: "02:fa:b0:50:00:01"
-                          description: MAC address of the site gateway VM underlay interface.
-                        interface:
-                          type: string
-                          description: Node NIC to translate on. Defaults to siteUnderlay.interface.
-                    # <<< TIGHTEN-LATER-DROP
+                      minimum: 1280
+                      maximum: 9216
                 macNatShim:
                   type: object
                   description: >-
@@ -172,37 +143,6 @@ spec:
                       description: >-
                         Node NIC to translate on. Defaults to siteUnderlay.interface (openstack) or the node's
                         primary NIC (openshift).
-                # >>> TIGHTEN-LATER-DROP
-                cloud:
-                  type: string
-                  description: Deprecated; derived from the CloudInfrastructure type.
-                  enum: [aws, openstack, openshift]
-                region:
-                  type: string
-                  description: Deprecated; comes from the CloudInfrastructure.
-                domainAsn:
-                  type: integer
-                  description: Deprecated; the fabric ASN (HybridFabric.spec.domainAsn) is used.
-                landingZoneTemplate:
-                  type: string
-                  description: Deprecated; unused.
-                  default: default
-                managementClusterKubeconfigRef:
-                  type: string
-                  description: Deprecated; use CloudInfrastructure.spec.openstack.managementClusterKubeconfigRef.
-                awsAccountId:
-                  type: string
-                  description: Deprecated; use CloudInfrastructure.spec.aws.accountId.
-                openstackCloudOSORef:
-                  type: string
-                  description: Deprecated; use spec.cloudRef.
-                platformOpenshiftRef:
-                  type: string
-                  description: Deprecated; hosted clusters no longer attach to the fabric.
-                virtCloudVirtRef:
-                  type: string
-                  description: Deprecated; use spec.cloudRef.
-                # <<< TIGHTEN-LATER-DROP
             status:
               type: object
               properties:

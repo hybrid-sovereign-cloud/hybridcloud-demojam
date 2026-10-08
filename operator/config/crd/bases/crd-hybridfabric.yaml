@@ -45,12 +45,10 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [domainAsn, vniPool, underlay, borderGateway]
-              # x-kubernetes-validations:
-              #   - rule: "self.domainAsn <= 65535 || self.vniPool.end <= 65535"
-              #     message: with a 4-byte domainAsn the route target (ASN:VNI) limits vniPool.end to 65535
-              # <<< TIGHTEN-LATER-ADD
+              required: [domainAsn, vniPool, underlay, borderGateway]
+              x-kubernetes-validations:
+                - rule: "self.domainAsn <= 65535 || self.vniPool.end <= 65535"
+                  message: with a 4-byte domainAsn the route target (ASN:VNI) limits vniPool.end to 65535
               properties:
                 enabled:
                   type: boolean
@@ -60,61 +58,33 @@ spec:
                   description: Fabric BGP autonomous system (iBGP between the border gateway and all sites).
                   minimum: 1
                   maximum: 4294967295
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: domainAsn is immutable
-                  # <<< TIGHTEN-LATER-ADD
-                # >>> TIGHTEN-LATER-DROP
-                routeReflectors:
-                  type: array
-                  description: >-
-                    Deprecated. Hub route-reflector pods; superseded by spec.borderGateway. Leave empty for new fabrics.
-                  items:
-                    type: object
-                    required: [name, address]
-                    properties:
-                      name:
-                        type: string
-                      address:
-                        type: string
-                      nodeName:
-                        type: string
-                        description: >-
-                          Optional node pin for the route-reflector pod (deprecated).
-                # <<< TIGHTEN-LATER-DROP
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: domainAsn is immutable
                 vniPool:
                   type: object
                   description: VNI range allocated to HybridNetworks (one VNI per tenant VRF).
                   required: [start, end]
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self.start <= self.end
-                  #     message: vniPool.start must not exceed vniPool.end
-                  #   - rule: self == oldSelf
-                  #     message: vniPool is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self.start <= self.end
+                      message: vniPool.start must not exceed vniPool.end
+                    - rule: self == oldSelf
+                      message: vniPool is immutable
                   properties:
                     start:
                       type: integer
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1
-                      # maximum: 16777215
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1
+                      maximum: 16777215
                     end:
                       type: integer
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1
-                      # maximum: 16777215
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1
+                      maximum: 16777215
                 underlay:
                   type: object
                   description: >-
                     Fabric underlay address plan and the border gateway's underlay leg on the hub. Site underlays
                     and hub VTEP addresses are carved from cidr; fabric-wide unique.
-                  # >>> TIGHTEN-LATER-ADD
-                  # required: [cidr]
-                  # <<< TIGHTEN-LATER-ADD
+                  required: [cidr]
                   x-kubernetes-validations:
                     - rule: "(has(self.type) && self.type == 'localnet') || (!has(self.hubVtepBlock) && !has(self.hubLegAddress))"
                       message: underlay.hubVtepBlock and underlay.hubLegAddress require underlay.type localnet
@@ -151,23 +121,19 @@ spec:
                       description: Underlay CIDR, e.g. 192.168.64.0/18
                       # Bounded now so the underlay CEL rules stay within the cost budget.
                       maxLength: 64
-                      # >>> TIGHTEN-LATER-ADD
-                      # x-kubernetes-validations:
-                      #   - rule: isCIDR(self)
-                      #     message: must be a CIDR
-                      #   - rule: self == oldSelf
-                      #     message: underlay.cidr is immutable
-                      # <<< TIGHTEN-LATER-ADD
+                      x-kubernetes-validations:
+                        - rule: isCIDR(self)
+                          message: must be a CIDR
+                        - rule: self == oldSelf
+                          message: underlay.cidr is immutable
                     gatewayAddress:
                       type: string
                       description: >-
                         type ovn-layer2: border gateway address on the underlay. Defaults to the first host of cidr.
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
                     hubVtepBlock:
                       type: string
                       maxLength: 64
@@ -201,19 +167,15 @@ spec:
                     mtu:
                       type: integer
                       default: 1400
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1280
+                      maximum: 9216
                 borderGateway:
                   type: object
                   description: >-
                     Border gateway virtual machine on the hub: fabric route reflector (l2vpn evpn, ipv4
                     unicast), DHCP server and router for spec.underlay, and tunnel endpoint for remote site
                     gateways.
-                  # >>> TIGHTEN-LATER-ADD
-                  # required: [loopback]
-                  # <<< TIGHTEN-LATER-ADD
+                  required: [loopback]
                   properties:
                     name:
                       type: string
@@ -221,14 +183,12 @@ spec:
                     loopback:
                       type: string
                       description: BGP router ID and the address all spokes peer with, e.g. 10.255.10.10
-                      # >>> TIGHTEN-LATER-ADD
-                      # maxLength: 64
-                      # x-kubernetes-validations:
-                      #   - rule: isIP(self)
-                      #     message: must be an IP address
-                      #   - rule: self == oldSelf
-                      #     message: borderGateway.loopback is immutable
-                      # <<< TIGHTEN-LATER-ADD
+                      maxLength: 64
+                      x-kubernetes-validations:
+                        - rule: isIP(self)
+                          message: must be an IP address
+                        - rule: self == oldSelf
+                          message: borderGateway.loopback is immutable
                     vaultCredentialRef:
                       type: string
                       description: >-
@@ -241,26 +201,20 @@ spec:
                           type: string
                           default: 10.254.254.1/24
                           description: Tunnel interface address with prefix length.
-                          # >>> TIGHTEN-LATER-ADD
-                          # maxLength: 64
-                          # x-kubernetes-validations:
-                          #   - rule: isCIDR(self)
-                          #     message: must be an address with prefix length
-                          # <<< TIGHTEN-LATER-ADD
+                          maxLength: 64
+                          x-kubernetes-validations:
+                            - rule: isCIDR(self)
+                              message: must be an address with prefix length
                         listenPort:
                           type: integer
                           default: 51820
-                          # >>> TIGHTEN-LATER-ADD
-                          # minimum: 1
-                          # maximum: 65535
-                          # <<< TIGHTEN-LATER-ADD
+                          minimum: 1
+                          maximum: 65535
                         mtu:
                           type: integer
                           default: 1380
-                          # >>> TIGHTEN-LATER-ADD
-                          # minimum: 1280
-                          # maximum: 9216
-                          # <<< TIGHTEN-LATER-ADD
+                          minimum: 1280
+                          maximum: 9216
                     ingressHost:
                       type: string
                       description: >-
@@ -303,24 +257,13 @@ spec:
                     mtu:
                       type: integer
                       default: 1442
-                      # >>> TIGHTEN-LATER-ADD
-                      # minimum: 1280
-                      # maximum: 9216
-                      # <<< TIGHTEN-LATER-ADD
+                      minimum: 1280
+                      maximum: 9216
                     defaultTunnelType:
                       type: string
                       description: Transport used by CloudGateways that do not set spec.transport.type.
-                      enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [none, wireguard]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [none, wireguard]
                       default: wireguard
-                # >>> TIGHTEN-LATER-DROP
-                numberingAuthority:
-                  type: object
-                  description: Deprecated; unused.
-                  x-kubernetes-preserve-unknown-fields: true
-                # <<< TIGHTEN-LATER-DROP
                 entityRefs:
                   type: array
                   description: >-

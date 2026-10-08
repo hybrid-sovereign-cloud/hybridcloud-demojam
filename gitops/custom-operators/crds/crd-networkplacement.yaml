@@ -45,9 +45,7 @@ spec:
               type: object
             spec:
               type: object
-              # >>> TIGHTEN-LATER-ADD
-              # required: [network, backend]
-              # <<< TIGHTEN-LATER-ADD
+              required: [network, backend]
               x-kubernetes-validations:
                 - rule: "!has(self.vmNamespaces) || (has(self.backend) && self.backend.kind == 'CloudVirt')"
                   message: vmNamespaces is only valid for backend kind CloudVirt
@@ -55,28 +53,21 @@ spec:
                 network:
                   type: string
                   description: HybridNetwork name in the same namespace.
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: network is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: network is immutable
                 backend:
                   type: object
                   description: Tenant cloud project the network is placed on, in the same namespace.
                   required: [kind, name]
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: backend is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: backend is immutable
                   properties:
                     kind:
                       type: string
                       description: PlatformOpenshift is deprecated (hosted clusters do not attach to the fabric).
-                      enum: [CloudAWS, CloudOSO, CloudVirt, PlatformOpenshift]  # TIGHTEN-LATER-REMOVE
-                      # >>> TIGHTEN-LATER-ADD
-                      # enum: [CloudAWS, CloudOSO, CloudVirt]
-                      # <<< TIGHTEN-LATER-ADD
+                      enum: [CloudAWS, CloudOSO, CloudVirt]
                     name:
                       type: string
                 prefixes:
@@ -84,17 +75,13 @@ spec:
                   description: >-
                     Overlay prefixes for this placement. Unique within the HybridNetwork. CloudVirt prefixes must
                     not overlap the hub's cluster, service or node networks.
-                  # >>> TIGHTEN-LATER-ADD
-                  # maxItems: 64
-                  # <<< TIGHTEN-LATER-ADD
+                  maxItems: 64
                   items:
                     type: string
-                    # >>> TIGHTEN-LATER-ADD
-                    # maxLength: 64
-                    # x-kubernetes-validations:
-                    #   - rule: isCIDR(self)
-                    #     message: must be a CIDR
-                    # <<< TIGHTEN-LATER-ADD
+                    maxLength: 64
+                    x-kubernetes-validations:
+                      - rule: isCIDR(self)
+                        message: must be a CIDR
                 vmNamespaces:
                   type: array
                   description: >-
@@ -108,13 +95,6 @@ spec:
                     type: string
                     maxLength: 63
                     pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
-                # >>> TIGHTEN-LATER-DROP
-                state:
-                  type: string
-                  description: Deprecated; delete the NetworkPlacement to remove it.
-                  enum: [present, absent]
-                  default: present
-                # <<< TIGHTEN-LATER-DROP
             status:
               type: object
               properties:

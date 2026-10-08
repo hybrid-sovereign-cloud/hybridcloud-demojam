@@ -59,10 +59,7 @@ spec:
                 tunnelType:
                   type: string
                   description: Copied from CloudGateway.spec.transport.type.
-                  enum: [wireguard, ipsec, macsec, none]  # TIGHTEN-LATER-REMOVE
-                  # >>> TIGHTEN-LATER-ADD
-                  # enum: [none, wireguard]
-                  # <<< TIGHTEN-LATER-ADD
+                  enum: [none, wireguard]
             status:
               type: object
               properties:

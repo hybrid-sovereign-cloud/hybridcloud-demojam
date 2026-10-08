@@ -48,10 +48,7 @@ spec:
               type: object
             spec:
               type: object
-              required: [baseDomain]  # TIGHTEN-LATER-REMOVE
-              # >>> TIGHTEN-LATER-ADD
-              # required: [baseDomain, cloudRef]
-              # <<< TIGHTEN-LATER-ADD
+              required: [baseDomain, cloudRef]
               properties:
                 cloudRef:
                   type: object
@@ -80,11 +77,6 @@ spec:
                           - type: integer
                           - type: string
                         x-kubernetes-int-or-string: true
-                # >>> TIGHTEN-LATER-DROP
-                vaultPath:
-                  type: string
-                  description: Deprecated; set spec.cloudRef. Vault KV path for virt environment credentials.
-                # <<< TIGHTEN-LATER-DROP
                 baseDomain:
                   type: string
                   description: Parent DNS domain for virt workloads (no cluster URL)
@@ -95,40 +87,6 @@ spec:
                 networkAttachment:
                   type: string
                   description: Optional NAD name for secondary networking
-                # >>> TIGHTEN-LATER-DROP
-                hostedClusterCidrDefaults:
-                  type: object
-                  description: >-
-                    Deprecated; moved to CloudInfrastructure.spec.openshift.hostedClusterCidrDefaults.
-                  properties:
-                    clusterNetworkPool:
-                      type: object
-                      description: Pod CIDR range, carved per cluster.
-                      properties:
-                        cidr:
-                          type: string
-                          default: 100.64.0.0/11
-                        blockPrefixLength:
-                          type: integer
-                          default: 14
-                    serviceNetworkPool:
-                      type: object
-                      description: Service CIDR range, carved per cluster.
-                      properties:
-                        cidr:
-                          type: string
-                          default: 100.96.0.0/11
-                        blockPrefixLength:
-                          type: integer
-                          default: 16
-                enableVRF:
-                  type: boolean
-                  description: Deprecated; unused (fabric attachment is a NetworkPlacement).
-                  default: false
-                vrfId:
-                  type: string
-                  description: Deprecated; unused.
-                # <<< TIGHTEN-LATER-DROP
                 toolRbac:
                   type: object
                   properties:

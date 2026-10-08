@@ -54,11 +54,9 @@ spec:
                   description: >-
                     Optional HybridFabric name in sovereign-cloud. When set, VNI/RT
                     allocation uses this fabric; must be entity-visible and Ready.
-                  # >>> TIGHTEN-LATER-ADD
-                  # x-kubernetes-validations:
-                  #   - rule: self == oldSelf
-                  #     message: fabricRef is immutable
-                  # <<< TIGHTEN-LATER-ADD
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: fabricRef is immutable
                 overlayMtu:
                   type: integer
                   minimum: 1280
