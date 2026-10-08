@@ -821,6 +821,12 @@ spec:
     repoURL: {{ $repo | quote }}
     targetRevision: {{ $rev | quote }}
     path: gitops/apps/ui
+    {{- with .Values.ui }}{{- if .images }}
+    helm:
+      valuesObject:
+        images:
+          {{- toYaml .images | nindent 10 }}
+    {{- end }}{{- end }}
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-ui

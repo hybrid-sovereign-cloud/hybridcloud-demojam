@@ -95,3 +95,13 @@ namespaces:
   - external-secrets  # ESO operand controllers (OpenShift ESO)
   - multicluster-engine  # MCE (hs-mce); never prune
   - open-cluster-management  # ACM hub (hs-acm); never prune
+
+# UI images (gitops/apps/ui). Empty keeps the quay.io/gauravshankar defaults;
+# set to internally built digests (gitops/builds BuildConfigs) to run UI code
+# from this repo, e.g. image-registry.openshift-image-registry.svc:5000/sovereign-cloud/sovereign-admin-plugin@sha256:...
+ui:
+  images:
+    adminPlugin: ""
+    tenantPlugin: ""
+    adminDashboard: ""
+    tenantDashboard: ""

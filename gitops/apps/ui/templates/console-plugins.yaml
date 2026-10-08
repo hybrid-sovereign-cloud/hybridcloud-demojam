@@ -39,7 +39,7 @@ spec:
       serviceAccountName: sovereign-admin-plugin
       containers:
         - name: plugin
-          image: quay.io/gauravshankar/sovereign-admin-plugin:latest
+          image: {{ (.Values.images).adminPlugin | default "quay.io/gauravshankar/sovereign-admin-plugin:latest" }}
           imagePullPolicy: Always
           ports:
             - containerPort: 9001
@@ -84,7 +84,7 @@ spec:
       serviceAccountName: sovereign-tenant-plugin
       containers:
         - name: plugin
-          image: quay.io/gauravshankar/sovereign-tenant-plugin:latest
+          image: {{ (.Values.images).tenantPlugin | default "quay.io/gauravshankar/sovereign-tenant-plugin:latest" }}
           imagePullPolicy: Always
           ports:
             - containerPort: 9001

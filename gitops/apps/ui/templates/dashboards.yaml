@@ -173,7 +173,7 @@ spec:
               cpu: 200m
               memory: 128Mi
         - name: dashboard
-          image: quay.io/gauravshankar/sovereign-cloud-dashboard:latest
+          image: {{ (.Values.images).adminDashboard | default "quay.io/gauravshankar/sovereign-cloud-dashboard:latest" }}
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -334,7 +334,7 @@ spec:
               cpu: 200m
               memory: 128Mi
         - name: dashboard
-          image: quay.io/gauravshankar/tenancy-dashboard:latest
+          image: {{ (.Values.images).tenantDashboard | default "quay.io/gauravshankar/tenancy-dashboard:latest" }}
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
