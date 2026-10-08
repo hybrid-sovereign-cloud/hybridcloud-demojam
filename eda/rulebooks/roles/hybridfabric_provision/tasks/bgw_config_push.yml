@@ -132,7 +132,8 @@
     bgw_config_applied_inplace: true
     bgw_apply_note: >-
       (config applied in place: frr {{ bgw_push_result.frr | default('?') }}, nft {{ bgw_push_result.nft | default('?') }},
-      wg {{ bgw_push_result.wg | default('?') }}, dnsmasq {{ bgw_push_result.dnsmasq | default('?') }})
+      wg {{ bgw_push_result.wg | default('?') }}, dnsmasq {{ bgw_push_result.dnsmasq | default('?') }}{{
+      (', hubleg ' ~ bgw_push_result.hubleg) if (bgw_push_result.hubleg is defined) else '' }})
 
 # Fallback: the pre-restructure behaviour (the guest re-reads the config disk at boot).
 - name: Restart the BGW VMI when the in-place push is not possible

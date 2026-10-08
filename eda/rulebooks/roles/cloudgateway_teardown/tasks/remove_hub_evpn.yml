@@ -1,0 +1,231 @@
+---
+# Remove the hub CNV EVPN landing (counterpart of cloudgateway_provision
+# openshift_hub_evpn.yml): FRRConfiguration <fabric>-bgw, VTEP <fabric>-vtep,
+# DaemonSet/ConfigMap/RoleBinding/SA <fabric>-hub-underlay. The localnet NAD
+# and the BGW hub leg belong to the HybridFabric and stay.
+#
+# These objects are fabric-scoped, so they are kept while another openshift
+# CloudGateway on the same fabric exists, and the teardown is BLOCKED (fails,
+# the operator retries) while a CloudVirt NetworkPlacement on this fabric
+# remains: its Layer2 CUDN needs the VTEP and the node legs.
+#
+# Expected: cgwt_lookup (the CloudGateway), cgwt_spec, rcs_* facts,
+#           cloudgateway_cr_name/namespace, services_api_host/services_bearer_token.
+# Sets: cgwt_hub_message
+
+- name: Read the gateway's HybridFabric
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: HybridFabric
+    name: "{{ cgwt_spec.fabricRef }}"
+    namespace: sovereign-cloud
+  register: _cgwt_fabric
+
+# Names depend on the fabric name only; a fabric already gone still resolves them.
+- name: Resolve hub EVPN names
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/hub_evpn_names.yml"
+  vars:
+    hen_fabric: >-
+      {{
+        (_cgwt_fabric.resources | default([]) + [{'metadata': {'name': cgwt_spec.fabricRef, 'namespace': 'sovereign-cloud'}, 'spec': {}}])[0]
+      }}
+
+- name: List CloudGateways, CloudInfrastructures, NetworkPlacements and HybridNetworks
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: "{{ item }}"
+  loop: [CloudGateway, CloudInfrastructure, NetworkPlacement, HybridNetwork]
+  register: _cgwt_lists
+
+- name: Find remaining users of the hub landing
+  block:
+    - name: Write lists to files
+      ansible.builtin.copy:
+        content: "{{ item.resources | default([]) | to_json }}"
+        dest: "/tmp/cgwt-{{ cloudgateway_cr_name }}-{{ item.item | lower }}.json"
+        mode: "0600"
+      loop: "{{ _cgwt_lists.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Count other openshift gateways and CloudVirt placements on this fabric
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 <<'PY'
+        import json, os
+        d = os.environ["DIR"]
+        L = lambda k: json.load(open("%s-%s.json" % (d, k)))
+        fabric, me, my_ns = os.environ["FABRIC"], os.environ["SELF"], os.environ["SELF_NS"]
+        ci_type = {c["metadata"]["name"]: (c.get("spec") or {}).get("type") for c in L("cloudinfrastructure")}
+        gws = []
+        for g in L("cloudgateway"):
+            md, sp = g["metadata"], g.get("spec") or {}
+            if (md["name"], md.get("namespace")) == (me, my_ns) or md.get("deletionTimestamp"):
+                continue
+            ref = (sp.get("cloudRef") or {}).get("name")
+            if sp.get("fabricRef") == fabric and ref and ci_type.get(ref) == "openshift":
+                gws.append(md["name"])
+        hn_fabric = {(h["metadata"].get("namespace"), h["metadata"]["name"]): (h.get("status") or {}).get("fabric")
+                     for h in L("hybridnetwork")}
+        nps = []
+        for p in L("networkplacement"):
+            md, sp = p["metadata"], p.get("spec") or {}
+            if (sp.get("backend") or {}).get("kind") != "CloudVirt":
+                continue
+            if hn_fabric.get((md.get("namespace"), sp.get("network"))) == fabric:
+                nps.append("%s/%s" % (md.get("namespace"), md["name"]))
+        print(json.dumps({"gateways": sorted(gws), "placements": sorted(nps)}))
+        PY
+      args:
+        executable: /bin/bash
+      environment:
+        DIR: "/tmp/cgwt-{{ cloudgateway_cr_name }}"
+        FABRIC: "{{ hen_fabric_name }}"
+        SELF: "{{ cloudgateway_cr_name }}"
+        SELF_NS: "{{ cloudgateway_cr_namespace }}"
+      register: _cgwt_users
+      changed_when: false
+  always:
+    - name: Remove list files
+      ansible.builtin.file:
+        path: "/tmp/cgwt-{{ cloudgateway_cr_name }}-{{ item | lower }}.json"
+        state: absent
+      loop: [CloudGateway, CloudInfrastructure, NetworkPlacement, HybridNetwork]
+
+- name: Set remaining-user facts
+  ansible.builtin.set_fact:
+    _cgwt_other_gateways: "{{ (_cgwt_users.stdout | from_json).gateways }}"
+    _cgwt_placements: "{{ (_cgwt_users.stdout | from_json).placements }}"
+
+# Placements still being deleted count too: their teardown removes the CUDN.
+- name: Block while CloudVirt placements remain on this fabric
+  when:
+    - _cgwt_other_gateways | length == 0
+    - _cgwt_placements | length > 0
+  ansible.builtin.fail:
+    msg: >-
+      Blocked: CloudVirt NetworkPlacement(s) {{ _cgwt_placements | join(', ') }} still use the hub
+      EVPN landing of fabric {{ hen_fabric_name }} (VTEP {{ hen_vtep_name }}). Delete them first.
+
+- name: Keep the hub landing for the other openshift gateway(s)
+  when: _cgwt_other_gateways | length > 0
+  ansible.builtin.set_fact:
+    cgwt_hub_message: >-
+      hub EVPN landing of fabric {{ hen_fabric_name }} kept (still used by CloudGateway(s)
+      {{ _cgwt_other_gateways | join(', ') }}).
+
+- name: Remove the hub landing
+  when: _cgwt_other_gateways | length == 0
+  block:
+    - name: Remove FRRConfiguration and VTEP CR
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: "{{ item.api_version }}"
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+        namespace: "{{ item.namespace | default(omit) }}"
+      loop:
+        - {api_version: frrk8s.metallb.io/v1beta1, kind: FRRConfiguration, name: "{{ hen_frr_name }}", namespace: "{{ hen_frr_namespace }}"}
+        - {api_version: k8s.ovn.org/v1, kind: VTEP, name: "{{ hen_vtep_name }}"}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.name }}"
+
+    - name: Read the hub underlay DaemonSet
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: apps/v1
+        kind: DaemonSet
+        name: "{{ hen_underlay_ds }}"
+        namespace: "{{ hen_namespace }}"
+      register: _cgwt_ds
+
+    # The pods keep node state across restarts; the remove pass takes the VTEP
+    # address, routes and MAC-NAT shim off every node before the DaemonSet goes.
+    - name: Run the DaemonSet's remove pass
+      when: (_cgwt_ds.resources | default([])) | length > 0
+      block:
+        - name: Switch the DaemonSet to HUB_UNDERLAY_MODE=remove
+          kubernetes.core.k8s:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            state: patched
+            api_version: apps/v1
+            kind: DaemonSet
+            name: "{{ hen_underlay_ds }}"
+            namespace: "{{ hen_namespace }}"
+            definition:
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: underlay
+                        env:
+                          - name: HUB_UNDERLAY_MODE
+                            value: remove
+
+        - name: Wait for every node to finish the remove pass
+          kubernetes.core.k8s_info:
+            host: "{{ services_api_host }}"
+            api_key: "{{ services_bearer_token }}"
+            validate_certs: false
+            api_version: apps/v1
+            kind: DaemonSet
+            name: "{{ hen_underlay_ds }}"
+            namespace: "{{ hen_namespace }}"
+          register: _cgwt_ds_rm
+          until: >-
+            (_cgwt_ds_rm.resources | default([]) | length > 0)
+            and ((_cgwt_ds_rm.resources[0].status.observedGeneration | default(0) | int)
+                 >= (_cgwt_ds_rm.resources[0].metadata.generation | default(1) | int))
+            and ((_cgwt_ds_rm.resources[0].status.updatedNumberScheduled | default(0) | int)
+                 == (_cgwt_ds_rm.resources[0].status.desiredNumberScheduled | default(0) | int))
+            and ((_cgwt_ds_rm.resources[0].status.numberReady | default(0) | int)
+                 == (_cgwt_ds_rm.resources[0].status.desiredNumberScheduled | default(0) | int))
+          retries: "{{ cgwt_hub_wait_retries | int }}"
+          delay: "{{ cgwt_hub_wait_delay | int }}"
+          failed_when: false
+
+        - name: Note an incomplete remove pass
+          vars:
+            _st: "{{ (_cgwt_ds_rm.resources | default([]) + [{}])[0].status | default({}) }}"
+          when: >-
+            (_st.updatedNumberScheduled | default(0) | int) != (_st.desiredNumberScheduled | default(-1) | int)
+            or (_st.numberReady | default(0) | int) != (_st.desiredNumberScheduled | default(-1) | int)
+          ansible.builtin.set_fact:
+            _cgwt_rm_note: " (remove pass not confirmed on every node; check br-ex addresses in {{ hen_vtep_block }} and nft table netdev fabricmacnat)"
+
+    - name: Delete the hub underlay DaemonSet, ConfigMap, RoleBinding and ServiceAccount
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: "{{ item.api_version }}"
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+        namespace: "{{ hen_namespace }}"
+      loop:
+        - {api_version: apps/v1, kind: DaemonSet, name: "{{ hen_underlay_ds }}"}
+        - {api_version: v1, kind: ConfigMap, name: "{{ hen_underlay_ds }}"}
+        - {api_version: rbac.authorization.k8s.io/v1, kind: RoleBinding, name: "{{ hen_underlay_ds }}-privileged"}
+        - {api_version: v1, kind: ServiceAccount, name: "{{ hen_underlay_ds }}"}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.name }}"
+
+    - name: Set teardown message
+      ansible.builtin.set_fact:
+        cgwt_hub_message: >-
+          hub EVPN landing of fabric {{ hen_fabric_name }} removed (FRRConfiguration {{ hen_frr_name }},
+          VTEP {{ hen_vtep_name }}, DaemonSet {{ hen_underlay_ds }}){{ _cgwt_rm_note | default('') }}.

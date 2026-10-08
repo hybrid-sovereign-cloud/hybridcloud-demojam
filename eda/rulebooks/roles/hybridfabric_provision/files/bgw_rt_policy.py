@@ -15,12 +15,16 @@
 #            on a CloudOSO whose cloudRef (deprecated: name == openstackCloudOSORef)
 #            is the gateway's site.
 #   TUNNEL   the BGW tunnel subnet (no BGP speakers expected): EVPN denied.
+# Hub CNV (localnet fabric, HUB_VTEP_BLOCK set): a CloudVirt placement also adds
+# the macVRF RT <asn>:<L2VNI_OFFSET + vni> to HUB (Layer2 CUDN Type-2 routes), and
+# the HUB listen ranges must cover the hub VTEP block (hub node VTEPs peer from it).
 # FRR rejects overlapping listen ranges, so HUB is the underlay with the site
 # CIDRs carved out (ipaddress.address_exclude).
 #
 # Inputs (files, JSON): GATEWAYS_FILE [{name, siteCidr, site, legacyCloudOSO}],
 #   PLACEMENTS_FILE, NETWORKS_FILE, CLOUDOSOS_FILE (k8s list items).
-# Env: FABRIC, UNDERLAY_CIDR, WG_NETWORK, ALLOWED_RTS (JSON list), ASN.
+# Env: FABRIC, UNDERLAY_CIDR, WG_NETWORK, ALLOWED_RTS (JSON list), ASN,
+#   L2VNI_OFFSET, HUB_VTEP_BLOCK (localnet fabrics only).
 # Output: {"groups": [{name, kind, ranges, rts, gateway}], "spokesRanges": [...], "errors": [...]}
 import ipaddress
 import json
@@ -53,7 +57,13 @@ def pg_name(prefix, name):
     return prefix + re.sub(r"[^A-Za-z0-9_-]", "-", name)
 
 
-def plan(fabric, underlay, wg_net, allowed, gateways, placements, networks, cloudosos):
+def l2_rt(rt, offset):
+    a, _, v = rt.partition(":")
+    return "%s:%d" % (a, offset + int(v)) if v.isdigit() else ""
+
+
+def plan(fabric, underlay, wg_net, allowed, gateways, placements, networks, cloudosos,
+         l2_offset=0, hub_block=""):
     errors = []
     allowed = set(allowed)
     nets = {}
@@ -98,6 +108,10 @@ def plan(fabric, underlay, wg_net, allowed, gateways, placements, networks, clou
         kind, name = backend.get("kind"), backend.get("name")
         if kind in ("CloudVirt", "PlatformOpenshift"):
             hub_rts.add(rt)
+            if kind == "CloudVirt" and hub_block and l2_offset:
+                l2 = l2_rt(rt, l2_offset)
+                if l2 and l2 in allowed:
+                    hub_rts.add(l2)
         elif kind == "CloudOSO":
             infra = osos.get((md.get("namespace"), name), "")
             for s in sites:
@@ -112,6 +126,9 @@ def plan(fabric, underlay, wg_net, allowed, gateways, placements, networks, clou
     hub_ranges = carve(underlay, [s["siteCidr"] for s in sites]) if underlay else []
     groups.append({"name": "HUB", "kind": "hub", "ranges": hub_ranges,
                    "rts": sorted(hub_rts, key=key), "gateway": ""})
+    if hub_block and not any(N(hub_block).subnet_of(N(r)) for r in hub_ranges):
+        errors.append("hub VTEP block %s is not inside the HUB listen ranges %s (a site underlay overlaps it)"
+                      % (hub_block, hub_ranges))
     for s in sites:
         groups.append({"name": pg_name("SITE-", s["name"]), "kind": "site", "ranges": [s["siteCidr"]],
                        "rts": sorted(site_rts[s["name"]], key=key), "gateway": s["name"]})
@@ -145,6 +162,8 @@ def main():
         load("PLACEMENTS_FILE"),
         load("NETWORKS_FILE"),
         load("CLOUDOSOS_FILE"),
+        int(os.environ.get("L2VNI_OFFSET") or 0),
+        os.environ.get("HUB_VTEP_BLOCK", ""),
     )
     print(json.dumps(out))
     return 0

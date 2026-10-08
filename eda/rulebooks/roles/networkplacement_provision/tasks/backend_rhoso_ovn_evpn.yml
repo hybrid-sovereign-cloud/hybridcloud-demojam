@@ -243,7 +243,7 @@
                   np_os_env | combine({
                     'OS_CLOUD': np_os_cloud_name,
                     'PREFIXES_JSON': (np_spec.prefixes | default([]) | to_json),
-                    'NET_MTU': (np_oso_network_mtu | string)
+                    'NET_MTU': (np_overlay_mtu | default(np_oso_network_mtu, true) | string)
                   })
                 }}
               register: np_sdk_net_raw

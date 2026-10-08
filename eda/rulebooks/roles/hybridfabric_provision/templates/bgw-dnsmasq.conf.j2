@@ -4,10 +4,17 @@ interface=eth1
 bind-interfaces
 except-interface=lo
 dhcp-authoritative
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+# eth1 only; the hub VTEP block {{ bgw_hub_vtep_block }} (hub leg eth2, node VTEPs) is cut out.
+{% for r in bgw_dhcp_ranges %}
+dhcp-range={{ r[0] }},{{ r[1] }},{{ bgw_underlay_netmask }},{{ bgw_dhcp_lease }}
+{% endfor %}
+{% else %}
 dhcp-range={{ bgw_dhcp_start }},{{ bgw_dhcp_end }},{{ bgw_underlay_netmask }},{{ bgw_dhcp_lease }}
+{% endif %}
 dhcp-option=3
 dhcp-option=6
-dhcp-option=121,{{ bgw_loopback }}/32,{{ bgw_underlay_address }}{% for p in bgw_peers %},{{ p.siteCidr }},{{ bgw_underlay_address }}{% endfor %}
+dhcp-option=121,{{ bgw_loopback }}/32,{{ bgw_underlay_address }}{% for p in bgw_peers %},{{ p.siteCidr }},{{ bgw_underlay_address }}{% endfor %}{% if bgw_hub_leg_enabled | default(false) | bool %},{{ bgw_hub_vtep_block }},{{ bgw_underlay_address }}{% endif %}
 
 dhcp-option=option:mtu,{{ bgw_underlay_mtu }}
 log-dhcp

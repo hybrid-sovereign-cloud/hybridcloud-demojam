@@ -12,6 +12,11 @@ table inet fabric {
     iifname "eth0" udp sport 67 udp dport 68 accept
     iifname { "eth1", "wg0" } tcp dport 179 accept
     iifname { "eth1", "wg0" } udp dport { 67, 4789 } accept
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+    # hub leg (localnet, hub node VTEPs {{ bgw_hub_vtep_block }}): BGP + VXLAN, no DHCP
+    iifname "eth2" tcp dport 179 accept
+    iifname "eth2" udp dport 4789 accept
+{% endif %}
     iifname "lo" udp dport {{ bgw_wg_listen_port }} accept
   }
   chain forward {
@@ -19,6 +24,10 @@ table inet fabric {
     ct state established,related accept
     iifname "eth1" oifname "wg0" accept
     iifname "wg0" oifname "eth1" accept
+{% if bgw_hub_leg_enabled | default(false) | bool %}
+    iifname "eth2" oifname { "wg0", "eth1" } accept
+    iifname { "wg0", "eth1" } oifname "eth2" accept
+{% endif %}
   }
   chain output {
     type filter hook output priority 0; policy accept;

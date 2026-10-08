@@ -24,6 +24,7 @@
     bgw_dnsmasq_conf: "{{ lookup('template', 'bgw-dnsmasq.conf.j2') }}"
     bgw_fabric_nft: "{{ lookup('template', 'bgw-fabric.nft.j2') }}"
     bgw_wg0_conf: "{{ lookup('template', 'bgw-wg0.conf.j2') if (bgw_wg_enabled | bool) else '' }}"
+    bgw_hubleg_nm: "{{ lookup('template', 'bgw-hubleg.nmconnection.j2') if (bgw_hub_leg_enabled | bool) else '' }}"
   no_log: true
 
 - name: Build BGW config Secret data
@@ -36,6 +37,7 @@
           'fabric.nft': bgw_fabric_nft | b64encode
         }
         | combine({'wg0.conf': bgw_wg0_conf | b64encode} if (bgw_wg_enabled | bool) else {})
+        | combine({'hubleg.nmconnection': bgw_hubleg_nm | b64encode} if (bgw_hub_leg_enabled | bool) else {})
       }}
   no_log: true
 

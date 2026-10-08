@@ -20,7 +20,7 @@ bgw_underlay_mac: "02:fa:b0:64:00:01"
 bgw_default_underlay_nad: fabric-underlay
 bgw_default_underlay_mtu: 1400
 bgw_default_dhcp_lease: 10m
-bgw_default_wg_address: 10.254.254.1/24
+bgw_default_wg_address: "{{ fabric_bgw_default_wg_address }}"  # common/vars/fabric_evpn.yml
 bgw_default_wg_listen_port: 51820
 bgw_default_wg_mtu: 1380
 # wstunnel server port inside the VM (Service 443 -> this port; Route passthrough).
@@ -61,3 +61,9 @@ bgw_rt_policy: per-site
 # host offset, recorded in fabric-numbering-<fabric> key wgAddresses.
 bgw_wg_allocate: true
 bgw_wg_alloc_start_offset: 10
+# BGW hub leg (HybridFabric.spec.underlay.type localnet, plan §3.2.5 / §4): third
+# NIC `hubleg` (guest eth2) on the localnet NAD spec.underlay.nadName, address
+# spec.underlay.hubLegAddress, MAC fabric_bgw_hub_leg_mac (common/vars/fabric_evpn.yml,
+# shared with the hub MAC-NAT shim). MTU is the node bridge's (br-ex 1500), not
+# spec.underlay.mtu (that one is the OVN-K layer2 leg's).
+bgw_hub_leg_default_mtu: 1500

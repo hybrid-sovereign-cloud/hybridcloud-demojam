@@ -137,6 +137,13 @@
         np_vrf: "{{ hn_lookup.resources[0].status.vrfName | default(np_spec.network) }}"
         np_canonical_rt: "{{ hn_lookup.resources[0].status.canonicalRt | default('') }}"
         np_domain_asn: "{{ hn_lookup.resources[0].status.canonicalRt | default('0:0') | regex_replace(':.*$', '') | int }}"
+        # Overlay MTU (CUDN mtu, Neutron network MTU): HybridNetwork spec.overlayMtu,
+        # else status.overlayMtu, else the lab default (1300).
+        np_overlay_mtu: >-
+          {{
+            (hn_lookup.resources[0].spec | default({})).overlayMtu
+            | default((hn_lookup.resources[0].status | default({})).overlayMtu | default(np_overlay_default_mtu, true), true) | int
+          }}
 
     - name: Load HybridFabric detail (used for spoke FRR route reflectors)
       kubernetes.core.k8s_info:
@@ -460,30 +467,11 @@
       when: np_spec.backend.kind == 'CloudOSO'
       ansible.builtin.include_tasks: backend_rhoso_ovn_evpn.yml
 
-    # TODO(hub-pass): hub CNV EVPN backend (plan §3.2.4 / §4), built live by the lead.
-    # Expected inputs: np_spec (prefixes, vmNamespaces), np_backend_obj (CloudVirt),
-    # np_cloudinfra (CloudInfrastructure type openshift), np_gateway (CloudGateway of
-    # that site), np_vni, np_canonical_rt, np_vrf, hn_all_fabrics_detail (HybridFabric:
-    # underlay.hubVtepBlock, borderGateway.loopback), overlay MTU from the HybridNetwork,
-    # networkplacement_cr_name/namespace, np_entity.
-    # Expected outputs: np_backend_applied, np_backend_ready, np_backend_message,
-    # np_backend_fail_reason, optionally np_backend_vtep / np_spoke_kubeconfig_file for
-    # validate_bgp.yml.
-    # - name: Dispatch to the hub CNV EVPN backend (Layer2 CUDN, VTEP, RouteAdvertisements)
-    #   when: np_spec.backend.kind == 'CloudVirt'
-    #   ansible.builtin.include_tasks: backend_cloudvirt_evpn.yml
-    #   vars:
-    #     hn_fabric_cr: "{{ hn_all_fabrics_detail | default({}) }}"
-    - name: Hold CloudVirt placements until the hub CNV EVPN backend lands
+    # Hub CNV EVPN backend (plan §3.2.4 / §4): Layer2 primary CUDN with ipVRF +
+    # macVRF on the hub VTEP, RouteAdvertisements, vmNamespaces created labelled.
+    - name: Dispatch to the hub CNV EVPN backend (Layer2 CUDN, RouteAdvertisements, vmNamespaces)
       when: np_spec.backend.kind == 'CloudVirt'
-      ansible.builtin.set_fact:
-        np_backend_applied: false
-        np_backend_ready: false
-        np_backend_fail_reason: HubEvpnBackendPending
-        np_backend_message: >-
-          CloudVirt EVPN backend (hub CNV, Layer2 CUDN) is not available yet; placement
-          validated (prefixes, site {{ np_backend_site | default('', true) }}, gateway
-          {{ np_cloud_gateway_ref | default('', true) }}) but not realized.
+      ansible.builtin.include_tasks: backend_cloudvirt_evpn.yml
 
     - name: Set networkplacement_fail_reason from backend failure
       ansible.builtin.set_fact:
@@ -547,6 +535,9 @@
           validated: "{{ np_validated | default(false) }}"
           lastValidatedAt: "{{ networkplacement_status_transition_time }}"
           realizedPrefixes: "{{ np_spec.prefixes | default([]) }}"
+          # CloudVirt: hub namespaces created for this placement; CUDN/RA/VTEP/L2VNI ids.
+          vmNamespaces: "{{ np_vm_namespaces | default([]) }}"
+          backendIds: "{{ np_backend_ids | default({}) }}"
           cloudGatewayRef: "{{ np_cloud_gateway_ref | default('') }}"
           transportLinkRef: "{{ np_transport_link_ref | default('') }}"
           cloudInfrastructure: "{{ np_backend_site | default('') }}"

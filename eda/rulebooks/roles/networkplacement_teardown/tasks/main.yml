@@ -4,8 +4,8 @@
 # clusters are removed with the hosted-cluster cutover, plan §5b step 5).
 #   CloudOSO  : Neutron network / EVPN router are left in the tenant project
 #               (unchanged behaviour; the project goes with CloudOSO teardown).
-#   CloudVirt : TODO(hub-pass) backend teardown (CUDN, RouteAdvertisements, the
-#               placement's vmNamespaces).
+#   CloudVirt : hub CNV attachment (the placement's vmNamespaces, RouteAdvertisements,
+#               CUDN; networkplacement_provision backend_cloudvirt_evpn_teardown.yml).
 # Then the BGW per-site RT policy is re-rendered without this placement (the
 # planner ignores placements that carry a deletionTimestamp) and pushed in place.
 - block:
@@ -37,21 +37,17 @@
       ansible.builtin.set_fact:
         npt_backend_kind: "{{ (npt_spec.backend | default({})).kind | default('') }}"
 
-    # TODO(hub-pass): hub CNV EVPN backend teardown. Expected inputs: npt_spec
-    # (network, prefixes, vmNamespaces), npt_status (vni, vrfName), the CloudVirt
-    # backend and its CloudInfrastructure, networkplacement_cr_name/namespace,
-    # services_api_host/services_bearer_token. Expected output: npt_backend_message.
-    # - name: Remove the hub CNV EVPN attachment (CUDN, RouteAdvertisements, vmNamespaces)
-    #   when: npt_backend_kind == 'CloudVirt'
-    #   ansible.builtin.include_tasks: "{{ role_path }}/../networkplacement_provision/tasks/backend_cloudvirt_evpn_teardown.yml"
+    - name: Remove the hub CNV EVPN attachment (vmNamespaces, RouteAdvertisements, CUDN)
+      when: npt_backend_kind == 'CloudVirt'
+      ansible.builtin.include_tasks: "{{ role_path }}/../networkplacement_provision/tasks/backend_cloudvirt_evpn_teardown.yml"
 
     - name: Describe the backend cleanup
+      when: npt_backend_kind != 'CloudVirt'
       ansible.builtin.set_fact:
         npt_backend_message: >-
           {{
             {
               'CloudOSO': 'Neutron network/router left in the tenant project (removed with the CloudOSO).',
-              'CloudVirt': 'hub CNV attachment teardown pending (hub pass).',
               'CloudAWS': 'no fabric attachment on AWS.',
               'PlatformOpenshift': 'deprecated PlatformOpenshift backend: nothing to remove here (hosted-cluster CUDNs go with the hosted-cluster cutover).'
             }.get(npt_backend_kind, 'no backend cleanup.')

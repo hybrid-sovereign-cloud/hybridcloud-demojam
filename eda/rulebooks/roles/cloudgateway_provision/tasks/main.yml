@@ -290,22 +290,38 @@
               }}
 
     # ---------------------------------------------------------------
-    # OpenShift: HCP/Virt hosted landing (tunnelType none prep)
+    # OpenShift: hub CNV EVPN landing (cloudRef), legacy HCP peer address
     # ---------------------------------------------------------------
     - name: Handle an openshift site
       when: cgw_cloud_type == 'openshift'
       block:
-        # TODO(hub-pass): hub-side CloudVirt EVPN landing (plan §3.2.2 / §4), built live
-        # by the lead. Expected inputs: cgw_cloudinfra (CloudInfrastructure type openshift,
-        # clusterRef local), cgw_fabric (HybridFabric: spec.underlay.hubVtepBlock,
-        # spec.borderGateway.loopback, domainAsn), services_api_host/services_bearer_token.
-        # Expected outputs: cgw_gateway_address, cgw_hub_evpn_ready, cgw_hub_evpn_message.
-        # - name: Hub CNV EVPN landing (CNO check, hub VTEP CR, hub FRRConfiguration)
-        #   ansible.builtin.include_tasks: openshift_hub_evpn.yml
+        # Hub CNV EVPN landing (plan §3.2.2 / §4): hub node VTEPs on the localnet
+        # underlay, VTEP CR, FRRConfiguration to the BGW. cloudRef objects only; a
+        # legacy gateway (spec.cloud=openshift + platformOpenshiftRef/virtCloudVirtRef,
+        # hosted-cluster spokes) keeps the old peer-address-only behaviour below.
+        - name: Hub CNV EVPN landing (CNO check, hub underlay DaemonSet, VTEP CR, FRRConfiguration)
+          when: not (rcs_legacy | bool)
+          ansible.builtin.include_tasks: openshift_hub_evpn.yml
 
-        # HCP spokes peer natively over the hub underlay (eth1, DHCP from the BGW);
-        # the gateway address is the BGP peer: the border gateway loopback.
-        - name: Set gatewayAddress to the fabric BGP peer
+        - name: Fail so the operator relaunches until the hub landing is Ready
+          when:
+            - not (rcs_legacy | bool)
+            - not (cgw_hub_evpn_ready | default(false) | bool)
+          ansible.builtin.fail:
+            msg: "CloudGateway {{ cloudgateway_cr_name }} not Ready: {{ cgw_hub_evpn_message | default('hub EVPN landing not ready') }}"
+
+        - name: Set hub landing zone facts
+          when: not (rcs_legacy | bool)
+          ansible.builtin.set_fact:
+            cgw_landing_zone_ready: true
+            cgw_transport_ready: true
+            cgw_hub_vtep_list: "{{ cgw_hub_vteps.values() | list | sort | join(',') }}"
+            cgw_message: "{{ cgw_hub_evpn_message }}"
+
+        # Legacy HCP spokes peered natively over the hub underlay (eth1, DHCP from
+        # the BGW); the gateway address is the BGP peer: the border gateway loopback.
+        - name: Set gatewayAddress to the fabric BGP peer (legacy hosted-cluster gateways)
+          when: rcs_legacy | bool
           ansible.builtin.set_fact:
             cgw_gateway_address: >-
               {{
@@ -315,7 +331,8 @@
                       | default('10.255.' ~ ((cloudgateway_spec.domainAsn | default(cgw_fabric.spec.domainAsn | default(0)) | int) % 250) ~ '.1', true))
               }}
 
-        - name: Set OpenShift landing zone facts
+        - name: Set OpenShift landing zone facts (legacy hosted-cluster gateways)
+          when: rcs_legacy | bool
           ansible.builtin.set_fact:
             cgw_landing_zone_ready: true
             cgw_transport_ready: true
@@ -347,6 +364,8 @@
           # Allocated by the BGW facts when spec.wireguard.address is omitted.
           wireguardAddress: "{{ cgw_gw_wg_address | default('') }}"
           cloudInfrastructure: "{{ cgw_site_name | default('') }}"
+          # openshift (hub CNV): node VTEP addresses; '' elsewhere.
+          vtep: "{{ cgw_hub_vtep_list | default('') }}"
           conditions:
             - type: Ready
               status: "True"
@@ -363,7 +382,9 @@
         cr_name: "{{ cloudgateway_cr_name }}"
         cr_namespace: "{{ cloudgateway_cr_namespace }}"
         cr_status_body:
-          status: failed
+          # PendingPrereq (e.g. hub CNO without FRR/route advertisements) is not a
+          # failure of this object; the operator relaunches either way.
+          status: "{{ 'pending' if (cloudgateway_fail_reason | default('')) == 'PendingPrereq' else 'failed' }}"
           ready: false
           landingZoneReady: false
           message: "{{ ansible_failed_result.msg | default('EDA provision failed') }}"

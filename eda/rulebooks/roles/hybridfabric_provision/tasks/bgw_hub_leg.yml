@@ -1,0 +1,61 @@
+---
+# BGW hub leg (HybridFabric.spec.underlay.type localnet; plan §3.2.5 / §4).
+# Owner of the localnet NAD spec.underlay.nadName in the fabric namespace: the
+# BGW VM cannot start without it, so the fabric role (not the CloudGateway)
+# creates it. The CloudGateway openshift path only checks that it exists.
+# The NIC itself (hubleg, guest eth2) is rendered by bgw-vm.yaml.j2, its NM
+# profile by bgw-user-data.j2 / bgw-push.sh.j2, its firewall by bgw-fabric.nft.j2.
+# Adding the NIC changes the VM spec: the boot hash restarts the VMI once.
+#
+# Expected: bgw_* facts from bgw_facts.yml (bgw_hub_leg_*).
+# Sets: bgw_hub_leg_message
+
+- name: Apply the hub-leg localnet NAD
+  when: bgw_hub_leg_enabled | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ lookup('template', 'bgw-localnet-nad.yaml.j2') | from_yaml }}"
+
+# Underlay type switched away from localnet, or nadName renamed: drop the stale
+# hub-leg NADs of this fabric (the VM spec rendered below no longer uses them).
+- name: List hub-leg NADs of this fabric
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    namespace: "{{ bgw_namespace }}"
+    label_selectors:
+      - "hybridsovereign.redhat/fabric={{ bgw_fabric_name }}"
+      - "hybridsovereign.redhat/fabric-hub-leg=true"
+  register: _bgw_hub_leg_nads
+
+- name: Remove stale hub-leg NADs
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    name: "{{ item }}"
+    namespace: "{{ bgw_namespace }}"
+  loop: >-
+    {{
+      _bgw_hub_leg_nads.resources | default([]) | map(attribute='metadata.name')
+      | reject('equalto', bgw_hub_leg_nad if (bgw_hub_leg_enabled | bool) else '')
+      | list
+    }}
+
+- name: Set hub-leg message
+  ansible.builtin.set_fact:
+    bgw_hub_leg_message: >-
+      {{
+        ('hub leg eth2 ' ~ bgw_hub_leg_address ~ ' on ' ~ bgw_namespace ~ '/' ~ bgw_hub_leg_nad
+         ~ ' (localnet ' ~ bgw_hub_leg_physnet ~ ', MAC ' ~ bgw_hub_leg_mac ~ ', VTEP block ' ~ bgw_hub_vtep_block ~ ')')
+        if (bgw_hub_leg_enabled | bool) else ''
+      }}

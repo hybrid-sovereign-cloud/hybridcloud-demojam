@@ -1,0 +1,299 @@
+---
+# Hub CNV EVPN landing (CloudGateway on a CloudInfrastructure of type openshift,
+# clusterRef local; plan §3.2.2 / §4, proven live 2026-10-08,
+# handover/hub-build/10-hub-underlay-ds.yaml + 20-vtep-frr.yaml). The hub nodes
+# become EVPN VTEPs on the fabric underlay; nothing here is tenant-specific
+# (tenant CUDNs come from networkplacement_provision backend_cloudvirt_evpn.yml).
+#
+# Ownership (one platform fabric per hub; all fabric-scoped names come from
+# common/tasks/hub_evpn_names.yml):
+#   hybridfabric_provision  localnet NAD <underlay.nadName> + BGW hub leg (eth2,
+#                           hubLegAddress). Only CHECKED here.
+#   this file               SA/RoleBinding(privileged SCC)/ConfigMap/DaemonSet
+#                           <fabric>-hub-underlay (node VTEP address with the underlay
+#                           prefix on br-ex, site-underlay + WireGuard routes via the hub
+#                           leg, MAC-NAT shim), VTEP <fabric>-vtep (Unmanaged),
+#                           FRRConfiguration <fabric>-bgw in openshift-frr-k8s peering the
+#                           hub-leg address.
+#   GitOps (never patched)  CNO FRR provider + routeAdvertisements Enabled: patching
+#                           it restarts ovnkube on the cluster that runs AAP/Argo.
+#
+# Expected: cloudgateway_spec, cloudgateway_cr_name, cgw_fabric, cgw_cloudinfra,
+#           services_api_host/services_bearer_token.
+# Sets: cgw_gateway_address (hub-leg IP), cgw_hub_evpn_ready, cgw_hub_evpn_message,
+#       cgw_hub_vteps (node VTEP addresses), cloudgateway_fail_reason on failure.
+
+- name: Resolve hub EVPN names and addressing from the fabric
+  ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/hub_evpn_names.yml"
+  vars:
+    hen_fabric: "{{ cgw_fabric }}"
+
+- name: Set hub-underlay failure reason before failing
+  when: hen_error | length > 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: HubUnderlayInvalid
+
+- name: Require a localnet fabric underlay with a hub VTEP block
+  when: hen_error | length > 0
+  ansible.builtin.fail:
+    msg: "CloudGateway {{ cloudgateway_cr_name }}: {{ hen_error }}"
+
+- name: Set cluster facts
+  ansible.builtin.set_fact:
+    cgw_hub_cluster_ref: "{{ ((cgw_cloudinfra.spec | default({})).openshift | default({}, true)).clusterRef | default('local', true) }}"
+
+- name: Set clusterRef failure reason before failing
+  when: cgw_hub_cluster_ref not in ['local', 'hub', 'local-cluster']
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: ClusterRefUnsupported
+
+- name: Require the hub itself (clusterRef local)
+  when: cgw_hub_cluster_ref not in ['local', 'hub', 'local-cluster']
+  ansible.builtin.fail:
+    msg: >-
+      CloudGateway {{ cloudgateway_cr_name }}: CloudInfrastructure {{ cgw_site_name }} clusterRef
+      {{ cgw_hub_cluster_ref }} is not supported; the hub CNV EVPN landing runs on the hub (local) only.
+
+# ------------------------------------------------------------------ prerequisites (read only)
+- name: Read the hub cluster network operator config
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: operator.openshift.io/v1
+    kind: Network
+    name: cluster
+  register: _cgw_hub_cno
+  failed_when: false
+
+- name: Evaluate CNO FRR provider and route advertisements
+  vars:
+    _cno_spec: "{{ ((_cgw_hub_cno.resources | default([]) + [{}])[0].spec | default({})) }}"
+  ansible.builtin.set_fact:
+    cgw_hub_cno_frr: "{{ 'FRR' in ((_cno_spec.additionalRoutingCapabilities | default({}, true)).providers | default([], true)) }}"
+    cgw_hub_cno_ra: "{{ ((_cno_spec.defaultNetwork | default({}, true)).ovnKubernetesConfig | default({}, true)).routeAdvertisements | default('', true) }}"
+
+- name: Set PendingPrereq reason when the CNO is not EVPN-ready
+  when: not (cgw_hub_cno_frr | bool) or cgw_hub_cno_ra != 'Enabled'
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: PendingPrereq
+
+- name: Wait for the GitOps-owned CNO settings (never patched by EDA)
+  when: not (cgw_hub_cno_frr | bool) or cgw_hub_cno_ra != 'Enabled'
+  ansible.builtin.fail:
+    msg: >-
+      PendingPrereq: the hub network operator needs spec.additionalRoutingCapabilities.providers
+      [FRR] (now {{ 'set' if (cgw_hub_cno_frr | bool) else 'missing' }}) and
+      spec.defaultNetwork.ovnKubernetesConfig.routeAdvertisements Enabled (now
+      {{ cgw_hub_cno_ra | default('unset', true) }}). This is GitOps-owned cluster config:
+      patching it restarts ovnkube on every hub node, so EDA only checks it.
+
+- name: Read the hub-leg localnet NAD (owned by hybridfabric_provision)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    name: "{{ hen_localnet_nad }}"
+    namespace: "{{ hen_namespace }}"
+  register: _cgw_hub_nad
+
+- name: Set PendingPrereq reason when the hub leg is missing
+  when: (_cgw_hub_nad.resources | default([])) | length == 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: PendingPrereq
+
+- name: Require the BGW hub leg
+  when: (_cgw_hub_nad.resources | default([])) | length == 0
+  ansible.builtin.fail:
+    msg: >-
+      PendingPrereq: localnet NAD {{ hen_namespace }}/{{ hen_localnet_nad }} (BGW hub leg) is missing;
+      the HybridFabric {{ hen_fabric_name }} reconcile creates it.
+
+# ------------------------------------------------------------------ node VTEP plan
+- name: Set MAC-NAT shim facts (spec.macNatShim; test environments only)
+  ansible.builtin.set_fact:
+    cgw_hub_macnat_enabled: "{{ (cloudgateway_spec.macNatShim | default({}, true)).enabled | default(false) | bool }}"
+    cgw_hub_macnat_interface: >-
+      {{ (cloudgateway_spec.macNatShim | default({}, true)).interface | default(cgw_hub_macnat_default_interface, true) }}
+
+- name: List hub nodes
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Node
+  register: _cgw_hub_nodes
+
+# Same rule as files/hub-underlay.sh (status.hostIP = first InternalIP): node
+# VTEP = <block first three octets>.<node IP last octet> (prefix: underlay cidr's). Two nodes with the same
+# last octet, or one ending in the hub leg's octet, would collide.
+- name: Plan node VTEP addresses
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os
+    block = ipaddress.ip_network(os.environ["BLOCK"])
+    pfx = str(block.network_address).rsplit(".", 1)[0]
+    leg = os.environ["LEG"]
+    vteps, seen, errors = {}, {}, []
+    for name, ip in json.loads(os.environ["NODES"]):
+        v = "%s.%s" % (pfx, ip.rsplit(".", 1)[1])
+        if v == leg:
+            errors.append("node %s (%s) maps to the hub leg address %s" % (name, ip, v))
+        if v in seen:
+            errors.append("nodes %s and %s both map to %s" % (seen[v], name, v))
+        seen[v] = name
+        vteps[name] = v
+    print(json.dumps({"vteps": vteps, "errors": errors}))
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    BLOCK: "{{ hen_vtep_block }}"
+    LEG: "{{ hen_hub_leg_ip }}"
+    NODES: >-
+      {%- set out = [] -%}
+      {%- for n in _cgw_hub_nodes.resources | default([]) -%}
+      {%-   set ips = (n.status.addresses | default([])) | selectattr('type', 'equalto', 'InternalIP')
+                      | map(attribute='address') | select('match', '^[0-9.]+$') | list -%}
+      {%-   if ips | length > 0 -%}{%- set _ = out.append([n.metadata.name, ips[0]]) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ out | to_json }}
+  register: _cgw_hub_vtep_plan
+  changed_when: false
+
+- name: Keep the node VTEP plan
+  ansible.builtin.set_fact:
+    cgw_hub_vteps: "{{ (_cgw_hub_vtep_plan.stdout | from_json).vteps }}"
+    _cgw_hub_vtep_errors: "{{ (_cgw_hub_vtep_plan.stdout | from_json).errors }}"
+
+- name: Set VTEP collision failure reason before failing
+  when: _cgw_hub_vtep_errors | length > 0
+  ansible.builtin.set_fact:
+    cloudgateway_fail_reason: HubVtepCollision
+
+- name: Refuse colliding node VTEP addresses
+  when: _cgw_hub_vtep_errors | length > 0
+  ansible.builtin.fail:
+    msg: >-
+      CloudGateway {{ cloudgateway_cr_name }}: hub VTEP block {{ hen_vtep_block }} cannot be mapped
+      onto the nodes: {{ _cgw_hub_vtep_errors | join('; ') }}.
+
+# Remote site underlays (wireguard CloudGateways on this fabric): every hub node
+# routes them via the hub leg. They sit inside the on-link underlay prefix of the
+# node VTEP address, so each needs its own (more specific) route. A site added
+# later reaches the hub nodes on the next reconcile of this gateway.
+- name: List the fabric's CloudGateways (remote site underlays)
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hybridsovereign.redhat/v1alpha1
+    kind: CloudGateway
+    namespace: "{{ hen_namespace }}"
+  register: _cgw_hub_sites
+
+- name: Set site underlay CIDRs for the hub routes
+  ansible.builtin.set_fact:
+    cgw_hub_site_cidrs: >-
+      {{
+        _cgw_hub_sites.resources | default([])
+        | rejectattr('metadata.deletionTimestamp', 'defined')
+        | selectattr('spec.fabricRef', 'defined') | selectattr('spec.fabricRef', 'equalto', hen_fabric_name)
+        | selectattr('spec.transport.type', 'defined') | selectattr('spec.transport.type', 'equalto', 'wireguard')
+        | selectattr('spec.siteUnderlay.cidr', 'defined')
+        | map(attribute='spec.siteUnderlay.cidr') | select | unique | sort | list
+      }}
+
+# ------------------------------------------------------------------ apply
+- name: Apply hub underlay SA, privileged SCC binding, script and DaemonSet
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'hub-underlay.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+- name: Apply hub VTEP CR and FRRConfiguration
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'hub-vtep-frr.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+# ------------------------------------------------------------------ readiness
+- name: Wait for the hub underlay DaemonSet fully ready
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: apps/v1
+    kind: DaemonSet
+    name: "{{ hen_underlay_ds }}"
+    namespace: "{{ hen_namespace }}"
+  register: _cgw_hub_ds
+  until: >-
+    (_cgw_hub_ds.resources | default([]) | length > 0)
+    and ((_cgw_hub_ds.resources[0].status.observedGeneration | default(0) | int)
+         >= (_cgw_hub_ds.resources[0].metadata.generation | default(1) | int))
+    and ((_cgw_hub_ds.resources[0].status.desiredNumberScheduled | default(0) | int) > 0)
+    and ((_cgw_hub_ds.resources[0].status.numberReady | default(0) | int)
+         == (_cgw_hub_ds.resources[0].status.desiredNumberScheduled | default(0) | int))
+    and ((_cgw_hub_ds.resources[0].status.updatedNumberScheduled | default(0) | int)
+         == (_cgw_hub_ds.resources[0].status.desiredNumberScheduled | default(0) | int))
+  retries: "{{ cgw_hub_wait_retries | int }}"
+  delay: "{{ cgw_hub_wait_delay | int }}"
+  failed_when: false
+
+- name: Wait for the VTEP CR Accepted
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: VTEP
+    name: "{{ hen_vtep_name }}"
+  register: _cgw_hub_vtep
+  until: >-
+    (_cgw_hub_vtep.resources | default([]) | length > 0)
+    and ((_cgw_hub_vtep.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Accepted') | selectattr('status', 'equalto', 'True') | list | length) > 0)
+  retries: "{{ cgw_hub_wait_retries | int }}"
+  delay: "{{ cgw_hub_wait_delay | int }}"
+  failed_when: false
+
+- name: Set hub EVPN landing facts
+  vars:
+    _ds: "{{ (_cgw_hub_ds.resources | default([]) + [{}])[0].status | default({}) }}"
+    _vtep_conds: "{{ ((_cgw_hub_vtep.resources | default([]) + [{}])[0].status | default({})).conditions | default([]) }}"
+    _ds_ok: >-
+      {{
+        (_ds.desiredNumberScheduled | default(0) | int) > 0
+        and (_ds.numberReady | default(0) | int) == (_ds.desiredNumberScheduled | default(0) | int)
+        and (_ds.updatedNumberScheduled | default(0) | int) == (_ds.desiredNumberScheduled | default(0) | int)
+      }}
+    _vtep_ok: "{{ (_vtep_conds | selectattr('type', 'equalto', 'Accepted') | selectattr('status', 'equalto', 'True') | list | length) > 0 }}"
+  ansible.builtin.set_fact:
+    cgw_gateway_address: "{{ hen_hub_leg_ip }}"
+    cgw_hub_evpn_ready: "{{ (_ds_ok | bool) and (_vtep_ok | bool) }}"
+    cloudgateway_fail_reason: "{{ '' if ((_ds_ok | bool) and (_vtep_ok | bool)) else 'HubEvpnNotReady' }}"
+    cgw_hub_evpn_message: >-
+      hub CNV EVPN landing on fabric {{ hen_fabric_name }}: DaemonSet {{ hen_namespace }}/{{ hen_underlay_ds }}
+      {{ _ds.numberReady | default(0) }}/{{ _ds.desiredNumberScheduled | default(0) }} ready
+      (node VTEPs {{ cgw_hub_vteps.values() | list | sort | join(',') }}/{{ hen_underlay_cidr | regex_replace('^.*/', '') }}
+      on {{ cgw_hub_bridge }}, routes {{ (cgw_hub_site_cidrs + [hen_wg_cidr]) | join(',') }} via hub leg {{ hen_hub_leg_ip }},
+      MAC-NAT shim {{ ('on ' ~ (cgw_hub_macnat_interface | default('', true) or 'br-ex uplink')
+                       ~ ' for ' ~ hen_hub_leg_mac) if (cgw_hub_macnat_enabled | bool) else 'off' }}),
+      VTEP {{ hen_vtep_name }} {{ 'Accepted' if (_vtep_ok | bool) else 'NOT Accepted' }}
+      (Unmanaged, cidrs {{ hen_underlay_cidr }}), FRRConfiguration {{ hen_frr_namespace }}/{{ hen_frr_name }}
+      peering the hub leg {{ hen_hub_peer }} AS{{ hen_asn }}.

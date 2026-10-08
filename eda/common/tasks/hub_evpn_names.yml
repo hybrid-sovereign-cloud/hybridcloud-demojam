@@ -1,0 +1,119 @@
+---
+# Names and parameters of the hub-side EVPN objects for one HybridFabric
+# (hub CNV attachment, plan §3.2.2 / §4). Shared by cloudgateway_provision
+# (openshift_hub_evpn.yml), cloudgateway_teardown (remove_hub_evpn.yml) and
+# networkplacement_* (backend_cloudvirt_evpn*.yml) so every role agrees on them.
+#
+# Required vars: hen_fabric (HybridFabric object)
+# Sets:
+#   hen_fabric_name, hen_namespace         fabric name / namespace (sovereign-cloud)
+#   hen_underlay_type                      ovn-layer2 | localnet
+#   hen_localnet_nad                       localnet NAD spec.underlay.nadName (owned by
+#                                          hybridfabric_provision, bgw_hub_leg.yml)
+#   hen_physnet                            spec.underlay.physicalNetworkName (default physnet)
+#   hen_underlay_cidr, hen_vtep_block      spec.underlay.cidr / hubVtepBlock (normalized)
+#   hen_vtep_prefixlen                     prefix length of hubVtepBlock
+#   hen_hub_leg_address / hen_hub_leg_ip   BGW hub leg (hubLegAddress, default first host
+#                                          of hubVtepBlock) with / without prefix length
+#   hen_bgw_loopback, hen_asn
+#   hen_wg_cidr                            BGW WireGuard network (borderGateway.wireguard.address)
+#   hen_hub_peer                           BGP peer of the hub FRRConfiguration: the hub-leg
+#                                          IP (hub nodes reach the BGW only on-link; the
+#                                          loopback stays the peer of site gateways / EDPM)
+#   hen_vtep_name                          VTEP CR                <fabric>-vtep
+#   hen_frr_name, hen_frr_namespace        FRRConfiguration       <fabric>-bgw in openshift-frr-k8s
+#   hen_underlay_ds                        SA/RoleBinding/CM/DS   <fabric>-hub-underlay
+#   hen_l2vni_offset, hen_hub_leg_mac      common/vars/fabric_evpn.yml
+#   hen_error                              '' when the fabric can carry a hub attachment
+
+- name: Load fabric EVPN conventions
+  ansible.builtin.include_vars: "{{ role_path }}/../../../common/vars/fabric_evpn.yml"
+  when: fabric_l2vni_offset is not defined
+
+- name: Set hub EVPN names from the fabric
+  vars:
+    _ul: "{{ (hen_fabric.spec | default({})).underlay | default({}, true) }}"
+  ansible.builtin.set_fact:
+    hen_fabric_name: "{{ hen_fabric.metadata.name }}"
+    hen_namespace: "{{ hen_fabric.metadata.namespace | default('sovereign-cloud', true) }}"
+    hen_underlay_type: "{{ _ul.type | default('ovn-layer2', true) }}"
+    hen_localnet_nad: "{{ _ul.nadName | default('fabric-localnet', true) }}"
+    hen_physnet: "{{ _ul.physicalNetworkName | default('physnet', true) }}"
+    _hen_cidr_in: "{{ _ul.cidr | default('', true) }}"
+    _hen_block_in: "{{ _ul.hubVtepBlock | default('', true) }}"
+    _hen_leg_in: "{{ _ul.hubLegAddress | default('', true) }}"
+    _hen_wg_in: >-
+      {{ (((hen_fabric.spec | default({})).borderGateway | default({}, true)).wireguard | default({}, true)).address
+         | default(fabric_bgw_default_wg_address, true) }}
+    hen_bgw_loopback: "{{ ((hen_fabric.spec | default({})).borderGateway | default({}, true)).loopback | default('', true) }}"
+    hen_asn: "{{ (hen_fabric.spec | default({})).domainAsn | default(0) | int }}"
+    hen_vtep_name: "{{ hen_fabric.metadata.name }}-vtep"
+    hen_frr_name: "{{ hen_fabric.metadata.name }}-bgw"
+    hen_frr_namespace: "{{ fabric_hub_frr_namespace | default('openshift-frr-k8s') }}"
+    hen_underlay_ds: "{{ hen_fabric.metadata.name }}-hub-underlay"
+    hen_l2vni_offset: "{{ fabric_l2vni_offset | int }}"
+    hen_hub_leg_mac: "{{ fabric_bgw_hub_leg_mac }}"
+
+# Node VTEP = <first three octets of hubVtepBlock>.<last octet of the node IP>
+# (files/hub-underlay.sh), so the block must be /24 or shorter.
+- name: Compute hub VTEP block and hub-leg addressing
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 <<'PY'
+    import ipaddress, json, os
+    out = {"cidr": "", "block": "", "blocklen": 0, "leg": "", "leg_ip": "", "wg": ""}
+    err = []
+    try:
+        out["wg"] = str(ipaddress.ip_interface(os.environ["WG"]).network)
+        if os.environ["CIDR"]:
+            out["cidr"] = str(ipaddress.ip_network(os.environ["CIDR"], strict=False))
+        if os.environ["BLOCK"]:
+            b = ipaddress.ip_network(os.environ["BLOCK"], strict=False)
+            out["block"], out["blocklen"] = str(b), b.prefixlen
+            if b.prefixlen > 24:
+                err.append("spec.underlay.hubVtepBlock %s must be /24 or shorter (node VTEP = block prefix + node IP last octet)" % b)
+            leg = os.environ["LEG"] or "%s/%d" % (b.network_address + 1, b.prefixlen)
+            li = ipaddress.ip_interface(leg)
+            if li.ip not in b:
+                err.append("spec.underlay.hubLegAddress %s is not inside hubVtepBlock %s" % (leg, b))
+            out["leg"], out["leg_ip"] = str(li), str(li.ip)
+            if out["cidr"] and not b.subnet_of(ipaddress.ip_network(out["cidr"])):
+                err.append("spec.underlay.hubVtepBlock %s is not inside spec.underlay.cidr %s" % (b, out["cidr"]))
+    except ValueError as e:
+        err.append("invalid hub underlay addressing: %s" % e)
+    out["error"] = "; ".join(err)
+    print(json.dumps(out))
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    CIDR: "{{ _hen_cidr_in }}"
+    BLOCK: "{{ _hen_block_in }}"
+    LEG: "{{ _hen_leg_in }}"
+    WG: "{{ _hen_wg_in }}"
+  register: _hen_calc
+  changed_when: false
+
+- name: Set hub EVPN derived facts
+  vars:
+    _c: "{{ _hen_calc.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    hen_underlay_cidr: "{{ _c.cidr }}"
+    hen_vtep_block: "{{ _c.block }}"
+    hen_vtep_prefixlen: "{{ _c.blocklen | int }}"
+    hen_hub_leg_address: "{{ _c.leg }}"
+    hen_hub_leg_ip: "{{ _c.leg_ip }}"
+    hen_hub_peer: "{{ _c.leg_ip }}"
+    hen_wg_cidr: "{{ _c.wg }}"
+    hen_error: >-
+      {{
+        ('HybridFabric ' ~ hen_fabric_name ~ ' spec.underlay.type is ' ~ hen_underlay_type
+         ~ '; the hub CNV EVPN attachment needs type localnet (hub node VTEPs on the node bridge).')
+        if hen_underlay_type != 'localnet'
+        else (
+          ('HybridFabric ' ~ hen_fabric_name ~ ' needs spec.underlay.cidr, spec.underlay.hubVtepBlock'
+           ~ ' and spec.borderGateway.loopback for the hub CNV EVPN attachment.')
+          if (_c.cidr | length == 0 or _c.block | length == 0 or hen_bgw_loopback | length == 0)
+          else (('HybridFabric ' ~ hen_fabric_name ~ ': ' ~ _c.error) if (_c.error | length > 0) else '')
+        )
+      }}

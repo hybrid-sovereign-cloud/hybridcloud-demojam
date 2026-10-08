@@ -1,0 +1,100 @@
+---
+# Remove the hub CNV EVPN attachment of a CloudVirt NetworkPlacement
+# (counterpart of backend_cloudvirt_evpn.yml; included by networkplacement_teardown).
+# Only objects labelled hybridsovereign.redhat/networkplacement=<this placement>
+# are removed, in this order:
+#   1. the VM namespaces (their VMs and disks go with them; wait until gone, the
+#      CUDN cannot be deleted while pods still use it),
+#   2. RouteAdvertisements advertise-<network>-evpn,
+#   3. ClusterUserDefinedNetwork <network>.
+# The hub VTEP / FRRConfiguration / node legs stay (openshift CloudGateway).
+#
+# Expected: npt_spec, npt_status, networkplacement_cr_name/namespace,
+#           services_api_host/services_bearer_token.
+# Sets: npt_backend_message
+
+- name: Set CloudVirt teardown facts
+  ansible.builtin.set_fact:
+    _npt_network: "{{ npt_spec.network | default('') }}"
+    _npt_entity: "{{ networkplacement_cr_namespace | regex_replace('^entity-', '') }}"
+    _npt_ra_name: "advertise-{{ npt_spec.network | default('') }}-evpn"
+
+- name: List the namespaces this placement created
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: v1
+    kind: Namespace
+    label_selectors:
+      - "hybridsovereign.redhat/networkplacement={{ networkplacement_cr_name }}"
+      - "hybridsovereign.redhat/entity={{ _npt_entity }}"
+      - "hybridsovereign.redhat/hybridnetwork={{ _npt_network }}"
+  register: _npt_ns
+
+- name: Delete the VM namespaces (and wait until they are gone)
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+    wait: true
+    wait_timeout: "{{ npt_namespace_wait_timeout | default(600) | int }}"
+  loop: "{{ _npt_ns.resources | default([]) | map(attribute='metadata.name') | list }}"
+
+- name: Read RouteAdvertisements and CUDN
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: k8s.ovn.org/v1
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+  loop:
+    - {kind: RouteAdvertisements, name: "{{ _npt_ra_name }}"}
+    - {kind: ClusterUserDefinedNetwork, name: "{{ _npt_network }}"}
+  loop_control:
+    label: "{{ item.kind }}/{{ item.name }}"
+  register: _npt_hub_objs
+  when: _npt_network | length > 0
+
+# Owned = labelled for this placement. An unlabelled object (hand-built, never
+# adopted by a provision run) is left alone and reported.
+- name: Delete RouteAdvertisements and CUDN owned by this placement
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: k8s.ovn.org/v1
+    kind: "{{ item.item.kind }}"
+    name: "{{ item.item.name }}"
+    wait: true
+    wait_timeout: 300
+  loop: >-
+    {{
+      (_npt_hub_objs.results | default([]))
+      | selectattr('resources', 'defined')
+      | selectattr('resources')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"
+  when: >-
+    ((item.resources[0].metadata.labels | default({})).get('hybridsovereign.redhat/networkplacement', '')
+     == networkplacement_cr_name)
+    and ((item.resources[0].metadata.labels | default({})).get('hybridsovereign.redhat/entity', '') == _npt_entity)
+  register: _npt_hub_deleted
+
+- name: Set CloudVirt teardown message
+  vars:
+    _deleted: "{{ _npt_hub_deleted.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item.item.kind') | list }}"
+    _kept: "{{ _npt_hub_deleted.results | default([]) | selectattr('skipped', 'defined') | selectattr('skipped') | map(attribute='item.item.kind') | list }}"
+  ansible.builtin.set_fact:
+    npt_backend_message: >-
+      hub CNV attachment removed: namespaces {{ _npt_ns.resources | default([]) | map(attribute='metadata.name') | join(',') | default('none', true) }},
+      {{ _deleted | join(', ') | default('no CUDN/RouteAdvertisements', true) }}
+      {{- ('; left (not labelled for this placement): ' ~ (_kept | join(', '))) if (_kept | length > 0) else '' }}.

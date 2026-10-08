@@ -1,0 +1,19 @@
+[connection]
+id=hubleg
+type=ethernet
+interface-name=eth2
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+mac-address={{ bgw_hub_leg_mac | upper }}
+mtu={{ bgw_hub_leg_mtu }}
+
+[ipv4]
+method=manual
+address1={{ bgw_hub_leg_address }}
+never-default=true
+may-fail=false
+
+[ipv6]
+method=disabled

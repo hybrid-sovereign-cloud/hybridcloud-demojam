@@ -7,3 +7,13 @@ np_oso_network_mtu: 1300
 np_oso_namespace: openstack
 np_oso_nb_pod: ovsdbserver-nb-0
 np_oso_nb_container: ovsdbserver-nb
+
+# Hub CNV EVPN backend (CloudVirt, backend_cloudvirt_evpn.yml).
+# Overlay MTU when the HybridNetwork sets neither spec.overlayMtu nor
+# status.overlayMtu (1300 in the lab: 1442 RHDP segment - WireGuard/wstunnel - VXLAN).
+np_overlay_default_mtu: 1300
+# Hub kubemacpool webhook is broken in the lab: opt the VM namespaces out
+# (explicit or kubemacpool-free MACs then). Set false once kubemacpool works.
+np_hub_kubemacpool_ignore: true
+np_hub_wait_retries: 18
+np_hub_wait_delay: 10

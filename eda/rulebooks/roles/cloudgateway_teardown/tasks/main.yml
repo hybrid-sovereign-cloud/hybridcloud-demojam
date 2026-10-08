@@ -37,11 +37,13 @@
         - rcs_site_name | default('') | length > 0
       ansible.builtin.include_tasks: remove_site_gateway.yml
 
-    # TODO(hub-pass): openshift site teardown (hub VTEP / FRRConfiguration owned by this
-    # gateway). Expected inputs: rcs_cloudinfra, cloudgateway_cr_name, services_api_host.
-    # - name: Remove hub CNV EVPN landing
-    #   when: rcs_cloud_type | default('') == 'openshift'
-    #   ansible.builtin.include_tasks: remove_hub_evpn.yml
+    - name: Remove hub CNV EVPN landing (openshift site, cloudRef)
+      when:
+        - (cgwt_lookup.resources | default([])) | length > 0
+        - rcs_cloud_type | default('') == 'openshift'
+        - not (rcs_legacy | default(true) | bool)
+        - (cgwt_spec.fabricRef | default('')) | length > 0
+      ansible.builtin.include_tasks: remove_hub_evpn.yml
 
     - name: Release the gateway's allocated WireGuard address
       when: (cgwt_spec.fabricRef | default('')) | length > 0
@@ -62,7 +64,9 @@
           status: ready
           ready: true
           deletionComplete: true
-          message: "CloudGateway teardown complete (site gateway removed for an openstack site with transport wireguard; EDPM left as-is; WireGuard address released)."
+          message: >-
+            CloudGateway teardown complete (site gateway removed for an openstack site with transport
+            wireguard; EDPM left as-is; WireGuard address released){{ ('; ' ~ cgwt_hub_message) if (cgwt_hub_message | default('') | length > 0) else '' }}.
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
 
   rescue:

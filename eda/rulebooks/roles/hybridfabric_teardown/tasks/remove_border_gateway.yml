@@ -25,8 +25,15 @@
       ansible.builtin.set_fact:
         hf_teardown_bgw_name: >-
           {{ hf_teardown_bgw.name | default('fabric-bgw-' ~ (hybridfabric_cr_name | regex_replace('-fabric$', '')), true) }}
+        # OVN-K layer2 leg (eth1). Type localnet: spec.underlay.nadName names the
+        # hub-leg localnet NAD instead and eth1 keeps fabric-underlay
+        # (hybridfabric_provision bgw_facts.yml).
         hf_teardown_bgw_nad: >-
-          {{ ((hf_teardown_bgw_self.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true) }}
+          {{
+            'fabric-underlay'
+            if (((hf_teardown_bgw_self.resources | default([]) + [{}])[0].spec.underlay | default({})).type | default('ovn-layer2', true)) == 'localnet'
+            else (((hf_teardown_bgw_self.resources | default([]) + [{}])[0].spec.underlay | default({})).nadName | default('fabric-underlay', true))
+          }}
 
     - name: List HybridFabrics that name the same BGW
       kubernetes.core.k8s_info:
@@ -89,15 +96,42 @@
           {%   if f.metadata.name != hybridfabric_cr_name
                  and f.metadata.deletionTimestamp is not defined
                  and (f.spec.borderGateway | default({})).loopback | default('') | length > 0
-                 and ((f.spec.underlay | default({})).nadName | default('fabric-underlay', true)) == hf_teardown_bgw_nad %}
+                 and ('fabric-underlay' if ((f.spec.underlay | default({})).type | default('ovn-layer2', true)) == 'localnet'
+                      else ((f.spec.underlay | default({})).nadName | default('fabric-underlay', true))) == hf_teardown_bgw_nad %}
           {%     set _ = users.append(f.metadata.name) %}
           {%   endif %}
           {% endfor %}
           {{ users | length }}
 
-    # TODO(hub-pass): remove the BGW hub leg (localnet NAD / NNCP mapping and
-    # hub-leg MAC-NAT shim) created by hybridfabric_provision bgw_hub_leg.yml.
-    # Expected inputs: hf_teardown_bgw_name, the deleting HybridFabric spec.underlay.
+    # BGW hub leg (hybridfabric_provision bgw_hub_leg.yml): the localnet NAD(s)
+    # labelled for this fabric. The hub node side (VTEP addresses, MAC-NAT shim,
+    # VTEP CR, FRRConfiguration) belongs to the openshift CloudGateway and goes
+    # with cloudgateway_teardown (remove_hub_evpn.yml); this fabric cannot be
+    # deleted while that gateway exists (attached-gateway check in main.yml).
+    - name: List hub-leg localnet NADs of this fabric
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+        namespace: "{{ hybridfabric_cr_namespace }}"
+        label_selectors:
+          - "hybridsovereign.redhat/fabric={{ hybridfabric_cr_name }}"
+          - "hybridsovereign.redhat/fabric-hub-leg=true"
+      register: hf_teardown_hub_leg_nads
+
+    - name: Delete hub-leg localnet NADs
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+        name: "{{ item }}"
+        namespace: "{{ hybridfabric_cr_namespace }}"
+      loop: "{{ hf_teardown_hub_leg_nads.resources | default([]) | map(attribute='metadata.name') | list }}"
 
     # Legacy: HostedCluster VM namespaces may still carry a copy of the NAD from
     # the removed PlatformOpenshift fabric join; they go with the HostedCluster namespace.

@@ -1,0 +1,6 @@
+---
+# Hub CNV EVPN teardown (remove_hub_evpn.yml): wait for the hub underlay
+# DaemonSet to run its remove pass (address/routes/MAC-NAT shim off every node)
+# before deleting it.
+cgwt_hub_wait_retries: 30
+cgwt_hub_wait_delay: 10
