@@ -26,9 +26,13 @@
         {}
         if (cisr_ref is string)
         else (
-          {'name': (cisr_ref | default({}, true)).secretRef}
-          if ((cisr_ref | default({}, true)).secretRef | default('') is string)
-          else ((cisr_ref | default({}, true)).secretRef | default({}, true))
+          {}
+          if ((cisr_ref | default({}, true)).get('secretRef') is none)
+          else (
+            {'name': (cisr_ref | default({}, true)).get('secretRef')}
+            if ((cisr_ref | default({}, true)).get('secretRef') is string)
+            else ((cisr_ref | default({}, true)).get('secretRef') | default({}, true))
+          )
         )
       }}
   no_log: true
