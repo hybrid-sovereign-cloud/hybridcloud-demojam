@@ -3,15 +3,20 @@
 # - Launch AAP JobTemplate on create / spec generation change
 # - On delete: launch *-teardown and BLOCK finalizer until status.deletionComplete
 # - Cancel+relaunch if failed or not completed within 3 hours
-# - Status-only updates must NOT relaunch (observedGeneration + in-window job)
+# - Status-only updates must NOT relaunch (status.aapJob.generation + in-window job)
+# - ansible.sdk.operatorframework.io/reconcileNow forces exactly one relaunch
+#   (see the state machine at the top of aap_job.yml)
 - name: Resolve kind and job template
   ansible.builtin.set_fact:
     hs_kind: "{{ operator_kind | default(lookup('env', 'OPERATOR_KIND') | default(ansible_operator_meta.kind, true), true) }}"
     hs_name: "{{ ansible_operator_meta.name }}"
     hs_namespace: "{{ ansible_operator_meta.namespace }}"
     hs_api_version: "{{ ansible_operator_meta.api_version | default('hybridsovereign.redhat/v1alpha1') }}"
-    hs_generation: "{{ ansible_operator_meta.generation | default(0) | int }}"
     job_stale_seconds: 10800
+    # Delete path: max in-run wait on a running teardown job (wait_teardown.yml).
+    # Blocks one of MAX_CONCURRENT_RECONCILES workers for this kind meanwhile.
+    teardown_wait_seconds: "{{ lookup('env', 'TEARDOWN_WAIT_SECONDS') | default(120, true) | int }}"
+    teardown_poll_seconds: 10
     # Never hardcode a demojam apps domain — empty host fails loud if secret missing.
     aap_host: "{{ lookup('env', 'AAP_HOST') | default('', true) }}"
 
@@ -29,56 +34,64 @@
   register: hs_live
   failed_when: false
 
-- name: Read current status safely
+# Every decision below keys on the live status (aapJob, ready, deletionComplete).
+# Proceeding on an API error used to look like "no job tracked" and launched a
+# duplicate job, or, on a deleting CR, like a non-delete reconcile whose
+# "End after ready" exit let ansible-operator drop the finalizer without teardown.
+- name: Requeue when the live CR could not be read
+  ansible.builtin.fail:
+    msg: "Could not read {{ hs_kind }} {{ hs_namespace }}/{{ hs_name }}: {{ hs_live.msg | default('unknown error') }}"
+  # failed_when: false above masks .failed; an API error leaves no resources key
+  # (a missing CR returns resources: []).
+  when: hs_live.resources is not defined
+
+# ansible_operator_meta only carries name/namespace, so the old
+# ansible_operator_meta.generation default made hs_generation 0 on every CR (and
+# the operator stamped observedGeneration 0 over the EDA value). Take the
+# generation from the live read, falling back to the object ansible-operator
+# passes as _<group>_<kind>.
+- name: Pick the live CR (fallback to the object ansible-operator passed in)
   ansible.builtin.set_fact:
-    hs_status: "{{ (hs_live.resources | default([{}]))[0].status | default(status | default({})) }}"
+    hs_cr: "{{ (hs_live.resources | default([]))[0] | default(lookup('ansible.builtin.vars', '_hybridsovereign_redhat_' ~ (hs_kind | lower), default={}), true) }}"
+
+- name: Normalize generation and deletion state
+  ansible.builtin.set_fact:
+    hs_generation: "{{ hs_cr.metadata.generation | default(0) | int }}"
+    hs_status: "{{ hs_cr.status | default(status | default({})) }}"
     # watches use snakeCaseParameters: false → camelCase deletionTimestamp
-    is_delete: "{{ ((ansible_operator_meta.deletionTimestamp | default(ansible_operator_meta.deletion_timestamp | default((hs_live.resources | default([{}]))[0].metadata.deletionTimestamp | default('')) | default('')) | string | length) > 0) | bool }}"
+    is_delete: "{{ ((ansible_operator_meta.deletionTimestamp | default(ansible_operator_meta.deletion_timestamp | default(hs_cr.metadata.deletionTimestamp | default('')) | default('')) | string | length) > 0) | bool }}"
+    hs_reconcile_now_value: "{{ (hs_cr.metadata.annotations | default({})).get('ansible.sdk.operatorframework.io/reconcileNow', '') | string }}"
 
 - name: Normalize status fields
   ansible.builtin.set_fact:
     cur_observed: "{{ (hs_status.observedGeneration | default(-1)) | int }}"
     cur_job_id: "{{ hs_status.aapJob.jobId | default('') | string }}"
     cur_job_started: "{{ hs_status.aapJob.startedAt | default('') | string }}"
+    # Generation the tracked job was launched for ('' on jobs launched by older images).
+    cur_job_generation_raw: "{{ hs_status.aapJob.generation | default('') | string }}"
     cur_phase: "{{ hs_status.phase | default('') | string }}"
     deletion_complete: "{{ hs_status.deletionComplete | default(false) | bool }}"
 
-# ansible-operator only drops the watches finalizer after a successful finalizer
-# playbook. meta:end_play alone has raced with status patches and left CRs stuck
-# with deletionComplete=true. Explicitly clear hybridsovereign finalizers via
-# JSON patch (strategic merge ignores empty finalizers lists).
 - name: Clear finalizers when EDA teardown reported deletionComplete
   when:
     - is_delete | bool
     - deletion_complete | bool
-  block:
-    - name: Remove hybridsovereign finalizers from deleting CR
-      kubernetes.core.k8s_json_patch:
-        api_version: "{{ hs_api_version }}"
-        kind: "{{ hs_kind }}"
-        name: "{{ hs_name }}"
-        namespace: "{{ hs_namespace }}"
-        patch:
-          - op: replace
-            path: /metadata/finalizers
-            value: []
-      failed_when: false
+  ansible.builtin.include_tasks: release_finalizer.yml
 
-    - name: End play after finalizer clear
-      ansible.builtin.meta: end_play
-
+# Fast path only. observedGeneration alone is not trusted (EDA provision roles
+# stamp it from the CR they read, which can be newer than the generation the job
+# was launched for), so also require the tracked job's own generation to match.
 - name: Skip when generation already observed and phase ready
   ansible.builtin.meta: end_play
   when:
     - not is_delete | bool
     - cur_observed | int == hs_generation | int
+    - cur_job_generation_raw | length > 0
+    - cur_job_generation_raw | int == hs_generation | int
     - cur_phase in ['ready', 'provisioned']
     - (hs_status.ready | default(false) | bool)
     - (hs_status.status | default('') | string | lower) not in ['failed', 'error', 'degraded']
-    - not (
-        ((hs_live.resources | default([{}]))[0].metadata.annotations | default({}))
-        .get('ansible.sdk.operatorframework.io/reconcileNow', '') | string | length > 0
-      )
+    - hs_reconcile_now_value | length == 0
 
 # Periodic retry for non-ready / failed CRs (watches reconcilePeriod also requeues).
 # If lastReconciledAt is older than reconcile window (or missing) and not ready, force AAP path.
@@ -117,11 +130,7 @@
       }}
 
 - name: Clear reconcileNow annotation when present
-  when: >-
-    (
-      ((hs_live.resources | default([{}]))[0].metadata.annotations | default({}))
-      .get('ansible.sdk.operatorframework.io/reconcileNow', '') | string | length > 0
-    )
+  when: hs_reconcile_now_value | length > 0
   kubernetes.core.k8s:
     state: patched
     api_version: "{{ hs_api_version }}"
@@ -132,7 +141,23 @@
       metadata:
         annotations:
           ansible.sdk.operatorframework.io/reconcileNow: null
+  register: hs_reconcile_now_clear
   failed_when: false
+
+# The annotation is consumed by clearing it, so it forces one relaunch per
+# set. If the clear failed, do not force: the annotation would still be there
+# on the next pass and relaunch again (loop). failed_when: false masks .failed,
+# so check that the patched object came back without the annotation.
+- name: Force one relaunch for a consumed reconcileNow annotation
+  ansible.builtin.set_fact:
+    hs_reconcile_now: >-
+      {{
+        hs_reconcile_now_value | length > 0
+        and not (is_delete | bool)
+        and (hs_reconcile_now_clear.result | default({})).metadata is defined
+        and 'ansible.sdk.operatorframework.io/reconcileNow' not in
+          ((hs_reconcile_now_clear.result | default({})).metadata.annotations | default({}))
+      }}
 
 - name: Include AAP API tasks
   ansible.builtin.include_tasks: aap_job.yml
