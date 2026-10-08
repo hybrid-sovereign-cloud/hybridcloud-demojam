@@ -33,6 +33,10 @@
       No management cluster kubeconfig for CloudOSO {{ np_backend_name }}
       (CloudInfrastructure spec.openstack.managementClusterKubeconfigRef); HA chassis group not verified.
 
+- name: Debug HA check inputs (temporary)
+  ansible.builtin.debug:
+    msg: "mgmt_ref_len={{ np_mgmt_kubeconfig_ref | string | length }} ref_type={{ np_mgmt_kubeconfig_ref | type_debug }} router_id_len={{ np_neutron_router_id | default('') | length }}"
+
 - name: Check and repair HA chassis group
   when: np_mgmt_kubeconfig_ref | length > 0
   block:
