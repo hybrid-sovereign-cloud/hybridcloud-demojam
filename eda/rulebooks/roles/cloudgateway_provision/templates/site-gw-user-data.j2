@@ -13,21 +13,21 @@ users:
 {% endif %}
 packages: [wireguard-tools, nftables, tcpdump, iproute, bind-utils, qemu-guest-agent, tar]
 write_files:
-- path: /etc/NetworkManager/system-connections/management.nmconnection
-  permissions: '0600'
-  content: |
-    # Management NIC (pod network, masquerade), bound by interface name so a
-    # launcher pod MAC change (VM restart/migration) does not orphan the profile.
-    [connection]
-    id=management
-    type=ethernet
-    interface-name=eth0
-    autoconnect=true
-    autoconnect-priority=50
-    [ipv4]
-    method=auto
-    [ipv6]
-    method=disabled
+  - path: /etc/NetworkManager/system-connections/management.nmconnection
+    permissions: '0600'
+    content: |
+      # Management NIC (pod network, masquerade), bound by interface name so a
+      # launcher pod MAC change (VM restart/migration) does not orphan the profile.
+      [connection]
+      id=management
+      type=ethernet
+      interface-name=eth0
+      autoconnect=true
+      autoconnect-priority=50
+      [ipv4]
+      method=auto
+      [ipv6]
+      method=disabled
   - path: /etc/wireguard/wg0.conf
     permissions: '0600'
     content: |
