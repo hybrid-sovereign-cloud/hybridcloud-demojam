@@ -387,14 +387,14 @@
           status: "{{ 'pending' if (cloudgateway_fail_reason | default('')) == 'PendingPrereq' else 'failed' }}"
           ready: false
           landingZoneReady: false
-          message: "{{ ansible_failed_result.msg | default('EDA provision failed') }}"
+          message: "{{ 'provision failed: ' ~ (ansible_failed_result.msg | default('EDA provision failed') | string) }}"
           lastReconciledAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
           conditions:
             - type: Ready
               status: "False"
               lastTransitionTime: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
               reason: "{{ cloudgateway_fail_reason if (cloudgateway_fail_reason | default('') | length > 0) else 'EDAFailed' }}"
-              message: "{{ ansible_failed_result.msg | default('EDA provision failed') }}"
+              message: "{{ 'provision failed: ' ~ (ansible_failed_result.msg | default('EDA provision failed') | string) }}"
       ignore_errors: true
       when: services_api_host is defined and services_bearer_token is defined
 
