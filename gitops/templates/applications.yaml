@@ -18,6 +18,7 @@ Child Applications — ZTP wave order (parent sync waits for prior wave Healthy)
  46  hs-platform-smoke   — always-on ACME Entity + local CloudVirt + dummy tool CRs
  48  hs-platform-fabric  — HybridFabric + CloudInfrastructure + CloudGateways + tenant VRFs/placements (hub CloudVirt + RHOSO)
  50  hs-ui
+ 52  hs-iaac             — Gitea admin/repo bootstrap + IaaC git-sync StatefulSet + Iaac CR
  60  hs-samples          — gated by provision.samples (default: true; seed-once, no selfHeal)
 
 Per-app debug (no full wipe): ./scripts/ztp-app.sh cleanup|redeploy|wait APP
@@ -849,6 +850,67 @@ spec:
         maxDuration: 5m
 {{- end }}
 
+{{- if (default true .Values.provision.iaac) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hs-iaac
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/instance: field-content
+    app.kubernetes.io/part-of: {{ $partOf }}
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "52"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: hybridsovereign
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ $rev | quote }}
+    path: gitops/apps/iaac
+    {{- with .Values.iaac }}
+    helm:
+      valuesObject:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  destination:
+    server: {{ $server | quote }}
+    namespace: sovereign-cloud-plugins
+  ignoreDifferences:
+    - group: hybridsovereign.redhat
+      kind: "*"
+      jqPathExpressions:
+        - .metadata.annotations["force-reconcile"]
+        - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+        - .status
+    # The build mutates these in place; Argo must not fight it.
+    - group: image.openshift.io
+      kind: ImageStream
+      jqPathExpressions:
+        - .spec.tags
+        - .status
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 15
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+
 {{- if .Values.provision.samples }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -869,6 +931,13 @@ spec:
     repoURL: {{ $repo | quote }}
     targetRevision: {{ $rev | quote }}
     path: gitops/apps/samples
+    helm:
+      valuesObject:
+        samples:
+          hostedCluster: {{ default true .Values.samples.hostedCluster }}
+          hostedClusterNodePoolReplicas: {{ default 2 .Values.samples.hostedClusterNodePoolReplicas }}
+          hostedClusterWorkerCores: {{ default 4 .Values.samples.hostedClusterWorkerCores }}
+          hostedClusterWorkerMemory: {{ default "16Gi" .Values.samples.hostedClusterWorkerMemory | quote }}
   destination:
     server: {{ $server | quote }}
     namespace: sovereign-cloud

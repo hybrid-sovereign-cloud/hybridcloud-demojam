@@ -27,4 +27,4 @@ oc get cloudvirt -A
 
 If Entity missing, create from UI or `samples/entity/acme-corp.yaml` (adjust to your lab), then continue.
 
-→ [Lab 2](lab-02-register-cloud.md)
+→ [Lab 2 — Create your tenant](lab-02-entity.md)

@@ -69,7 +69,7 @@ Wait for Provisioned / `status.ready`.
 
 ### 5. (Optional) Assignment
 
-Create Team + Assignment pointing `openshift: ocp-<label>` — see [team-project-assignment](../usage/crds/team-project-assignment.md).
+Create Team + Assignment pointing `openshift: ocp-<label>` — see [team-project-assignment](../reference/crds/team-project-assignment.md).
 
 ## Remove
 
@@ -79,5 +79,5 @@ Create Team + Assignment pointing `openshift: ocp-<label>` — see [team-project
 
 ## See also
 
-- [CloudAWS CRD](../usage/crds/cloudaws.md)
+- [CloudAWS CRD](../reference/crds/cloudaws.md)
 - [Workshop lab](../workshop/README.md)

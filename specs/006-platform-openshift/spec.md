@@ -41,5 +41,5 @@ PlatformOpenshift provisions OpenShift clusters on OpenStack (CloudOSO) or AWS (
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

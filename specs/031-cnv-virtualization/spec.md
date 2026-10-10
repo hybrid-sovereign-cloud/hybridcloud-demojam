@@ -34,5 +34,5 @@ HyperConverged CR enabling KubeVirt with storage class integration.
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

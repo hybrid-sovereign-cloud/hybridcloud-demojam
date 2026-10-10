@@ -1,0 +1,32 @@
+# IaaC git-sync ZTP defaults.
+#
+# Unlike the UI and operator images, there is no published quay.io image for the
+# IaaC sync app, so this app always builds it in-cluster from `iaac/` in this
+# repo. That keeps `provision.iaac` independent of `provision.builds`.
+image:
+  # Leave empty to build from source into the internal registry (default).
+  # Set to a pinned external reference to skip the BuildConfig entirely.
+  override: ""
+  repository: image-registry.openshift-image-registry.svc:5000/sovereign-cloud/iaac-git-sync
+  tag: latest
+
+git:
+  uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+  ref: main
+  contextDir: iaac
+
+gitea:
+  # In-cluster Service — never the route, so sync does not depend on ingress.
+  url: http://gitea-http.gitea.svc:3000
+  adminUser: gitea_admin
+  repoOwner: gitea_admin
+  repoName: tenancy_repo
+
+# Namespace holding the Iaac CR and the sync StatefulSet.
+namespace: sovereign-cloud-plugins
+
+reconcileInterval: "300"
+
+persistence:
+  size: 10Gi
+  storageClass: ""

@@ -36,5 +36,5 @@ Project CRs define logical application groupings within an entity with optional 
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

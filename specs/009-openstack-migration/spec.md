@@ -36,5 +36,5 @@ Migration source (VMware), target CloudOSO project, VM inventory, network/flavor
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

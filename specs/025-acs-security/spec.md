@@ -28,5 +28,5 @@ ACS Central CR; acs-config Job for cluster registration and OIDC.
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

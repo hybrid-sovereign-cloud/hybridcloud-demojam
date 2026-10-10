@@ -1,0 +1,217 @@
+# Headless Gitea bootstrap for IaaC: admin user, API token, tenancy repo.
+#
+# Gitea has no declarative admin-user API — the only supported path is the
+# `gitea admin` CLI inside the running container, so this Job execs into the
+# pod. Every step is idempotent: a re-run reuses the existing password and
+# token from the Secrets it wrote, so ZTP replays never rotate credentials
+# out from under the running StatefulSet.
+#
+# No secret values in Git: the password is generated in-cluster on first run.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-iaac-gitea-bootstrap
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hs-iaac-gitea-bootstrap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "namespaces"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hs-iaac-gitea-bootstrap
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: hs-iaac-gitea-bootstrap
+    namespace: sovereign-secrets
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hs-iaac-gitea-bootstrap
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-iaac-gitea-bootstrap
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-iaac-gitea-bootstrap
+      containers:
+        - name: bootstrap
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+          env:
+            - name: VAULT_ADDR
+              value: http://vault.vault.svc:8200
+            - name: GITEA_URL
+              value: {{ .Values.gitea.url | quote }}
+            - name: ADMIN_USER
+              value: {{ .Values.gitea.adminUser | quote }}
+            - name: REPO_OWNER
+              value: {{ .Values.gitea.repoOwner | quote }}
+            - name: REPO_NAME
+              value: {{ .Values.gitea.repoName | quote }}
+            - name: PLUGIN_NS
+              value: {{ .Values.namespace | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+
+              echo "Waiting for gitea deployment to be available..."
+              oc -n gitea rollout status deploy/gitea --timeout=10m
+
+              POD=$(oc -n gitea get pods -l app.kubernetes.io/name=gitea \
+                -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | awk '{print $1}')
+              [ -n "$POD" ] || { echo "FATAL: no running gitea pod" >&2; exit 1; }
+              echo "gitea pod: $POD"
+
+              gitea_cli() { oc -n gitea exec "$POD" -- gitea "$@"; }
+
+              # Reuse an existing password so replays never rotate credentials.
+              PASSWORD=""
+              if oc -n sovereign-secrets get secret gitea-admin >/dev/null 2>&1; then
+                PASSWORD=$(oc -n sovereign-secrets get secret gitea-admin \
+                  -o jsonpath='{.data.password}' | base64 -d || true)
+              fi
+              if [ -z "$PASSWORD" ]; then
+                PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+                echo "generated a new Gitea admin password"
+              else
+                echo "reusing existing Gitea admin password"
+              fi
+
+              if gitea_cli admin user list 2>/dev/null | awk '{print $2}' | grep -qx "$ADMIN_USER"; then
+                echo "admin user $ADMIN_USER exists; aligning password"
+                gitea_cli admin user change-password --username "$ADMIN_USER" --password "$PASSWORD" \
+                  --must-change-password=false
+              else
+                echo "creating admin user $ADMIN_USER"
+                gitea_cli admin user create --admin --username "$ADMIN_USER" \
+                  --password "$PASSWORD" --email "$ADMIN_USER@sovereign.local" \
+                  --must-change-password=false
+              fi
+
+              # Reuse an existing token if it still authenticates; otherwise mint one.
+              TOKEN=""
+              if oc -n "$PLUGIN_NS" get secret gitea-admin-token >/dev/null 2>&1; then
+                TOKEN=$(oc -n "$PLUGIN_NS" get secret gitea-admin-token \
+                  -o jsonpath='{.data.admin_token}' | base64 -d || true)
+              fi
+              # API calls run from this container against the Service: the rootless
+              # Gitea image has no curl.
+              token_works() {
+                [ -n "$TOKEN" ] || return 1
+                code=$(curl -s -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: token ${TOKEN}" "${GITEA_URL}/api/v1/user" || echo 000)
+                [ "$code" = "200" ]
+              }
+              if token_works; then
+                echo "reusing existing Gitea API token"
+              else
+                echo "minting a new Gitea API token"
+                TOKEN_NAME="iaac-ztp-$(date +%s)"
+                TOKEN=$(gitea_cli admin user generate-access-token --username "$ADMIN_USER" \
+                  --token-name "$TOKEN_NAME" --scopes write:repository,write:user --raw | tr -d '\r\n')
+                [ -n "$TOKEN" ] || { echo "FATAL: token generation returned empty" >&2; exit 1; }
+              fi
+
+              # Create the IaaC repo (409 = already there, which is success).
+              CODE=$(curl -s -o /tmp/repo.json -w '%{http_code}' \
+                -X POST -H "Authorization: token ${TOKEN}" -H 'Content-Type: application/json' \
+                -d "{\"name\":\"${REPO_NAME}\",\"auto_init\":true,\"default_branch\":\"main\",\"private\":true,\"description\":\"Hybrid Sovereign tenancy config-as-code (IaaC)\"}" \
+                "${GITEA_URL}/api/v1/user/repos" || echo 000)
+              case "$CODE" in
+                201) echo "created repo ${REPO_OWNER}/${REPO_NAME}" ;;
+                409) echo "repo ${REPO_OWNER}/${REPO_NAME} already exists" ;;
+                *)   echo "FATAL: repo create returned HTTP ${CODE}" >&2
+                     cat /tmp/repo.json >&2 || true
+                     exit 1 ;;
+              esac
+
+              oc -n "$PLUGIN_NS" create secret generic gitea-admin-token \
+                --from-literal=admin_token="$TOKEN" \
+                --dry-run=client -o yaml | oc apply -f -
+              oc -n sovereign-secrets create secret generic gitea-admin \
+                --from-literal=username="$ADMIN_USER" \
+                --from-literal=password="$PASSWORD" \
+                --from-literal=admin_token="$TOKEN" \
+                --from-literal=url="$GITEA_URL" \
+                --dry-run=client -o yaml | oc apply -f -
+              echo "wrote gitea-admin-token (${PLUGIN_NS}) and gitea-admin (sovereign-secrets)"
+
+              # Seed Vault KV so the ESO path in iaac/helm and other consumers resolve.
+              if oc -n vault get secret vault-init >/dev/null 2>&1; then
+                VAULT_TOKEN=$(oc -n vault get secret vault-init -o jsonpath='{.data.rootToken}' | base64 -d)
+                export VAULT_TOKEN GITEA_URL ADMIN_USER PASSWORD TOKEN
+                python3 - <<'PY'
+              import json, os, urllib.error, urllib.request
+
+              addr, tok = os.environ["VAULT_ADDR"], os.environ["VAULT_TOKEN"]
+
+              def vault(method, path, payload=None):
+                  data = None if payload is None else json.dumps(payload).encode()
+                  req = urllib.request.Request(
+                      f"{addr}/v1/{path}", data=data,
+                      headers={"X-Vault-Token": tok, "Content-Type": "application/json"},
+                      method=method,
+                  )
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          return r.status, r.read()
+                  except urllib.error.HTTPError as e:
+                      return e.code, e.read()
+
+              if vault("GET", "sys/mounts/hybridsovereign")[0] == 404:
+                  vault("POST", "sys/mounts/hybridsovereign", {"type": "kv", "options": {"version": "2"}})
+
+              status, body = vault("POST", "hybridsovereign/data/gitea-admin", {"data": {
+                  "username": os.environ["ADMIN_USER"],
+                  "password": os.environ["PASSWORD"],
+                  "admin_token": os.environ["TOKEN"],
+                  "url": os.environ["GITEA_URL"],
+              }})
+              print(f"seeded hybridsovereign/gitea-admin {status}")
+              if status >= 400:
+                  raise SystemExit(f"vault put failed: {body[:200]}")
+              PY
+              else
+                echo "WARN: vault-init not present; skipped Vault KV seed"
+              fi
+
+              echo "gitea bootstrap complete"

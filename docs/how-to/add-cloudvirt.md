@@ -80,6 +80,6 @@ Point Assignment `openshift:` at the hosted PlatformOpenshift name.
 
 ## See also
 
-- [CloudVirt CRD](../usage/crds/cloudvirt.md)
-- [PlatformOpenshift](../usage/crds/platformopenshift.md)
+- [CloudVirt CRD](../reference/crds/cloudvirt.md)
+- [PlatformOpenshift](../reference/crds/platformopenshift.md)
 - [Workshop lab](../workshop/README.md)

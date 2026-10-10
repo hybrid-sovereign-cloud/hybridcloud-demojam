@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hs-iaac
+description: IaaC git-sync — Gitea admin/repo bootstrap, sync StatefulSet, Iaac CR
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -41,5 +41,5 @@ Assignment binds Teams to PlatformOpenshift clusters with scoped RBAC. Creates A
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

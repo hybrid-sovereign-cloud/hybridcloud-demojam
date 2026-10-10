@@ -1,0 +1,69 @@
+# Spoke-cluster samples that need no external cloud.
+#
+# `type: hosted` provisions a HyperShift control plane onto the hub's own
+# CloudVirt (`local-virt`, always-on via hs-platform-smoke), so this chain
+# completes on the central cluster alone — it does not wait on the RHOSO site
+# and is unaffected if CloudOSO is provisioned later or never.
+#
+# Per design/fabric.md §: a PlatformOpenshift never joins the hybrid fabric and
+# is not a NetworkPlacement backend, whatever its type. No spec.fabric here.
+#
+# These are the slowest objects in a ZTP run (~30-45 min to Ready) because they
+# install a real cluster. Set `samples.hostedCluster: false` to skip them.
+{{- if .Values.samples.hostedCluster }}
+---
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: PlatformOpenshift
+metadata:
+  name: ocp-hub-hosted
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+    # The CloudVirt backing it may still be settling on a cold run.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  type: hosted
+  hosted:
+    # CloudVirt CR in this namespace; created by hs-platform-smoke.
+    environment: local-virt
+    nodePoolReplicas: {{ .Values.samples.hostedClusterNodePoolReplicas }}
+    workerCores: {{ .Values.samples.hostedClusterWorkerCores }}
+    workerMemory: {{ .Values.samples.hostedClusterWorkerMemory | quote }}
+  toolRbac:
+    clusterAdminRbac:
+      - acme-platform-admins
+    clusterDeveloperRbac:
+      - acme-developers
+    clusterViewerRbac:
+      - acme-viewers
+---
+# Assignment is the Layer-2 binding: it places a Team and its Projects onto a
+# provisioned cluster and maps tenant Rbac groups to roles there. It is the one
+# kind that requires a real spoke, which is why it lands only with the hosted
+# cluster above.
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Assignment
+metadata:
+  name: acme-platform-eng-hub
+  namespace: entity-acme-corp
+  annotations:
+    argocd.argoproj.io/sync-wave: "16"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec:
+  openshift: ocp-hub-hosted
+  team: platform-engineering
+  projects:
+    - website-redesign
+    - api-services
+  toolRbac:
+    assignmentAdmin: acme-assignment-admins
+    assignmentDeveloper: acme-developers
+    assignmentViewer: acme-viewers
+    assignmentOps: acme-devops
+{{- end }}

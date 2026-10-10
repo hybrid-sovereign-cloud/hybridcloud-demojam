@@ -72,14 +72,22 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            # Locked: ZTP provisions the admin user and the IaaC repo headlessly
+            # (gitops/apps/iaac PreSync). Leaving this false parks Gitea on the
+            # interactive web installer, which no unattended run can clear.
             - name: GITEA__security__INSTALL_LOCK
-              value: "false"
+              value: "true"
             - name: GITEA__database__DB_TYPE
               value: sqlite3
             - name: GITEA_WORK_DIR
               value: /var/lib/gitea
             - name: HOME
               value: /var/lib/gitea/git
+            # No ROOT_URL here: the apps domain is cluster-specific and must never
+            # be baked into Git (tests/specs/security/no-lab-domains-in-git.yaml).
+            # IaaC reaches Gitea over the in-cluster Service, so it does not need one.
+            - name: GITEA__service__DISABLE_REGISTRATION
+              value: "true"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

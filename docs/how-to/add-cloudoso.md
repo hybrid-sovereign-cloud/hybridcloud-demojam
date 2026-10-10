@@ -81,5 +81,5 @@ Same pattern as AWS — Assignment → Team on `ocp-<label>`.
 
 ## See also
 
-- [CloudOSO CRD](../usage/crds/cloudoso.md)
+- [CloudOSO CRD](../reference/crds/cloudoso.md)
 - [Workshop lab](../workshop/README.md)

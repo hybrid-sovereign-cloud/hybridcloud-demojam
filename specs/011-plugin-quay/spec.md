@@ -35,5 +35,5 @@ QuayConfig: registry URL, OIDC client. QuayOrg: org name, admin RBAC refs.
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

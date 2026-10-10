@@ -35,5 +35,5 @@ Persona CRs define reusable permission bundles (platform-admin, cloud-viewer, et
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

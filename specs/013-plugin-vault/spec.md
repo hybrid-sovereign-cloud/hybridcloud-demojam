@@ -35,5 +35,5 @@ Vault: `spec.ha`, `spec.rbacConfig`. VaultKV: engine path, admin/reader RBAC ref
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

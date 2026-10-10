@@ -73,8 +73,12 @@ spec:
           image: quay.io/gauravshankar/hybridsovereign-ansible-operator:latest
           imagePullPolicy: Always
           env:
+            # Rbac carries far more CRs than any other kind (one per tenant group:
+            # ~17 on the workshop hub vs <=4 for every other kind). Each concurrent
+            # reconcile forks an ansible-runner, so peak RSS scales with this value.
+            # Keep it at 1 — the Rbac operator OOMKilled in CrashLoopBackOff at 2.
             - name: MAX_CONCURRENT_RECONCILES
-              value: "2"
+              value: "1"
             - name: OPERATOR_KIND
               value: Rbac
             - name: WATCH_NAMESPACE
@@ -104,10 +108,11 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 512Mi
             limits:
               cpu: 500m
-              memory: 2Gi
+              # Headroom above the shared 2Gi: see MAX_CONCURRENT_RECONCILES above.
+              memory: 6Gi
       volumes:
         - name: watches
           configMap:

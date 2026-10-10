@@ -35,5 +35,5 @@ RbacConfig: Keycloak realm ref. Rbac: `spec.members`, `spec.description`, status
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

@@ -1,7 +1,12 @@
-# Hybrid Fabric Design
+# Hybrid Fabric design — moved
 
-**Single source of truth:** [`fabric.md`](./fabric.md)
+All Hybrid Fabric / EVPN design prose now lives in `docs/`:
 
-All Hybrid Fabric / EVPN / PlatformOpenshift / UI design content is in that file.
+| Document | Path |
+|----------|------|
+| Fabric design (authoritative) | [docs/concepts/fabric-design.md](../docs/concepts/fabric-design.md) |
+| Live verification record | [docs/concepts/fabric-verify.md](../docs/concepts/fabric-verify.md) |
+| Fabric CRD reference | [docs/reference/crds/fabric.md](../docs/reference/crds/fabric.md) |
+| Fabric workshop lab | [docs/workshop/lab-09-hybrid-fabric.md](../docs/workshop/lab-09-hybrid-fabric.md) |
 
-Assets: [`images/`](./images/).
+Diagrams moved with the prose, to `docs/concepts/images/`.

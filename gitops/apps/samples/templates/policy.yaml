@@ -7,13 +7,26 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
 data:
   parked: |
-    CloudAWS, CloudOSO, PlatformOpenshift, Assignment, OpenStackMigration —
-    not applied via hs-samples.
+    CloudAWS, CloudOSO, OpenStackMigration — not applied via hs-samples.
+    Each needs credentials for, or a provisioned instance of, a cloud outside
+    the central cluster, so none can reach healthy on a hub-only ZTP run.
+    CloudOSO in particular is external by design: the central cluster is always
+    provisioned first and must never block on an RHOSO site that may arrive
+    later or never.
   unparked: |
-    Tenant Teams/Projects/Personas + fabric samples via hs-samples (seed-once).
+    Tenant Teams/Projects/Personas, Vault/VaultKV, HybridNetwork and the
+    hosted spoke chain (PlatformOpenshift type: hosted + Assignment) via
+    hs-samples (seed-once).
     CloudVirt local-virt is base ZTP (hs-platform-smoke), not a sample.
+    Iaac is its own app (hs-iaac, wave 52), not a sample.
   status: |
-    No Cloud* environment CRs in hs-samples.
+    No Cloud* environment CRs in hs-samples. Every other hybridsovereign kind
+    that can reach healthy without an external cloud is covered by ZTP.
+  hostedCluster: |
+    samples.hostedCluster={{ .Values.samples.hostedCluster }} — gates
+    PlatformOpenshift/ocp-hub-hosted and Assignment/acme-platform-eng-hub.
+    These install a real HyperShift cluster on the hub CloudVirt and are the
+    slowest objects in a cold run.
   reconcile: |
     hs-samples: automated prune=false selfHeal=false — UI deletes of sample CRs
     are not restored by ArgoCD.

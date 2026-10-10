@@ -47,5 +47,5 @@ Create CloudOSO forms accept a `clouds.yaml` textarea. On submit the UI creates 
 
 ## Related Samples
 
-See [`samples/`](../samples/) for sanitized CR examples.
-See [`tests/`](../tests/) for holistic test specs.
+See [`samples/`](../../samples/) for sanitized CR examples.
+See [`tests/`](../../tests/) for holistic test specs.

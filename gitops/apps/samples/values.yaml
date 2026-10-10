@@ -1,0 +1,12 @@
+samples:
+  # Hosted spoke cluster (PlatformOpenshift type: hosted) + the Assignment bound
+  # to it. On by default so every hybridsovereign kind that *can* reach healthy
+  # without an external cloud is exercised by ZTP.
+  #
+  # This is the longest pole in a cold run: it installs a real HyperShift cluster
+  # on the hub's CloudVirt (~30-45 min, 2 workers x 4 vCPU / 16Gi by default).
+  # Set false for a fast hub bring-up; nothing else in ZTP depends on it.
+  hostedCluster: true
+  hostedClusterNodePoolReplicas: 2
+  hostedClusterWorkerCores: 4
+  hostedClusterWorkerMemory: 16Gi

@@ -1,7 +1,15 @@
 # Sample Custom Resources
 
-Sanitized sample CRs migrated from frozen sovereign operator repos and bootstrap samples.
-These are intended for **manual apply** on the hub — they are **not** managed by ArgoCD.
+Sanitized reference CRs, for **manual apply** and for reading. These files are
+**not** the ZTP deploy path.
+
+Most kinds are deployed for you by ArgoCD — see
+[ZTP sample policy](../docs/getting-started/ztp.md#sample-policy) for exactly
+which, and why `CloudOSO`, `CloudAWS` and `OpenStackMigration` are not. The
+live manifests are under `gitops/apps/{samples,platform-smoke,platform-fabric}/`.
+
+For a guided walk through these kinds in dependency order, use the
+[workshop](../docs/workshop/README.md).
 
 ## Prerequisites
 

@@ -60,12 +60,14 @@ class GitSyncEngine:
             logger.warning("list %s failed: %s", plural, exc)
             return []
 
-    def full_sync(self) -> None:
+    def full_sync(self) -> dict:
         expected: set[str] = set()
         total = 0
         errors: list[str] = []
+        kinds: list[dict] = []
 
         for _kind, plural in WATCHED_KINDS:
+            before = total
             for obj in self.list_kind(plural):
                 stripped = strip_cr(obj)
                 ns = obj.get("metadata", {}).get("namespace", "")
@@ -81,6 +83,7 @@ class GitSyncEngine:
                     total += 1
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"{path}: {exc}")
+            kinds.append({"kind": _kind, "count": total - before})
 
         orphaned = self.tracked_paths - expected
         for path in orphaned:
@@ -98,6 +101,7 @@ class GitSyncEngine:
         if errors:
             for err in errors[:10]:
                 logger.error(err)
+        return {"synced": total, "errors": errors, "kinds": kinds}
 
     def _write_local(self, path: str, content: str) -> None:
         local = Path(self.settings.git_clone_path) / path

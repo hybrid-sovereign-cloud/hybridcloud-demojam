@@ -41,6 +41,9 @@ provision:
   # Hybrid Fabric ZTP (design/fabric.md): fabrics + HCP1–3 + EVPN zoning; no RHOSO/CloudOSO
   platformFabric: true
   ui: true
+  # IaaC config-as-code: bootstraps the Gitea admin + tenancy repo headlessly,
+  # builds the sync image in-cluster, runs the StatefulSet and the Iaac CR.
+  iaac: true
   samples: true  # seed workshop sample CRs once (no selfHeal — UI deletes stay deleted)
   aapConfig: true  # JobTemplates / org config only (not AAP instance)
 
@@ -62,14 +65,23 @@ mtv: false
 # Sample filters (only used when provision.samples is true)
 samples:
   deployAllExceptParked: false
+  # Parked = cannot reach healthy on a hub-only run: each needs credentials for,
+  # or a provisioned instance of, a cloud outside the central cluster. The
+  # central cluster is always provisioned first and must never block on these.
   parkedKinds:
     - CloudAWS
     - CloudOSO
-    - PlatformOpenshift
-    - Assignment
     - OpenStackMigration
   # CloudVirt is NOT a sample — always-on via platform-smoke (local-virt)
-  # CloudAWS, CloudOSO, PlatformOpenshift, Assignment are not applied by hs-samples
+  # Iaac is NOT a sample — own app, hs-iaac (wave 52)
+  #
+  # PlatformOpenshift (type: hosted) + Assignment ARE deployed: HyperShift on the
+  # hub's own CloudVirt needs no external cloud. They are the slowest part of a
+  # cold run (~30-45 min); set false to skip. Consumed by gitops/apps/samples.
+  hostedCluster: true
+  hostedClusterNodePoolReplicas: 2
+  hostedClusterWorkerCores: 4
+  hostedClusterWorkerMemory: 16Gi
 # Non-secret URLs (optional overrides from field-content)
 deployer:
   domain: ""

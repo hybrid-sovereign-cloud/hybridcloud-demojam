@@ -1,0 +1,18 @@
+# The Iaac CR is a marker, not a config surface: the sync engine is a singleton
+# StatefulSet configured by env, and spec is reserved (see crd-iaac.yaml). The CR
+# exists so config-as-code has a status object the UI and ZTP can gate on —
+# `iaac/src/status.py` writes ready / totalCRsSynced / lastSyncTime onto it.
+#
+# Central-cluster only: it reports on whatever CRs exist, so it goes healthy with
+# or without a provisioned OSO site.
+apiVersion: hybridsovereign.redhat/v1alpha1
+kind: Iaac
+metadata:
+  name: iaac
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/sample: "true"
+spec: {}

@@ -1,6 +1,6 @@
 # Bootstrap (legacy / chart build)
 
-**Runtime install path is [`../gitops/`](../gitops/) — see [`../docs/gitops-install.md`](../docs/gitops-install.md).**
+**Runtime install path is [`../gitops/`](../gitops/) — see [`../docs/gitops-install.md`](../docs/getting-started/gitops-install.md).**
 
 This directory still holds Helm charts, make targets, and helpers used to **build and push** OCI artifacts. It is **not** the dual central+services installer anymore. One OpenShift **hub** runs everything; spokes are PlatformOpenshift clusters.
 
@@ -79,4 +79,4 @@ Prefer documenting new day-2 flows under [`../docs/`](../docs/).
 ## Related
 
 - [docs/README.md](../docs/README.md)
-- [docs/ztp.md](../docs/ztp.md)
+- [docs/ztp.md](../docs/getting-started/ztp.md)
