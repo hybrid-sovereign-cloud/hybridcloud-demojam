@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 from kubernetes import client, config
@@ -34,19 +35,44 @@ class GitSyncEngine:
             config.load_kube_config()
         self.custom = client.CustomObjectsApi()
 
+    def _remote_url(self) -> str:
+        """Clone/push URL with the API token embedded.
+
+        The tenancy repo is created private, so an anonymous clone fails and
+        leaves no working tree — every later commit/push then dies with
+        "not a git repository".
+        """
+        base = self.settings.gitea_url.rstrip("/")
+        scheme, _, host = base.partition("://")
+        creds = f"{quote(self.settings.gitea_repo_owner, safe='')}:{quote(self.settings.gitea_token, safe='')}"
+        return (
+            f"{scheme}://{creds}@{host}/"
+            f"{self.settings.gitea_repo_owner}/{self.settings.gitea_repo_name}.git"
+        )
+
     def initialize_repo(self) -> None:
         clone_path = Path(self.settings.git_clone_path)
         clone_path.parent.mkdir(parents=True, exist_ok=True)
         if not (clone_path / ".git").exists():
-            remote = (
-                f"{self.settings.gitea_url.rstrip('/')}/"
-                f"{self.settings.gitea_repo_owner}/{self.settings.gitea_repo_name}.git"
-            )
-            subprocess.run(
-                ["git", "clone", remote, str(clone_path)],
+            result = subprocess.run(
+                ["git", "clone", self._remote_url(), str(clone_path)],
                 check=False,
+                capture_output=True,
+                text=True,
                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
             )
+            if result.returncode != 0:
+                # Never log the URL: it carries the token.
+                logger.warning(
+                    "git clone of %s/%s failed (rc=%s); the Gitea API path still "
+                    "commits every file, only the local mirror is unavailable",
+                    self.settings.gitea_repo_owner,
+                    self.settings.gitea_repo_name,
+                    result.returncode,
+                )
+                return
+            self._git(["config", "user.email", "iaac@hybridsovereign.local"])
+            self._git(["config", "user.name", "IaaC Git Sync"])
 
     def list_kind(self, plural: str) -> list[dict]:
         try:
@@ -108,11 +134,22 @@ class GitSyncEngine:
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text(content)
 
-    def _git_commit_push(self) -> None:
-        repo = self.settings.git_clone_path
-        subprocess.run(["git", "-C", repo, "add", "-A"], check=False)
-        subprocess.run(
-            ["git", "-C", repo, "commit", "-m", "iaac auto-sync", "--allow-empty"],
+    def _git(self, args: list[str]) -> int:
+        """Run a git command inside the clone, swallowing output."""
+        return subprocess.run(
+            ["git", "-C", self.settings.git_clone_path, *args],
             check=False,
-        )
-        subprocess.run(["git", "-C", repo, "push"], check=False)
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        ).returncode
+
+    def _git_commit_push(self) -> None:
+        # No clone (private repo unreachable at startup, or first run) — the
+        # Gitea API has already committed every file, so skip quietly rather
+        # than logging "not a git repository" on every pass.
+        if not (Path(self.settings.git_clone_path) / ".git").exists():
+            return
+        self._git(["add", "-A"])
+        self._git(["commit", "-m", "iaac auto-sync", "--allow-empty"])
+        self._git(["push"])

@@ -104,6 +104,10 @@ spec:
         name: git-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        # Declared explicitly even though it is the default: volumeClaimTemplates
+        # are immutable, so a field the API server defaults in shows up as a
+        # permanent OutOfSync that no sync can ever resolve.
+        volumeMode: Filesystem
         {{- if .Values.persistence.storageClass }}
         storageClassName: {{ .Values.persistence.storageClass }}
         {{- end }}
