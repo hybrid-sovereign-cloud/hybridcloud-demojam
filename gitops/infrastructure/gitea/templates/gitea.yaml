@@ -49,6 +49,12 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: gitea-data is ReadWriteOnce, so a surge pod can
+  # never attach the volume while the old pod holds it. A rolling update
+  # deadlocks on Multi-Attach and `oc rollout status` never returns — which in
+  # turn blocks the hs-iaac PreSync bootstrap that waits on it.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: gitea
