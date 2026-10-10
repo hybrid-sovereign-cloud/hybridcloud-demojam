@@ -49,12 +49,22 @@ metadata:
     hybridsovereign.redhat/gitops-owned: "true"
 spec:
   replicas: 1
-  # Recreate, not RollingUpdate: gitea-data is ReadWriteOnce, so a surge pod can
-  # never attach the volume while the old pod holds it. A rolling update
-  # deadlocks on Multi-Attach and `oc rollout status` never returns — which in
+  # gitea-data is ReadWriteOnce, so a surge pod can never attach the volume
+  # while the old pod still holds it: the default 25% maxSurge deadlocks the
+  # rollout on Multi-Attach and `oc rollout status` never returns, which in
   # turn blocks the hs-iaac PreSync bootstrap that waits on it.
+  #
+  # maxSurge: 0 tears the old pod down first, which is what this single-replica
+  # RWO workload needs. Expressed this way rather than `type: Recreate` because
+  # the API server defaults `rollingUpdate` on the live object and rejects it
+  # alongside Recreate ("may not be specified when strategy type is 'Recreate'");
+  # ArgoCD's server-side apply does not own that defaulted field and cannot
+  # remove it, so switching type would need a disruptive Replace=true.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: gitea
