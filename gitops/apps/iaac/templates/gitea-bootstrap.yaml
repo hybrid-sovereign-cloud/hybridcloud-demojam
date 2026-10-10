@@ -47,7 +47,9 @@ rules:
     verbs: ["create"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list"]
+    # watch: `oc rollout status` falls back to polling without it, but logs a
+    # Failed to watch error on every run.
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -131,7 +133,10 @@ spec:
                   -o jsonpath='{.data.password}' | base64 -d || true)
               fi
               if [ -z "$PASSWORD" ]; then
-                PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+                # Not `tr -dc </dev/urandom | head -c 24`: head exits first,
+                # tr dies on SIGPIPE, and `set -o pipefail` makes that fatal
+                # (exit 141) with no error message.
+                PASSWORD=$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')
                 echo "generated a new Gitea admin password"
               else
                 echo "reusing existing Gitea admin password"
