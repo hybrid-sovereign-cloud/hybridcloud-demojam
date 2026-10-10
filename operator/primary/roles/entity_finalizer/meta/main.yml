@@ -1,7 +1,0 @@
-galaxy_info:
-  role_name: entity_finalizer
-  author: hybrid-sovereign-cloud
-  description: Finalizer role for Entity operator - handles namespace cleanup
-  license: Apache-2.0
-  min_ansible_version: "2.15"
-dependencies: []

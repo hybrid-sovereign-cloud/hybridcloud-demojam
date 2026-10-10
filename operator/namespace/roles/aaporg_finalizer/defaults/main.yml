@@ -1,2 +1,0 @@
-aap_controller_internal_url: "{{ lookup('env', 'AAP_CONTROLLER_INTERNAL_URL') | default('http://sovereign-aap-controller-service.aap.svc:80', true) }}"
-aap_gateway_internal_url: "{{ lookup('env', 'AAP_GATEWAY_INTERNAL_URL') | default('http://sovereign-aap.aap.svc:80', true) }}"

@@ -1,1 +1,0 @@
-quay_url: "{{ lookup('env', 'QUAY_URL') }}"

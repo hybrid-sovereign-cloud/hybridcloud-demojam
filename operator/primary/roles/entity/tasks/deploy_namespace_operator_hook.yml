@@ -1,4 +1,0 @@
----
-- name: Deploy namespace operator into entity namespace
-  ansible.builtin.include_tasks: deploy_namespace_operator.yml
-  when: entity_skip_reconcile is defined and not (entity_skip_reconcile | bool)

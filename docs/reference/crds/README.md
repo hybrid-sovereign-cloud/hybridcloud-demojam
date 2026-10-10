@@ -89,4 +89,4 @@ sed -i \
   crd-*.yaml
 ```
 
-To keep the deprecated fields for a while, leave out the `-e '…DROP…'` line. Then refresh the copies: `cp crd-*.yaml ../../../operator/config/crd/bases/` and regenerate `operator/primary/helm/templates/crds.yaml` (it is a concatenation of these files).
+To keep the deprecated fields for a while, leave out the `-e '…DROP…'` line. `gitops/custom-operators/crds/` is the only copy — there is nothing else to refresh.

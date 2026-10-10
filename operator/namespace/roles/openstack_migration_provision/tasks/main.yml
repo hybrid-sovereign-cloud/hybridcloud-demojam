@@ -1,5 +1,0 @@
----
-- ansible.builtin.include_tasks: "{{ role_path }}/../../../../migration/roles/migration_cr_handler/tasks/main.yml"
-  vars:
-    migration_repo_root: "{{ role_path }}/../../../../migration"
-    migration_common_tasks_path: "{{ role_path }}/../../../../eda/common/tasks"

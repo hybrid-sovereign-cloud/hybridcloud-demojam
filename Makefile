@@ -19,20 +19,19 @@ include make/check-env.mk
 include bootstrap/make/*.mk
 include Makefile.ztp-images.mk
 
-.PHONY: help check-env lint-all build-operators build-iaac upload-hybrid-charts push-ztp-images
+.PHONY: help check-env lint-all build-iaac upload-hybrid-charts push-ztp-images
 help:
 	@$(MAKE) -f make/help.mk help
 
-build-operators:
-	$(MAKE) -C operator/primary operator-build-push
-	$(MAKE) -C operator/namespace operator-build-push
+# The operator image is one unified build (src/custom-operators/base) driven by
+# OPERATOR_KIND; see Makefile.ztp-images.mk `push-ansible-operator`.
 
 build-iaac:
 	podman build -t $(OCI_HOST)/iaac-git-sync:0.1.0 -f iaac/Dockerfile iaac/
 	podman push $(OCI_HOST)/iaac-git-sync:0.1.0
 
 upload-hybrid-charts:
-	$(MAKE) -C bootstrap upload-primary-operator-chart upload-iaac-chart
+	$(MAKE) -C bootstrap upload-iaac-chart
 
 test:
 	./tests/run-tests.sh
@@ -41,6 +40,4 @@ lint-all:
 	@find bootstrap/helm/charts -name Chart.yaml -execdir helm lint . \;
 	@helm lint bootstrap/helm/central
 	@helm lint bootstrap/helm/init
-	@helm lint operator/primary/helm
-	@helm lint operator/namespace/helm
 	@helm lint iaac/helm

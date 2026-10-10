@@ -1,0 +1,161 @@
+# Re-unseal TENANT Vaults after pod restarts.
+#
+# The platform CronJob next to this one only covers vault/vault. A tenant Vault
+# (Vault CR -> StatefulSet vault-<name> in entity-<name>) is unsealed once, by
+# the plugin-vault EDA role, at provision time. Nothing unseals it again: the
+# operator only relaunches that job on a spec generation change, so after any
+# node reboot or eviction the tenant Vault comes back sealed and simply stays
+# that way — observed on the reference hub as vault-acme-vault 0/3 for 8 days.
+#
+# Shamir seal: every replica must be unsealed individually, and on an HA raft
+# Vault the followers only report initialized once pod-0 is up and they have
+# joined, so this runs on a schedule rather than once.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tenant-vault-unseal
+  namespace: vault
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-vault-unseal
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # `vault operator unseal` inside each replica — the same path the
+  # plugin-vault role uses. Unseal keys are never sent over the network.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tenant-vault-unseal
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+subjects:
+  - kind: ServiceAccount
+    name: tenant-vault-unseal
+    namespace: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tenant-vault-unseal
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tenant-vault-unseal
+  namespace: vault
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "21"
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            hybridsovereign.redhat/gitops-owned: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: tenant-vault-unseal
+          containers:
+            - name: unseal
+              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  set -uo pipefail
+
+                  # Every tenant Vault StatefulSet, whatever entity it belongs to.
+                  STS_LIST=$(oc get statefulset -A \
+                    -l app.kubernetes.io/managed-by=plugin-vault \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.spec.replicas}{"\n"}{end}')
+
+                  if [ -z "$STS_LIST" ]; then
+                    echo "no tenant Vault StatefulSets found"
+                    exit 0
+                  fi
+
+                  rc=0
+                  while read -r NS NAME REPLICAS; do
+                    [ -n "${NS:-}" ] || continue
+                    SECRET="${NAME}-init"
+
+                    if ! oc -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
+                      echo "$NS/$NAME: no $SECRET yet (not initialized); skip"
+                      continue
+                    fi
+                    KEY=$(oc -n "$NS" get secret "$SECRET" -o jsonpath='{.data.unseal_key_0}' 2>/dev/null | base64 -d)
+                    if [ -z "$KEY" ]; then
+                      echo "$NS/$NAME: $SECRET has no unseal_key_0; skip"
+                      continue
+                    fi
+
+                    i=0
+                    while [ "$i" -lt "${REPLICAS:-1}" ]; do
+                      POD="${NAME}-${i}"
+                      i=$((i + 1))
+
+                      PHASE=$(oc -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                      if [ "$PHASE" != "Running" ]; then
+                        echo "$NS/$POD: phase=${PHASE:-missing}; skip"
+                        continue
+                      fi
+
+                      STATUS=$(oc -n "$NS" exec "$POD" -- sh -c \
+                        'VAULT_ADDR=http://127.0.0.1:8200 vault status -format=json' 2>/dev/null || true)
+                      if [ -z "$STATUS" ]; then
+                        echo "$NS/$POD: status unavailable; will retry next run"
+                        continue
+                      fi
+
+                      SEALED=$(echo "$STATUS" | grep -o '"sealed"[[:space:]]*:[[:space:]]*[a-z]*' | head -1 | awk -F: '{gsub(/ /,"",$2); print $2}')
+                      INITED=$(echo "$STATUS" | grep -o '"initialized"[[:space:]]*:[[:space:]]*[a-z]*' | head -1 | awk -F: '{gsub(/ /,"",$2); print $2}')
+
+                      if [ "$SEALED" != "true" ]; then
+                        echo "$NS/$POD: already unsealed"
+                        continue
+                      fi
+                      if [ "$INITED" != "true" ]; then
+                        # Raft follower that has not joined pod-0 yet. Normal on a
+                        # cold start; it becomes initialized once the leader is up.
+                        echo "$NS/$POD: sealed but not initialized (awaiting raft join); skip"
+                        continue
+                      fi
+
+                      # VAULT_UNSEAL_KEY is passed through the env so the key never
+                      # appears in the command line or in this job's logs.
+                      if oc -n "$NS" exec "$POD" -- env "VAULT_UNSEAL_KEY=$KEY" sh -c \
+                           'VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal "$VAULT_UNSEAL_KEY" >/dev/null' 2>/dev/null; then
+                        echo "$NS/$POD: unsealed"
+                      else
+                        echo "$NS/$POD: unseal FAILED"
+                        rc=1
+                      fi
+                    done
+                  done <<< "$STS_LIST"
+
+                  exit "$rc"

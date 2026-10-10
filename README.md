@@ -238,7 +238,7 @@ make -C charts upload-mce-chart OCI_REGISTRY_HOST="$OCI_HOST"
 |------|------------|
 | [`gitops/`](gitops/) | **The only runtime deploy path.** ArgoCD syncs this. |
 | [`docs/`](docs/README.md) | All documentation |
-| [`operator/`](operator/) | Ansible operator roles for every kind |
+| [`src/`](src/) | The unified operator image: one generic `kind_reconcile` role, specialised per kind by `OPERATOR_KIND` |
 | [`eda/`](eda/) | The Ansible playbooks the operators launch via AAP |
 | [`iaac/`](iaac/) | The config-as-code sync service |
 | [`ui/`](ui/) | Dashboards and console plugins |
@@ -247,7 +247,7 @@ make -C charts upload-mce-chart OCI_REGISTRY_HOST="$OCI_HOST"
 | [`tests/`](tests/) | Holistic and functional test suites |
 | [`bootstrap/`](bootstrap/README.md) | Pre-GitOps bring-up helpers |
 
-Source lives in `operator/`, `ui/`, `eda/` and `iaac/`. **The runtime deploy
+Source lives in `src/`, `ui/`, `eda/` and `iaac/`. **The runtime deploy
 path is only `gitops/`.**
 
 ---

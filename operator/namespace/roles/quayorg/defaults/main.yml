@@ -1,2 +1,0 @@
-quay_url: "{{ lookup('env', 'QUAY_URL') }}"
-quay_internal_url: "{{ lookup('env', 'QUAY_INTERNAL_URL') | default('http://svc-sovereign-registry-quay-app.quay-enterprise.svc:443', true) }}"

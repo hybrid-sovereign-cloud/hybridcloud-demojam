@@ -14,8 +14,8 @@ alwaysApply: true
 
 ## Operator Architecture
 
-- **Primary operator** (`operator/primary/`): watches `sovereign-cloud` for Entity CRs and `sovereign-cloud-plugins` for plugin config CRs.
-- **Namespace operators** (`operator/namespace/`): one Deployment per `entity-*` namespace; watches tenant CRs only in that namespace.
+- **One operator Deployment per kind**, all cluster-scoped in `sovereign-cloud` (`WATCH_NAMESPACE=""`). There are no per-entity operators.
+- All share one image built from `src/custom-operators/base`, specialised by `OPERATOR_KIND` + a `watches-<kind>` ConfigMap. The generic `kind_reconcile` role launches the AAP job templates `<kind>-provision` / `<kind>-teardown`; the logic lives in `eda/*/roles/`.
 - **No global singleton** reconciling all entity namespaces.
 
 ## Deployment

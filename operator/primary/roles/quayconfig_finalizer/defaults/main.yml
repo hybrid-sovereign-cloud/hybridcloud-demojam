@@ -1,2 +1,0 @@
-keycloak_internal_url: "{{ lookup('env', 'KEYCLOAK_INTERNAL_URL') | default('http://rhbk-services-service.rhbk.svc:8080', true) }}"
-keycloak_realm: "{{ lookup('env', 'KEYCLOAK_REALM') | default('sso', true) }}"

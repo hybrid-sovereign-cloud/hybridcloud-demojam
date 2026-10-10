@@ -95,7 +95,6 @@ include make/eda-sync.mk
 include make/upload-cnv-chart.mk
 include make/upload-mtv-chart.mk
 include make/upload-dns-forwarder-chart.mk
-include make/upload-primary-operator-chart.mk
 include make/upload-iaac-chart.mk
 include make/lab-config.mk
 
@@ -138,7 +137,6 @@ UPLOAD_TARGETS := \
   upload-cnv-chart \
   upload-mtv-chart \
   upload-dns-forwarder-chart \
-  upload-primary-operator-chart \
   upload-iaac-chart
 
 .PHONY: upload-all-charts
