@@ -198,7 +198,12 @@ spec:
                                   {"title": "sovereign-ztp-bootstrap"}, csrf=csrf)
                   tok = body.get("token")
                   if isinstance(tok, dict):
-                      return tok.get("token") or ""
+                      # Quay returns the secret as token_code; "token" is the
+                      # wrapper object, not the value. Reading the wrong key
+                      # yielded "", so this path silently fell through to
+                      # /user/initialize, which 400s on an initialized registry
+                      # and failed the whole PreSync hook.
+                      return tok.get("token_code") or tok.get("token") or ""
                   return tok if isinstance(tok, str) else ""
 
               def initialize_admin(user, password):
