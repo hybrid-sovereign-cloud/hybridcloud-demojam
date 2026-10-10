@@ -72,9 +72,34 @@ pass.
 | Repo | `GITEA_REPO_OWNER` / `GITEA_REPO_NAME` | `gitea_admin` / `tenancy_repo` |
 | Token | `GITEA_TOKEN` from Secret `gitea-admin-token` | created by the ZTP bootstrap job |
 | Interval | `RECONCILE_INTERVAL` | `300` seconds |
+| First-boot grace | `STARTUP_WAIT` | `600` seconds |
+| Retry back-off | `BACKOFF_START` / `BACKOFF_MAX` | `15` / `300` seconds |
 
 Override through the `iaac` block in the GitOps root values
 (`gitops/values.yaml`), never by editing the StatefulSet — self-heal reverts it.
+
+## Resilience during ZTP
+
+The sync pod routinely starts before Gitea is serving, so unavailability is
+treated as a normal state rather than a failure:
+
+- **First boot** waits up to `STARTUP_WAIT` for the repo to answer.
+- **Every pass** re-probes Gitea first and re-attempts the git clone, so a
+  repo that appears late is picked up without a restart.
+- **HTTP calls** retry connection errors and 429/5xx at the transport layer
+  with exponential back-off.
+- **Failed passes** back off from `BACKOFF_START` to `BACKOFF_MAX`, resetting
+  on the first success.
+- **No failure exits the loop.** An unexpected exception is logged and
+  reported on the CR; the pod keeps running rather than crash-looping.
+
+While waiting, the CR reads `status: pending` with reason `WaitingForGitea`
+(not `error`), so a ZTP run in progress is distinguishable from a real fault:
+
+```bash
+oc get iaac iaac -n sovereign-cloud-plugins \
+  -o jsonpath='{.status.status}{"  "}{.status.message}{"\n"}'
+```
 
 ## Credentials
 
@@ -98,7 +123,7 @@ oc get iaac iaac -n sovereign-cloud-plugins -o jsonpath='{.status.message}{"\n"}
 | Symptom | Cause |
 |---------|-------|
 | `ready=false`, errors > 0 | token expired or repo deleted — re-sync `hs-iaac` to re-run the bootstrap |
-| `ImagePullBackOff` | the first in-cluster build has not finished: `oc -n sovereign-cloud get builds -l buildconfig=iaac-git-sync` |
+| `ImagePullBackOff` | `quay.io/gauravshankar/iaac-git-sync` unreachable or private — the cluster pulls it anonymously |
 | no CR at all | `provision.iaac` is false in the GitOps root values |
 
 ## Related

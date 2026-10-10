@@ -207,11 +207,9 @@ default (`provision.builds: false`).
 | `quay.io/gauravshankar/tenancy-dashboard:latest` | Tenant UI |
 | `quay.io/gauravshankar/sovereign-admin-plugin:latest` | Admin console plugin |
 | `quay.io/gauravshankar/sovereign-tenant-plugin:latest` | Tenant console plugin |
+| `quay.io/gauravshankar/iaac-git-sync:latest` | IaaC config-as-code sync |
 | `docker.io/gitea/gitea:1.22.3-rootless` | Gitea on the hub |
 | `oci://quay.io/gauravshankar/mce-cluster-build` | Spoke cluster charts |
-
-The IaaC sync image is the one exception: it has no published build, so
-`hs-iaac` builds it in-cluster from [`iaac/`](iaac/).
 
 Rebuild and push (maintainers):
 

@@ -50,7 +50,7 @@ For **50+ cluster** ZTP, each `hs-*` Application must be independently deployabl
 | 46 | `hs-platform-smoke` | Always-on ACME Entity + **local CloudVirt** + dummy tool CRs | Platform configs ready; CNV adopted |
 | 48 | `hs-platform-fabric` | HybridFabric (acme/chad) + **HCP1–3** + EVPN gateways/links/networks (**no RHOSO/CloudOSO**) | Smoke Entity/CloudVirt Ready; MCE/Hypershift |
 | 50 | `hs-ui` | Dashboards + plugins from `quay.io/gauravshankar/*` | Public Quay |
-| 52 | `hs-iaac` | Gitea admin/repo bootstrap, in-cluster image build, IaaC sync StatefulSet, `Iaac` CR | Gitea (31), Vault (20), CRDs (38) |
+| 52 | `hs-iaac` | Gitea admin/repo bootstrap, IaaC sync StatefulSet, `Iaac` CR | Gitea (31), Vault (20), CRDs (38) |
 | 60 | `hs-samples` | Workshop sample CRs (**seed-once**: no selfHeal / no prune) | Entity + platform configs |
 
 Parent sync **waits for prior-wave Application health** before creating the next Application CR.

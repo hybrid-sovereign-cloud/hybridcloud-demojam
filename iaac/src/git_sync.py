@@ -50,6 +50,20 @@ class GitSyncEngine:
             f"{self.settings.gitea_repo_owner}/{self.settings.gitea_repo_name}.git"
         )
 
+    def ensure_ready(self) -> bool:
+        """Gate a sync pass on Gitea being usable.
+
+        Called before every pass, not just at startup: during ZTP the sync pod
+        can be running long before Gitea serves, and the repo may be created
+        after the first pass has already failed.
+        """
+        if not self.gitea.ping():
+            return False
+        # Cheap no-op once the clone exists; retries it if an earlier attempt
+        # failed because Gitea was not up.
+        self.initialize_repo()
+        return True
+
     def initialize_repo(self) -> None:
         clone_path = Path(self.settings.git_clone_path)
         clone_path.parent.mkdir(parents=True, exist_ok=True)

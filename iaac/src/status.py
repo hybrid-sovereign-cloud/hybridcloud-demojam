@@ -12,7 +12,6 @@ import datetime
 import logging
 
 from kubernetes import client
-from kubernetes.client.rest import ApiException
 
 from config import Settings
 
@@ -38,6 +37,39 @@ class IaacStatusReporter:
             "message": message,
             "lastTransitionTime": _now(),
         }
+
+    def report_waiting(self, message: str) -> None:
+        """Not an error — a dependency is not up yet. Keeps ZTP legible."""
+        self._patch_all({
+            "ready": False,
+            "status": "pending",
+            "message": message,
+            "lastReconciledAt": _now(),
+            "conditions": [{
+                "type": "Ready",
+                "status": "False",
+                "reason": "WaitingForGitea",
+                "message": message,
+                "lastTransitionTime": _now(),
+            }],
+        })
+
+    def report_error(self, exc: BaseException) -> None:
+        """An unexpected failure. The loop continues; the CR says why."""
+        message = f"{type(exc).__name__}: {exc}"[:400]
+        self._patch_all({
+            "ready": False,
+            "status": "error",
+            "message": message,
+            "lastReconciledAt": _now(),
+            "conditions": [{
+                "type": "Ready",
+                "status": "False",
+                "reason": "SyncFailed",
+                "message": message,
+                "lastTransitionTime": _now(),
+            }],
+        })
 
     def report(self, result: dict) -> None:
         """Patch status onto every Iaac CR. Never raises — status is best effort."""
@@ -67,6 +99,15 @@ class IaacStatusReporter:
             "conditions": [self._condition(ready, message)],
         }
 
+        self._patch_all(status)
+
+    def _patch_all(self, status: dict) -> None:
+        """Patch status onto every Iaac CR. Never raises — status is best effort.
+
+        Status reporting must never be able to take the sync loop down: the CR
+        may not exist yet during ZTP, and the API server may be briefly
+        unavailable.
+        """
         for obj in self._list_iaacs():
             meta = obj.get("metadata", {})
             name, namespace = meta.get("name"), meta.get("namespace")
@@ -81,8 +122,11 @@ class IaacStatusReporter:
                     name=name,
                     body={"status": status},
                 )
-                logger.info("status updated on Iaac/%s in %s (ready=%s)", name, namespace, ready)
-            except ApiException as exc:
+                logger.info(
+                    "status updated on Iaac/%s in %s (ready=%s)",
+                    name, namespace, status.get("ready"),
+                )
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("status patch on Iaac/%s in %s failed: %s", name, namespace, exc)
 
     def _list_iaacs(self) -> list[dict]:
@@ -92,6 +136,6 @@ class IaacStatusReporter:
                 version=self.settings.api_version,
                 plural=IAAC_PLURAL,
             ).get("items", [])
-        except ApiException as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("list iaacs failed: %s", exc)
             return []

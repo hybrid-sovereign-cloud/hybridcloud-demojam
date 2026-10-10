@@ -67,7 +67,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sync
-          image: {{ .Values.image.override | default (printf "%s:%s" .Values.image.repository .Values.image.tag) | quote }}
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
           imagePullPolicy: Always
           env:
             - name: GITEA_URL
@@ -85,6 +85,12 @@ spec:
               value: /data/git/{{ .Values.gitea.repoName }}
             - name: RECONCILE_INTERVAL
               value: {{ .Values.reconcileInterval | quote }}
+            - name: STARTUP_WAIT
+              value: {{ .Values.startupWait | quote }}
+            - name: BACKOFF_START
+              value: {{ .Values.backoffStart | quote }}
+            - name: BACKOFF_MAX
+              value: {{ .Values.backoffMax | quote }}
           volumeMounts:
             - name: git-data
               mountPath: /data/git

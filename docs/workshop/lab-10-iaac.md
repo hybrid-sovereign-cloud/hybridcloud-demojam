@@ -57,8 +57,7 @@ at wave 52. It:
 1. bootstraps a Gitea admin user headlessly and mints an API token,
 2. creates the `tenancy_repo` repository,
 3. stores the credentials in Secrets **and** Vault (`hybridsovereign/gitea-admin`),
-4. builds the sync image in-cluster from `iaac/`,
-5. runs the StatefulSet and applies the `Iaac` CR.
+4. runs the sync StatefulSet and applies the `Iaac` CR.
 
 ```bash
 oc get application hs-iaac -n openshift-gitops
@@ -151,7 +150,8 @@ oc get iaac iaac -n sovereign-cloud-plugins -o jsonpath='{.status.message}{"\n"}
 | Symptom | Cause |
 |---------|-------|
 | `ready=false`, errors > 0 | Gitea token expired or repo deleted. Re-run the bootstrap: `oc -n openshift-gitops patch app hs-iaac --type=merge -p '{"operation":{"sync":{}}}'` |
-| StatefulSet `ImagePullBackOff` | First build still running. `oc -n sovereign-cloud get builds -l buildconfig=iaac-git-sync` |
+| StatefulSet `ImagePullBackOff` | `quay.io/gauravshankar/iaac-git-sync` unreachable; the cluster pulls it anonymously |
+| `status: pending`, "waiting for Gitea" | Normal during ZTP — the sync retries with back-off and needs no intervention |
 | No `Iaac` CR at all | `provision.iaac` is false in the ArgoCD root values |
 
 ---

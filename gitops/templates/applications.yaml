@@ -886,12 +886,6 @@ spec:
         - .metadata.annotations["force-reconcile"]
         - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
         - .status
-    # The build mutates these in place; Argo must not fight it.
-    - group: image.openshift.io
-      kind: ImageStream
-      jqPathExpressions:
-        - .spec.tags
-        - .status
   syncPolicy:
     automated:
       prune: true
