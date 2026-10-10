@@ -12,7 +12,7 @@ steps:
       rg -n 'signal9\.gg|172\.18\.42\.(10|11)' \
         --glob '!.env*' \
         --glob '!**/values-lab.yaml' \
-        --glob '!**/architecture/mocks/**' \
+        --glob '!**/docs/design/ui-mockups/**' \
         bootstrap eda operator ui Makefile aap-config iaac charts \
         || true
     expect: ""

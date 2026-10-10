@@ -5,7 +5,7 @@ Connect tenant VMs on the hub (OpenShift Virtualization) and tenant VMs on an Op
 **Time:** ~1–2 hours on a prepared hub (the first OpenStack data plane rollout adds ~30 minutes).
 **Prereqs:** Labs 1–2 (Track 0 and Tracks B/C); a RHOSO 18.0.21+ site registered as CloudInfrastructure `oso1` with its data plane NodeSets; RHOSO `clouds.yaml` only on your workstation (never commit it).
 
-**Design reference:** [`design/fabric.md`](../concepts/fabric-design.md) (§1.1 tenancy, §7 object model, §10.2 hub spoke, §21 reference implementation). Live verification record: [`design/fabric-verify.md`](../concepts/fabric-verify.md).
+**Design reference:** [`fabric-design.md`](../concepts/fabric-design.md) (§1.1 tenancy, §7 object model, §10.2 hub spoke, §21 reference implementation). Live verification record: [`fabric-verify.md`](../concepts/fabric-verify.md).
 
 ## Mental model
 

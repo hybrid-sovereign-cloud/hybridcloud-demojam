@@ -60,5 +60,5 @@ Design specs for platform features. **Day-2 usage** (simple flows, workshop, how
 ## Related
 
 - Usage & workshop: [`../docs/README.md`](../docs/README.md)
-- Architecture: [`../architecture/README.md`](../architecture/README.md)
+- Architecture: [`docs/concepts/`](../docs/concepts/README.md)
 - Test specs: [`../tests/specs/README.md`](../tests/specs/README.md)

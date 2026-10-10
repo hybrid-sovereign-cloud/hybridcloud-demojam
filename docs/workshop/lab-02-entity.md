@@ -19,8 +19,9 @@ Entity/mycorp  (in sovereign-cloud)
       │       the only place this tenant's CRs may live; every later lab
       │       puts its objects here
       │
-      ├─► starts the per-tenant namespace operator in that namespace
-      │       watches tenant CRs scoped to this entity
+      │       The operators themselves are cluster-scoped and already
+      │       running in sovereign-cloud — they pick up the new namespace,
+      │       nothing new is deployed into it.
       │
       ├─► stamps entity identity onto the namespace
       │       name + billingID, so cost and ownership are attributable
@@ -81,14 +82,20 @@ oc get entity mycorp -n sovereign-cloud -w
 
 # What it produced
 oc get ns entity-mycorp
-oc get deploy -n entity-mycorp        # the per-tenant namespace operator
+```
+
+The namespace is the whole deliverable. `entity-mycorp` stays empty until you
+put something in it — the operators that reconcile tenant CRs are cluster-
+scoped (`WATCH_NAMESPACE=""`) and run in `sovereign-cloud`:
+
+```bash
+oc get deploy -n sovereign-cloud -l hybridsovereign.redhat/operator-kind
 ```
 
 **Pass criteria**
 
 - `oc get entity mycorp -n sovereign-cloud` shows the entity with its billing ID.
-- Namespace `entity-mycorp` exists.
-- A namespace operator Deployment in `entity-mycorp` is Running.
+- Namespace `entity-mycorp` exists (and is empty — that is correct).
 
 Typical time to ready: under a minute.
 

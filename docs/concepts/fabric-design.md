@@ -3,7 +3,7 @@
 **Status:** Design target and reference implementation (Hybrid VPC operators + AAP/Ansible realization)  
 **Audience:** Principal network engineers, principal security engineers, platform architects  
 **Scope:** One platform EVPN fabric per hub; tenant VRFs; platform-owned spokes (hub OpenShift Virtualization nodes, RHOSO sites); OpenShift 4.22 `ClusterUserDefinedNetwork`  
-**Single source:** this file (`design/fabric.md`). Images: `design/images/` (the PNGs predate the 2026-10-08 restructure; the mermaid diagrams are current). Live record: [`fabric-verify.md`](fabric-verify.md).
+**Single source:** this file (`docs/concepts/fabric-design.md`). Images: `docs/concepts/images/` (the PNGs predate the 2026-10-08 restructure; the mermaid diagrams are current). Live record: [`fabric-verify.md`](fabric-verify.md).
 
 ---
 
@@ -1095,7 +1095,7 @@ Plugin touchpoints: `AdminHybridFabricsPage`, `AdminCloudInfrastructuresPage` / 
 - OVN-Kubernetes — MAC-VRF vs IP-VRF
 - RHOSO **18.0.21 FR6** — Native BGP-EVPN (TP): OVN gateway centralized Type-5; Neutron `--evpn-vni` / advertise-host; OVN dynamic-routing + FRR (`l2vpn evpn`)
 - In-repo CRDs `gitops/custom-operators/crds/`; samples `samples/cloudinfrastructure/`, `samples/hybridvpc/`; field docs `docs/usage/crds/fabric.md`, `docs/usage/crds/cloudinfrastructure.md`
-- Prior UI notes `architecture/mocks/DESIGN_UI.md`
+- Prior UI notes `docs/design/ui-mockups/DESIGN_UI.md`
 - Admin / entity tagging / tenant catalog: §19
 
 ---

@@ -14,6 +14,13 @@ metadata:
   namespace: sovereign-secrets
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    # Must be a PreSync hook too, at an earlier wave than the Job: a plain
+    # resource is only applied during the main sync, which has not run yet
+    # when the PreSync Job is created. Without this the job-controller loops
+    # on "error looking up service account ... not found".
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "0"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -21,6 +28,13 @@ metadata:
   name: hs-iaac-gitea-bootstrap
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    # Must be a PreSync hook too, at an earlier wave than the Job: a plain
+    # resource is only applied during the main sync, which has not run yet
+    # when the PreSync Job is created. Without this the job-controller loops
+    # on "error looking up service account ... not found".
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "0"
 rules:
   - apiGroups: [""]
     resources: ["secrets", "namespaces"]
@@ -41,6 +55,13 @@ metadata:
   name: hs-iaac-gitea-bootstrap
   labels:
     hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    # Must be a PreSync hook too, at an earlier wave than the Job: a plain
+    # resource is only applied during the main sync, which has not run yet
+    # when the PreSync Job is created. Without this the job-controller loops
+    # on "error looking up service account ... not found".
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "0"
 subjects:
   - kind: ServiceAccount
     name: hs-iaac-gitea-bootstrap

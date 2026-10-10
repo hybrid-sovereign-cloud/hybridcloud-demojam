@@ -60,7 +60,7 @@ Ready signals: `status.ready=true`, `status.status=ready`, or `status.provisionS
 ## Walkthroughs
 
 - [Workshop](../../workshop/README.md): [Lab 2](../../workshop/lab-06-register-cloud.md) registers CloudInfrastructure and tenant projects; [Lab 6](../../workshop/lab-09-hybrid-fabric.md) builds and verifies the fabric
-- Fabric design and reference implementation: [design/fabric.md](../../concepts/fabric-design.md) · live record [design/fabric-verify.md](../../concepts/fabric-verify.md)
+- Fabric design and reference implementation: [fabric-design.md](../../concepts/fabric-design.md) · live record [fabric-verify.md](../../concepts/fabric-verify.md)
 
 ## How-tos for new accounts / clusters
 

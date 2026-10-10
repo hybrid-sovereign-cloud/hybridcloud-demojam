@@ -3465,7 +3465,7 @@ Name · Group · URL · **Live** (probe result). The old Status/reconcile badge 
 
 **Status:** design only — **no deploy** in this document.  
 **Scope:** CloudOSO + CloudVirt (+ PlatformOpenshift `virt` / `hosted`). **AWS EVPN is out of scope.**  
-**Source:** [architecture/mocks/DESIGN_UI.md](../design/ui-mockups/DESIGN_UI.md).
+**Source:** [DESIGN_UI.md](../design/ui-mockups/DESIGN_UI.md).
 
 ### Goal
 

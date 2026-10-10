@@ -13,7 +13,7 @@
 | **[technical.md](technical.md)** | Technical reference — Vault, AAP, plugins, RBAC, CNV, cleanup, QA |
 | **[workshop-tutorials.md](workshop-tutorials.md)** | Day-0 / ZTP workshop + day-2 tutorials |
 
-UI design mocks (unchanged): [`../mocks/`](../design/ui-mockups/).
+UI design mocks: [`docs/design/ui-mockups/`](../design/ui-mockups/).
 
 ## Quick topology
 
