@@ -45,6 +45,7 @@
       "AdminVaultKVDetailPage": "./src/components/AdminVaultKVDetailPage.tsx",
       "AdminCreatePage": "./src/components/AdminCreatePage.tsx",
       "AdminHybridFabricsPage": "./src/components/AdminHybridFabricsPage.tsx",
+      "AdminNetworkOverviewPage": "./src/components/AdminNetworkOverviewPage.tsx",
       "AdminCloudGatewaysPage": "./src/components/AdminCloudGatewaysPage.tsx",
       "AdminTransportLinksPage": "./src/components/AdminTransportLinksPage.tsx",
       "AdminUIHealthPage": "./src/components/AdminUIHealthPage.tsx",

@@ -27,6 +27,7 @@ import {
   UsersIcon,
   ClusterIcon,
   LayerGroupIcon,
+  NetworkIcon,
   AwsIcon,
   ServerIcon,
   TopologyIcon,
@@ -53,6 +54,7 @@ import {
   HybridSovereignKind,
 } from '@hybridsovereign/shared';
 import { TenantOverviewPage } from './pages/TenantOverviewPage';
+import { TenantNetworkOverviewPage } from './pages/TenantNetworkOverviewPage';
 import { TenantResourcePage } from './pages/TenantResourcePage';
 import { TenantResourceDetailPage } from './pages/TenantResourceDetailPage';
 import { SelfServiceFormPage } from './pages/SelfServiceFormPage';
@@ -90,6 +92,12 @@ const NAV: NavEntry[] = [
   { type: 'link', path: '/cloudaws', labelKey: 'nav.cloudAws', icon: AwsIcon, kind: 'CloudAWS', form: 'cloudaws' },
   { type: 'link', path: '/cloudvirt', labelKey: 'nav.cloudVirt', icon: ServerIcon, kind: 'CloudVirt', form: 'cloudvirt' },
   { type: 'sep', labelKey: 'nav.iaasNetworking' },
+  {
+    type: 'link',
+    path: '/network-overview',
+    labelKey: 'nav.networkOverview',
+    icon: NetworkIcon,
+  },
   {
     type: 'link',
     path: '/networks',
@@ -279,6 +287,10 @@ function TenantLayout(): React.ReactElement {
         <div className="sc-page">
           <Routes>
             <Route path="/" element={<TenantOverviewPage namespace={tenantNamespace} />} />
+            <Route
+              path="/network-overview"
+              element={<TenantNetworkOverviewPage namespace={tenantNamespace} />}
+            />
             {resourceRoutes.flatMap((item) => [
               <Route
                 key={`${item.path}-detail`}

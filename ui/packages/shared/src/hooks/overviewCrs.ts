@@ -45,6 +45,10 @@ const ENTITY_KINDS: HybridSovereignKind[] = [
   'CloudAWS',
   'CloudVirt',
   'Vault',
+  // Tenant VRFs and their per-cloud placements. Needed by NetworkOverview to
+  // draw networks across clouds; the fabric/gateway half is in PLATFORM_KINDS.
+  'HybridNetwork',
+  'NetworkPlacement',
 ];
 
 const RETRY_ATTEMPTS = 4;

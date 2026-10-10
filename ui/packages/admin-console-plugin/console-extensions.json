@@ -64,6 +64,19 @@
   {
     "type": "console.navigation/href",
     "properties": {
+      "id": "hybridsovereign-network-overview",
+      "section": "hybridsovereign-admin-networks-section",
+      "perspective": "hybridsovereign",
+      "name": "Network Overview",
+      "href": "/hybridsovereign/networking/overview",
+      "dataAttributes": {
+        "data-quickstart-id": "hs-network-overview"
+      }
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
       "id": "hybridsovereign-fabrics",
       "section": "hybridsovereign-admin-networks-section",
       "perspective": "hybridsovereign",
@@ -525,6 +538,16 @@
         "$codeRef": "AdminAssignmentDetailPage"
       },
       "exact": false
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/hybridsovereign/networking/overview",
+      "component": {
+        "$codeRef": "AdminNetworkOverviewPage"
+      }
     }
   },
   {

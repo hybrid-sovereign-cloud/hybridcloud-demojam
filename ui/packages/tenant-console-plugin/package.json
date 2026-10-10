@@ -46,6 +46,7 @@
       "TenantPersonaDetailPage": "./src/components/TenantPersonaDetailPage.tsx",
       "TenantRbacDetailPage": "./src/components/TenantRbacDetailPage.tsx",
       "TenantHybridNetworksPage": "./src/components/TenantHybridNetworksPage.tsx",
+      "TenantNetworkOverviewPage": "./src/components/TenantNetworkOverviewPage.tsx",
       "TenantNetworkPlacementsPage": "./src/components/TenantNetworkPlacementsPage.tsx",
       "TenantHybridNetworkDetailPage": "./src/components/TenantHybridNetworkDetailPage.tsx",
       "TenantNetworkPlacementDetailPage": "./src/components/TenantNetworkPlacementDetailPage.tsx"

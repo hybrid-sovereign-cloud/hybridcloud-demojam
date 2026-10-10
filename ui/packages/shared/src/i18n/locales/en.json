@@ -108,7 +108,8 @@
     "cloudGateways": "Cloud Gateways",
     "transportLinks": "Transport Links",
     "uiHealth": "UI Health",
-    "cloudInfrastructure": "Cloud Infrastructure"
+    "cloudInfrastructure": "Cloud Infrastructure",
+    "networkOverview": "Network Overview"
   },
   "kinds": {
     "Entity": "Entities",
@@ -176,7 +177,8 @@
     "cloudInfrastructureSection": "Infrastructure (platform)",
     "cloudInfrastructureSectionSubtitle": "Platform-owned OpenStack, OpenShift Virtualization and AWS sites in sovereign-cloud",
     "cloudProjectsSection": "Cloud projects (tenant)",
-    "cloudProjectsSectionSubtitle": "CloudOSO, CloudAWS and CloudVirt projects in entity namespaces, each on a Cloud Infrastructure"
+    "cloudProjectsSectionSubtitle": "CloudOSO, CloudAWS and CloudVirt projects in entity namespaces, each on a Cloud Infrastructure",
+    "networkOverviewDesc": "The hybrid fabric end to end: border gateway, attached sites, and every tenant VRF across the clouds it is placed on."
   },
   "list": {
     "showing": "{{count}} resources",

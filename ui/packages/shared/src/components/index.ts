@@ -3,6 +3,8 @@ export type { HealthDonutProps } from './HealthDonut';
 export { InventoryCard } from './InventoryCard';
 export type { InventoryCardProps } from './InventoryCard';
 export { EntityTopology } from './EntityTopology';
+export { NetworkOverview } from './NetworkOverview';
+export type { NetworkOverviewProps, NetState } from './NetworkOverview';
 export type { EntityTopologyProps, TopologyNode } from './EntityTopology';
 export { RbacGroupsEditor } from './RbacGroupsEditor';
 export type { RbacGroupsEditorProps } from './RbacGroupsEditor';

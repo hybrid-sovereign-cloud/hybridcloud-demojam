@@ -40,6 +40,7 @@ import {
   GlobeIcon,
   UserEditIcon,
   InfrastructureIcon,
+  NetworkIcon,
 } from '@patternfly/react-icons';
 import { NavLink, Routes, Route, useLocation } from 'react-router-dom';
 import {
@@ -56,6 +57,7 @@ import { ServicesPage } from './pages/ServicesPage';
 import { CreateResourcePage } from './pages/CreateResourcePage';
 import { AdminResourceDetailPage } from './pages/AdminResourceDetailPage';
 import { UIHealthPage } from './pages/UIHealthPage';
+import NetworkOverviewPage from './pages/NetworkOverviewPage';
 
 type NavEntry =
   | {
@@ -75,6 +77,12 @@ const NAV: NavEntry[] = [
   { type: 'link', path: '/entities', labelKey: 'nav.entities', icon: BuildingIcon, kind: 'Entity' },
   { type: 'link', path: '/personas', labelKey: 'nav.personas', icon: UserEditIcon, kind: 'Persona' },
   { type: 'sep', labelKey: 'nav.adminNetworks' },
+  {
+    type: 'link',
+    path: '/networking/overview',
+    labelKey: 'nav.networkOverview',
+    icon: NetworkIcon,
+  },
   {
     type: 'link',
     path: '/networking/fabrics',
@@ -446,6 +454,7 @@ function AdminLayout(): React.ReactElement {
               path="/services/vaultkvs/:namespace/:name"
               element={<AdminResourceDetailPage kind="VaultKV" title={t('nav.serviceUrls')} listPath="/services" />}
             />
+            <Route path="/networking/overview" element={<NetworkOverviewPage />} />
             <Route
               path="/networking/fabrics"
               element={

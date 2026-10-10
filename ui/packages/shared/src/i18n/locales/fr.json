@@ -108,7 +108,8 @@
     "cloudGateways": "Passerelles cloud",
     "transportLinks": "Liens de transport",
     "uiHealth": "Santé UI",
-    "cloudInfrastructure": "Infrastructure cloud"
+    "cloudInfrastructure": "Infrastructure cloud",
+    "networkOverview": "Vue d'ensemble du réseau"
   },
   "kinds": {
     "Entity": "Entités",
@@ -176,7 +177,8 @@
     "cloudInfrastructureSection": "Infrastructure (plateforme)",
     "cloudInfrastructureSectionSubtitle": "Sites OpenStack, OpenShift Virtualization et AWS détenus par la plateforme dans sovereign-cloud",
     "cloudProjectsSection": "Projets cloud (locataire)",
-    "cloudProjectsSectionSubtitle": "Projets CloudOSO, CloudAWS et CloudVirt dans les espaces de noms des entités, chacun sur une infrastructure cloud"
+    "cloudProjectsSectionSubtitle": "Projets CloudOSO, CloudAWS et CloudVirt dans les espaces de noms des entités, chacun sur une infrastructure cloud",
+    "networkOverviewDesc": "Le tissu hybride de bout en bout : passerelle de bordure, sites rattachés et chaque VRF locataire sur les clouds où il est placé."
   },
   "list": {
     "showing": "{{count}} ressources",

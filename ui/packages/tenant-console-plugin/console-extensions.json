@@ -32,6 +32,16 @@
   {
     "type": "console.navigation/href",
     "properties": {
+      "id": "hybridsovereign-tenant-network-overview",
+      "section": "hybridsovereign-iaas-networking-section",
+      "perspective": "hybridsovereign",
+      "name": "Network Overview",
+      "href": "/hybridsovereign/tenant/network-overview"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
       "id": "hybridsovereign-tenant-networks",
       "section": "hybridsovereign-iaas-networking-section",
       "perspective": "hybridsovereign",
@@ -97,6 +107,16 @@
       "perspective": "hybridsovereign",
       "name": "Quay Orgs",
       "href": "/hybridsovereign/tenant/quayorgs"
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/hybridsovereign/tenant/network-overview",
+      "component": {
+        "$codeRef": "TenantNetworkOverviewPage"
+      },
+      "perspective": "hybridsovereign"
     }
   },
   {

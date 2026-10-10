@@ -2126,3 +2126,374 @@ html.pf-v5-theme-dark .sc-console-page,
     transition: none;
   }
 }
+
+/* ── Network Overview ──────────────────────────────────────────────────────
+ * Status encoding only (no categorical series): every state ships an icon and
+ * a text label, so colour is reinforcement, never the sole channel. The amber
+ * "pending" step is below 3:1 on the light surface, which is exactly why the
+ * label and the table view are mandatory rather than optional.
+ * Dark mode rides PatternFly's own status tokens (--pf-t--*), which carry
+ * purpose-built dark steps — not a filter-inverted light palette.
+ */
+.sc-netov {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.sc-netov__section {
+  border: 1px solid var(--sc-border);
+  border-radius: 4px;
+  background: var(--sc-surface);
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.sc-netov__section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sc-netov__title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.sc-netov__title code {
+  font-size: 0.95em;
+}
+
+.sc-netov__hint {
+  margin: 0 0 0.75rem;
+  color: var(--sc-text-muted);
+  font-size: 0.875rem;
+  max-width: 68ch;
+}
+
+/* Fabric summary */
+.sc-netov__fabric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sc-netov__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.sc-netov__fact dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sc-text-muted);
+}
+
+.sc-netov__fact dd {
+  margin: 0.125rem 0 0;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Magnitude → a single-hue bar, deliberately not a status colour. */
+.sc-netov__pool-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+  color: var(--sc-text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.sc-netov__pool-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-netov__pool-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--sc-surface-alt);
+  overflow: hidden;
+}
+
+.sc-netov__pool-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--pf-t--global--color--brand--default, #0066cc);
+}
+
+/* Fabric map */
+.sc-netov__map-wrap {
+  overflow-x: auto;
+}
+
+.sc-netov__map {
+  width: 100%;
+  min-width: 620px;
+  height: auto;
+}
+
+.sc-netov__edge {
+  fill: none;
+  stroke-width: 2;
+  stroke: var(--sc-text-muted);
+}
+
+.sc-netov__edge--ready {
+  stroke: var(--sc-success);
+}
+
+.sc-netov__edge--pending {
+  stroke: var(--sc-warning);
+  stroke-dasharray: 5 4;
+}
+
+.sc-netov__edge--failed {
+  stroke: var(--sc-danger);
+}
+
+.sc-netov__edge--absent {
+  stroke: var(--sc-border);
+  stroke-dasharray: 2 4;
+}
+
+.sc-netov__edge-label {
+  font-size: 10px;
+  fill: var(--sc-text-muted);
+}
+
+.sc-netov__hub {
+  fill: var(--sc-surface-alt);
+  stroke: var(--sc-border);
+  stroke-width: 2;
+}
+
+.sc-netov__hub-kind {
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--sc-text-muted);
+}
+
+.sc-netov__hub-name {
+  font-size: 11px;
+  fill: var(--pf-t--global--text--color--regular, #151515);
+}
+
+.sc-netov__node rect {
+  fill: var(--sc-surface);
+  stroke: var(--sc-border);
+  stroke-width: 2;
+}
+
+.sc-netov__node--ready rect { stroke: var(--sc-success); }
+.sc-netov__node--pending rect { stroke: var(--sc-warning); }
+.sc-netov__node--failed rect { stroke: var(--sc-danger); }
+
+.sc-netov__node[role='button'] { cursor: pointer; }
+.sc-netov__node[role='button']:focus-visible rect {
+  outline: 2px solid var(--pf-t--global--color--brand--default, #0066cc);
+  outline-offset: 2px;
+}
+
+.sc-netov__node-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  fill: var(--sc-text-muted);
+}
+
+.sc-netov__node-name {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--pf-t--global--text--color--regular, #151515);
+}
+
+.sc-netov__node-state {
+  font-size: 10px;
+  fill: var(--sc-text-muted);
+}
+
+/* VRF × backend matrix */
+.sc-netov__matrix-wrap {
+  overflow-x: auto;
+}
+
+.sc-netov__matrix,
+.sc-netov__table {
+  border-collapse: separate;
+  /* 2px surface gap between fills, per mark spec */
+  border-spacing: 2px;
+  width: 100%;
+  font-size: 0.875rem;
+}
+
+.sc-netov__colhead {
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  vertical-align: bottom;
+  min-width: 132px;
+  background: var(--sc-surface-alt);
+  border-radius: 3px;
+}
+
+.sc-netov__colhead-kind,
+.sc-netov__colhead-site {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--sc-text-muted);
+}
+
+.sc-netov__colhead-name {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}
+
+.sc-netov__rowhead {
+  text-align: left;
+  padding: 0.5rem;
+  min-width: 190px;
+  background: var(--sc-surface-alt);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.sc-netov__rowlink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--pf-t--global--text--color--link--default, #0066cc);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sc-netov__rowlink:disabled {
+  color: inherit;
+  cursor: default;
+}
+
+.sc-netov__rowmeta {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--sc-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-netov__cell {
+  padding: 0;
+  border-radius: 3px;
+  background: var(--sc-surface-alt);
+}
+
+.sc-netov__cell-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem;
+  min-height: 42px;
+  border-radius: 3px;
+  /* 2px inner ring keeps adjacent fills from touching */
+  box-shadow: inset 0 0 0 2px var(--sc-surface);
+}
+
+.sc-netov__cell-label {
+  font-size: 0.8125rem;
+  /* Text wears a text token; the icon beside it carries the status colour. */
+  color: var(--pf-t--global--text--color--regular, #151515);
+}
+
+.sc-netov__cell-prefix {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--sc-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tint is mixed INTO the current surface, so the same rule yields a pale wash
+ * on light and a deep wash on dark. The PatternFly status *background* tokens
+ * are light-only — using them here made dark-mode cell text unreadable. */
+.sc-netov__cell--ready { background: #f3faf2; }
+.sc-netov__cell--pending { background: #fdf7e7; }
+.sc-netov__cell--failed { background: #faeae8; }
+.sc-netov__cell--absent { background: var(--sc-surface-alt); }
+
+@supports (background: color-mix(in srgb, red 10%, white)) {
+  .sc-netov__cell--ready { background: color-mix(in srgb, var(--sc-success) 14%, var(--sc-surface)); }
+  .sc-netov__cell--pending { background: color-mix(in srgb, var(--sc-warning) 14%, var(--sc-surface)); }
+  .sc-netov__cell--failed { background: color-mix(in srgb, var(--sc-danger) 14%, var(--sc-surface)); }
+}
+
+.sc-netov__cell--ready .sc-netov__cell-inner svg { color: var(--sc-success); }
+.sc-netov__cell--pending .sc-netov__cell-inner svg { color: var(--sc-warning); }
+.sc-netov__cell--failed .sc-netov__cell-inner svg { color: var(--sc-danger); }
+.sc-netov__cell--absent .sc-netov__cell-label { color: var(--sc-text-muted); }
+.sc-netov__cell--absent .sc-netov__cell-inner svg { color: var(--sc-text-muted); }
+
+/* Plain table view (the required non-colour fallback) */
+.sc-netov__table th,
+.sc-netov__table td {
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--sc-border);
+}
+
+.sc-netov__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sc-text-muted);
+  border-bottom-width: 2px;
+}
+
+/* Shared state chip — icon + label, used in legend, table and fabric head */
+.sc-netov__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.sc-netov__state--ready svg { color: var(--sc-success); }
+.sc-netov__state--pending svg { color: var(--sc-warning); }
+.sc-netov__state--failed svg { color: var(--sc-danger); }
+.sc-netov__state--absent svg { color: var(--sc-text-muted); }
+
+.sc-netov__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  color: var(--sc-text-muted);
+}
+
+/* Forced-colors / high-contrast: lean on the icon, drop the tint. */
+@media (forced-colors: active) {
+  .sc-netov__cell--ready,
+  .sc-netov__cell--pending,
+  .sc-netov__cell--failed,
+  .sc-netov__cell--absent {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  .sc-netov__cell-inner { box-shadow: none; }
+}
