@@ -1,0 +1,82 @@
+# ZTP prerequisite for Assignment.
+#
+# assignment_provision reads a service-account token Secret named
+# `assignment-acm-creator-sa` from sovereign-cloud and uses its `token` +
+# `ca.crt` to create the ACM Policy / Placement / PlacementBinding that grants
+# a Team access on its spoke cluster. Without it every Assignment fails with:
+#
+#   ACM creator SA secret 'assignment-acm-creator-sa' not found in
+#   'sovereign-cloud'. Ensure assignment-central-rbac chart is deployed ...
+#
+# That secret used to come only from the pre-GitOps bootstrap path (the OCI
+# chart `assignment-central-rbac`), so a hub brought up purely by ZTP never had
+# it. Everything the role actually needs is below, so there is no OCI
+# dependency: the SA, a least-privilege ClusterRole limited to ACM policy
+# objects, and a long-lived token Secret the kubelet token controller fills in.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: assignment-acm-creator
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+# Least privilege: ACM policy objects only. Deliberately not cluster-admin —
+# this token is handed to an AAP job.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: assignment-acm-creator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+  - apiGroups: ["policy.open-cluster-management.io"]
+    resources: ["policies", "placementbindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources: ["placements", "placementdecisions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Resolve the spoke a Placement targets.
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources: ["managedclusters", "managedclustersets", "managedclustersetbindings"]
+    verbs: ["get", "list", "watch"]
+  # Policies live in the entity namespace; the job needs to see it exists.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: assignment-acm-creator
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+subjects:
+  - kind: ServiceAccount
+    name: assignment-acm-creator
+    namespace: sovereign-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: assignment-acm-creator
+---
+# Long-lived SA token. The token controller populates .data.token and
+# .data["ca.crt"], which is exactly the shape assignment_provision asserts on.
+# A projected/bound token will not do here: the AAP job reads the Secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: assignment-acm-creator-sa
+  namespace: sovereign-cloud
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    kubernetes.io/service-account.name: assignment-acm-creator
+    argocd.argoproj.io/sync-wave: "1"
+type: kubernetes.io/service-account-token

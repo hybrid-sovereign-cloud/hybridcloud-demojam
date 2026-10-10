@@ -662,6 +662,14 @@ spec:
         - .metadata.annotations["requeue"]
         - .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
         - .status
+    # The token controller writes .data into the SA token Secret; Argo must
+    # not keep reverting it to the empty manifest.
+    - group: ""
+      kind: Secret
+      name: assignment-acm-creator-sa
+      namespace: sovereign-cloud
+      jsonPointers:
+        - /data
   syncPolicy:
     automated:
       prune: true
