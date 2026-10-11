@@ -1,0 +1,10 @@
+# Chad hybrid-network showcase: a VM plus a probe pod on the chad-app VRF.
+#
+# Demonstrates a tenant VRF carrying real workloads, and — paired with
+# acme-core — the inter-tenant isolation check in workshop lab-09. Hosted
+# clusters cannot serve this purpose: a PlatformOpenshift never joins the
+# fabric (fabric-design.md §15).
+chadShowcase:
+  enabled: true
+  vmImage: quay.io/containerdisks/centos-stream:9
+  probeImage: registry.redhat.io/openshift4/network-tools-rhel9:latest

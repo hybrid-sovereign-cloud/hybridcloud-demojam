@@ -1,0 +1,108 @@
+{{- if .Values.chadShowcase.enabled }}
+# Chad hybrid-network showcase.
+#
+# chad-app (VNI 52000) is the second tenant VRF on the shared platform fabric.
+# The NetworkPlacement above already made chad-app-vms a primary-network member
+# of that VRF, so a VM here needs no special NIC config: it attaches to the
+# default pod network and the CUDN puts it on 10.120.2.0/24 inside the VRF.
+#
+# What this demonstrates, and why it is VMs rather than hosted clusters: a
+# PlatformOpenshift never joins the fabric, whatever its type, and is not a
+# NetworkPlacement backend (fabric-design.md §15) — a tenant cluster-admin
+# controls their own OVN-K and FRR and could otherwise forge VNIs and route
+# targets on the shared underlay. Tenant *cloud projects* carry VRFs; tenant
+# clusters do not. So the hybrid-network story is told by workloads on a cloud
+# project, which is what these are.
+#
+# Paired with acme-core (10.110.2.0/24) this gives the isolation check in
+# workshop lab-09: chad VMs reach each other, and must NOT reach acme's.
+#
+# No credentials here: cloud-init sets no password, so nothing secret lands in
+# Git. Reachability is verified from the probe pod, which needs no login.
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: chad-app-vm1
+  namespace: chad-app-vms
+  annotations:
+    argocd.argoproj.io/sync-wave: "70"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/showcase: "chad-app"
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/showcase: "chad-app"
+    spec:
+      domain:
+        cpu:
+          cores: 1
+        memory:
+          guest: 1Gi
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinit
+              disk:
+                bus: virtio
+          interfaces:
+            # Default pod network: the VRF membership comes from the
+            # NetworkPlacement, not from the VM.
+            - name: default
+              binding:
+                name: l2bridge
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: {{ .Values.chadShowcase.vmImage | quote }}
+        - name: cloudinit
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              # Deliberately no user or password — this VM exists to hold an
+              # address on the chad-app VRF and answer pings.
+              packages:
+                - iputils
+              runcmd:
+                - [ systemctl, enable, --now, sshd ]
+---
+# Probe pod on the same VRF: gives a shell for ping/traceroute without needing
+# to log into the VM, which is what keeps credentials out of this manifest.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chad-app-probe
+  namespace: chad-app-vms
+  annotations:
+    argocd.argoproj.io/sync-wave: "70"
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+    hybridsovereign.redhat/platform-fabric: "true"
+    hybridsovereign.redhat/showcase: "chad-app"
+spec:
+  restartPolicy: Always
+  containers:
+    - name: probe
+      image: {{ .Values.chadShowcase.probeImage | quote }}
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+{{- end }}
