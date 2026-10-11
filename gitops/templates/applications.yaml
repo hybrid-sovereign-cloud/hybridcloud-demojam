@@ -790,6 +790,17 @@ spec:
       jsonPointers:
         - /metadata/annotations
         - /metadata/labels
+    # OpenShift SCC admission mutates bare Pods: it appends MKNOD to the
+    # dropped capabilities and allocates an SELinux level per namespace.
+    # Neither can be expressed in the manifest, so the showcase probe would
+    # sit OutOfSync forever.
+    - group: ""
+      kind: Pod
+      name: chad-app-probe
+      namespace: chad-app-vms
+      jsonPointers:
+        - /spec/securityContext
+        - /spec/containers/0/securityContext/capabilities/drop
   syncPolicy:
     automated:
       prune: true
