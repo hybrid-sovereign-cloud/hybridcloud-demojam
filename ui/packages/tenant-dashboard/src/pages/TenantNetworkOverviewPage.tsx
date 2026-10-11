@@ -4,7 +4,7 @@ import { SyncIcon } from '@patternfly/react-icons';
 import {
   NetworkOverview,
   PageHeader,
-  useOverviewCRs,
+  useNetworkOverviewCRs,
   useTranslation,
 } from '@hybridsovereign/shared';
 
@@ -23,7 +23,7 @@ export function TenantNetworkOverviewPage({
   namespace,
 }: TenantNetworkOverviewPageProps): React.ReactElement {
   const { t } = useTranslation();
-  const { items, loading, error, refresh } = useOverviewCRs(0);
+  const { items, loading, error, refresh } = useNetworkOverviewCRs(namespace);
 
   return (
     <>

@@ -20,6 +20,8 @@ export type {
 } from './k8s';
 export { useOverviewCRs, PLATFORM_NS, PLUGINS_NS } from './overviewCrs';
 export type { OverviewCRsResult, UseOverviewCRsOptions } from './overviewCrs';
+export { useNetworkOverviewCRs } from './networkOverviewCrs';
+export type { NetworkOverviewCRsResult } from './networkOverviewCrs';
 export {
   usePermissions,
   useCanListKind,

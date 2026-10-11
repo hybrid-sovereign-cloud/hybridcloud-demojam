@@ -6,7 +6,7 @@ import {
   PageHeader,
   NamespaceContextBar,
   useEntityNamespace,
-  useOverviewCRs,
+  useNetworkOverviewCRs,
   useTranslation,
 } from '@hybridsovereign/shared';
 import '@hybridsovereign/shared/styles/openshift.css';
@@ -21,7 +21,7 @@ import '@hybridsovereign/shared/styles/openshift.css';
 const TenantNetworkOverviewPage: React.FC = () => {
   const { t } = useTranslation();
   const { namespace, entities, selectEntity, entity } = useEntityNamespace();
-  const { items, loading, error } = useOverviewCRs(0);
+  const { items, loading, error } = useNetworkOverviewCRs(namespace);
 
   return (
     <PageSection className="sc-console-page">
