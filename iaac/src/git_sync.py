@@ -65,28 +65,68 @@ class GitSyncEngine:
         return True
 
     def initialize_repo(self) -> None:
+        """Make git_clone_path a working clone, whatever state it is in.
+
+        Three cases, because a long-lived PVC sees all of them:
+          - already a clone  -> nothing to do
+          - empty directory  -> plain clone
+          - files but no .git -> adopt them in place. An earlier build wrote
+            the stripped YAML here while its unauthenticated clone was failing
+            silently, so the PVC holds entity directories and `git clone`
+            refuses with "destination path already exists and is not an empty
+            directory" (rc 128) forever after.
+        """
         clone_path = Path(self.settings.git_clone_path)
         clone_path.parent.mkdir(parents=True, exist_ok=True)
-        if not (clone_path / ".git").exists():
-            result = subprocess.run(
-                ["git", "clone", self._remote_url(), str(clone_path)],
-                check=False,
-                capture_output=True,
-                text=True,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+
+        if (clone_path / ".git").exists():
+            return
+
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        label = f"{self.settings.gitea_repo_owner}/{self.settings.gitea_repo_name}"
+
+        def warn(step: str, rc: int) -> None:
+            # Never log the URL or the command: both carry the token.
+            logger.warning(
+                "git %s for %s failed (rc=%s); the Gitea API path still commits "
+                "every file, only the local mirror is unavailable",
+                step, label, rc,
             )
-            if result.returncode != 0:
-                # Never log the URL: it carries the token.
-                logger.warning(
-                    "git clone of %s/%s failed (rc=%s); the Gitea API path still "
-                    "commits every file, only the local mirror is unavailable",
-                    self.settings.gitea_repo_owner,
-                    self.settings.gitea_repo_name,
-                    result.returncode,
-                )
+
+        has_content = clone_path.exists() and any(clone_path.iterdir())
+        if not has_content:
+            rc = subprocess.run(
+                ["git", "clone", self._remote_url(), str(clone_path)],
+                check=False, capture_output=True, text=True, env=env,
+            ).returncode
+            if rc != 0:
+                warn("clone", rc)
                 return
-            self._git(["config", "user.email", "iaac@hybridsovereign.local"])
-            self._git(["config", "user.name", "IaaC Git Sync"])
+        else:
+            clone_path.mkdir(parents=True, exist_ok=True)
+            for step, args in (
+                ("init", ["init", "-q"]),
+                ("remote", ["remote", "add", "origin", self._remote_url()]),
+                ("fetch", ["fetch", "-q", "origin"]),
+            ):
+                rc = self._git(args)
+                if rc != 0:
+                    warn(step, rc)
+                    return
+            # Keep the files already on disk; just make them tracked against
+            # the remote tip so the next commit is a normal delta.
+            head = subprocess.run(
+                ["git", "-C", str(clone_path), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                check=False, capture_output=True, text=True, env=env,
+            ).stdout.strip()
+            branch = head.rsplit("/", 1)[-1] if head else "main"
+            if self._git(["checkout", "-q", "-B", branch, f"origin/{branch}"]) != 0:
+                # Remote may be an empty repo with no branches yet.
+                self._git(["checkout", "-q", "-B", branch])
+            logger.info("adopted existing contents of %s as a clone of %s", clone_path, label)
+
+        self._git(["config", "user.email", "iaac@hybridsovereign.local"])
+        self._git(["config", "user.name", "IaaC Git Sync"])
 
     def list_kind(self, plural: str) -> list[dict]:
         try:
