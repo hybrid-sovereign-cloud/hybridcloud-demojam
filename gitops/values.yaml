@@ -98,6 +98,10 @@ namespaces:
   - sovereign-secrets
   - sovereign-cloud
   - sovereign-cloud-plugins
+  # ACM Policy / Placement / PlacementBinding for Assignments land here
+  # (assignment_provision's acm_policy_namespace). Previously only created by
+  # the pre-GitOps bootstrap, so on a ZTP hub every Assignment 404'd on POST.
+  - sovereign-cloud-helpers
   - sovereign-cloud-jobs  # ACM spoke-sso ensure Job (hs-acm Sync hooks)
   - sovereign-ui
   - vault
