@@ -236,11 +236,35 @@ spec:
                   print("ok quay-admin-credentials (existing token)")
                   sys.exit(0)
 
+              def password_ok(user, password):
+                  """Can we still sign in as the Quay admin?"""
+                  jar = CookieJar()
+                  opener = urllib.request.build_opener(
+                      urllib.request.HTTPSHandler(context=ctx),
+                      urllib.request.HTTPCookieProcessor(jar),
+                  )
+                  st, body = call(opener, "GET", "/csrf_token")
+                  if st != 200 or not body.get("csrf_token"):
+                      return False
+                  st, body = call(opener, "POST", "/api/v1/signin",
+                                  {"username": user, "password": password},
+                                  csrf=body["csrf_token"])
+                  return st == 200 and bool(body.get("success"))
+
               if password and password != "quay-bootstrap-pending":
                   token = csrf_signin_apptoken(user, password)
                   if bearer_ok(token):
                       apply_secret(user, password, token)
                       print("ok quay-admin-credentials (csrf+apptoken)")
+                      sys.exit(0)
+                  # An app-specific token is registry (docker) auth, not an API
+                  # bearer — Quay answers 401 on /api/v1/user/ for it. A valid
+                  # admin password is still the thing downstream consumers need,
+                  # so record it and move on rather than failing the whole app.
+                  if password_ok(user, password):
+                      apply_secret(user, password, token or "")
+                      print("ok quay-admin-credentials (password verified; "
+                            "no API bearer available)")
                       sys.exit(0)
 
               # Fresh registry: create first superuser via initialize API
@@ -253,6 +277,20 @@ spec:
               if st in (200, 201) and bearer_ok(token):
                   apply_secret(user, password, token)
                   print("ok quay-admin-credentials (user/initialize)")
+                  sys.exit(0)
+
+              # 400 from /user/initialize means the registry is already
+              # bootstrapped. That is not a reason to fail this hook: it gates
+              # RbacConfig, AAPConfig and the Assignment ACM creator SA too, and
+              # a broken QuayOrg will surface on the QuayOrg CR where it belongs.
+              if st == 400:
+                  print(
+                      "WARN: Quay is already initialized but no working admin "
+                      "credential could be derived. QuayOrg reconciliation will "
+                      "fail until the admin password in quay-admin-credentials "
+                      "is corrected.",
+                      file=sys.stderr,
+                  )
                   sys.exit(0)
 
               print(f"FATAL: Quay admin bootstrap failed status={st} keys={list(body.keys())}", file=sys.stderr)
