@@ -80,3 +80,20 @@ metadata:
     kubernetes.io/service-account.name: assignment-acm-creator
     argocd.argoproj.io/sync-wave: "1"
 type: kubernetes.io/service-account-token
+---
+# Placement only sees clusters from ManagedClusterSets bound into its own
+# namespace. Without this the Assignment's Placement reports
+# NoManagedClusterSetBindings and selects nothing, so the Policy never reaches
+# the spoke. Spokes land in the `default` set (ManagedCluster label
+# cluster.open-cluster-management.io/clusterset=default).
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: default
+  namespace: sovereign-cloud-helpers
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  clusterSet: default
