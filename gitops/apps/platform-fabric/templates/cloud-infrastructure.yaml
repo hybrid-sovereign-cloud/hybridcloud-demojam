@@ -21,6 +21,7 @@ spec:
     vaultPath: oso/oso1/admin-clouds
   entityRefs:
     - name: acme-corp
+    - name: redhat1
   openstack:
     region: regionOne
     # Vault key `kubeconfig` for the OpenShift cluster running the OpenStack
