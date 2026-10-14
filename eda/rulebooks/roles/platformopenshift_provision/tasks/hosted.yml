@@ -308,6 +308,65 @@
         }, recursive=True)
       }}
 
+# A HostedCluster's networking is immutable in practice: if the planned CIDRs no
+# longer match what is deployed (IPAM re-allocated the block because the old one
+# clashes, e.g. with an OVN reserved subnet), the cluster's network operator stays
+# Degraded and no node ever turns Ready. Tear the build out down so ZTP recreates
+# it on the planned block.
+- name: Read existing HostedCluster before apply
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+  register: _hc_existing
+  failed_when: false
+
+- name: Detect a HostedCluster deployed on superseded CIDRs
+  ansible.builtin.set_fact:
+    _hc_net_superseded: >-
+      {{
+        ((_hc_existing.resources | default([])) | length > 0)
+        and (
+          ((_hc_existing.resources[0].spec.networking.clusterNetwork | default([]))
+             | map(attribute='cidr') | list | sort) != (hc_cluster_network | map(attribute='cidr') | list | sort)
+          or ((_hc_existing.resources[0].spec.networking.serviceNetwork | default([]))
+             | map(attribute='cidr') | list | sort) != (hc_service_network | map(attribute='cidr') | list | sort)
+        )
+      }}
+
+- name: Delete the superseded HostedCluster build out
+  when: _hc_net_superseded | bool
+  kubernetes.core.k8s:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    state: absent
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+    wait: true
+    wait_timeout: 900
+
+- name: Wait for the superseded HostedCluster to be gone
+  when: _hc_net_superseded | bool
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+  register: _hc_gone
+  until: (_hc_gone.resources | default([])) | length == 0
+  retries: 60
+  delay: 15
+
 - name: Create HostedCluster (KubeVirt platform — containerized control plane)
   kubernetes.core.k8s:
     host: "{{ services_api_host }}"

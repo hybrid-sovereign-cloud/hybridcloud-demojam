@@ -5,8 +5,8 @@ NPM := npm
 REGISTRY ?= $(or $(OCI_HOST),quay.io/gauravshankar)
 ADMIN_DASH_TAG ?= 2.0.27
 TENANT_DASH_TAG ?= 5.0.28
-ADMIN_PLUGIN_TAG ?= 1.2.37
-TENANT_PLUGIN_TAG ?= 1.3.31
+ADMIN_PLUGIN_TAG ?= 1.2.38
+TENANT_PLUGIN_TAG ?= 1.3.32
 
 .PHONY: help install build build-shared build-admin build-tenant \
         build-admin-plugin build-tenant-plugin typecheck dev-admin dev-tenant clean \

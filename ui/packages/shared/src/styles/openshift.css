@@ -1157,7 +1157,8 @@ html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__
 
 .sc-fields {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: minmax(220px, 22rem) minmax(0, 1fr);
+  column-gap: 1.5rem;
   border-top: 1px solid var(--sc-border);
 }
 
@@ -1167,9 +1168,11 @@ html.pf-v5-theme-dark .sc-standalone-shell .pf-v6-c-page__sidebar .pf-v6-c-nav__
 
 .sc-fields__label,
 .sc-fields__value {
-  padding: 0.75rem 1rem 0.75rem 0;
+  padding: 0.75rem 0;
   border-bottom: 1px solid var(--sc-border);
   font-size: 0.9375rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sc-fields__label {

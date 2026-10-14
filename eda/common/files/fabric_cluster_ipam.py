@@ -14,6 +14,10 @@
 #   * pod + service CIDRs must not overlap other PlatformOpenshift pod/service
 #     CIDRs (DENY_PEER_OVERLAP, role var, default true);
 #   * the cluster's own CIDRs must not overlap each other;
+#   * pod + service CIDRs must not overlap OVN-Kubernetes' own reserved subnets
+#     (join / transit switch / masquerade): OVN defaults them inside CG-NAT, so a
+#     block taken naively from 100.64.0.0/11 collides and the cluster's network
+#     operator goes Degraded with "already in use" before any node turns Ready;
 #   * no check against overlay (HybridNetwork) prefixes: overlay uniqueness is per
 #     HybridNetwork and is enforced by NetworkPlacement;
 #   * CIDRs outside the default ranges => legacy=True (LegacyClusterCidrs); kept.
@@ -36,6 +40,14 @@ cluster_pool = (pools.get("clusterNetworkPool") or {}).get("cidr") or "100.64.0.
 cluster_plen = int((pools.get("clusterNetworkPool") or {}).get("blockPrefixLength") or 14)
 service_pool = (pools.get("serviceNetworkPool") or {}).get("cidr") or "100.96.0.0/11"
 service_plen = int((pools.get("serviceNetworkPool") or {}).get("blockPrefixLength") or 16)
+
+# OVN-Kubernetes carves these out of CG-NAT for itself on every cluster. They are
+# not visible in any Network CR, so nothing else here would catch the collision.
+OVN_RESERVED = [
+    ("OVN join subnet", "100.64.0.0/16"),
+    ("OVN transit switch subnet", "100.88.0.0/16"),
+    ("OVN masquerade subnet", "169.254.169.0/29"),
+]
 
 
 def N(c):
@@ -65,7 +77,8 @@ for p in peers:
 
 
 def clashes(cidr):
-    hits = ["hub %s" % h for h in hub_cidrs if N(cidr).overlaps(N(h))]
+    hits = ["%s %s" % (label, r) for label, r in OVN_RESERVED if N(cidr).overlaps(N(r))]
+    hits += ["hub %s" % h for h in hub_cidrs if N(cidr).overlaps(N(h))]
     if deny_peer_overlap:
         hits += ["%s %s" % (t, c) for c, t in peer_cs if N(cidr).overlaps(N(c))]
     return hits
@@ -85,6 +98,14 @@ if src == "recorded":
     cl, sv = cidrs(recorded.get("clusterNetwork")), cidrs(recorded.get("serviceNetwork"))
     mc = cidrs(recorded.get("machineNetwork"))  # pre-underlay clusters only; not checked
     source = recorded.get("allocationSource") or "fabric-ipam"
+    # A block recorded before a clash rule existed (e.g. the OVN reserved subnets)
+    # can never converge: the cluster's network operator refuses it. Re-allocate so
+    # ZTP rebuilds the cluster on a clean block instead of keeping a dead one.
+    if any(clashes(c) for c in cl + sv):
+        src, source = "allocate", "fabric-ipam-realloc"
+        cl = [allocate(cluster_pool, cluster_plen, [])]
+        sv = [allocate(service_pool, service_plen, cl)]
+        mc = []
 elif src == "explicit":
     cl, sv = cidrs(explicit.get("clusterNetwork")), cidrs(explicit.get("serviceNetwork"))
     source = "explicit"
