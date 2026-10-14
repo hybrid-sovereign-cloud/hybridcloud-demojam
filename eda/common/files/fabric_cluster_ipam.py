@@ -93,6 +93,7 @@ def allocate(pool, plen, taken):
     raise SystemExit("no free /%d left in %s" % (plen, pool))
 
 
+superseded = None
 mc = []
 if src == "recorded":
     cl, sv = cidrs(recorded.get("clusterNetwork")), cidrs(recorded.get("serviceNetwork"))
@@ -102,7 +103,8 @@ if src == "recorded":
     # can never converge: the cluster's network operator refuses it. Re-allocate so
     # ZTP rebuilds the cluster on a clean block instead of keeping a dead one.
     if any(clashes(c) for c in cl + sv):
-        src, source = "allocate", "fabric-ipam-realloc"
+        superseded = (cl, sv)
+        src, source = "allocate", "fabric-ipam"
         cl = [allocate(cluster_pool, cluster_plen, [])]
         sv = [allocate(service_pool, service_plen, cl)]
         mc = []
@@ -128,9 +130,11 @@ for c in own:
 
 legacy = any(not N(c).subnet_of(N(cluster_pool)) for c in cl) or any(
     not N(c).subnet_of(N(service_pool)) for c in sv)
+realloc = ("" if not superseded else
+           " (re-allocated: %s / %s clashed and were superseded)" % superseded)
 msg = ("LegacyClusterCidrs: cluster %s / service %s are outside the default ranges %s / %s "
        "(kept; checked against the hub and other clusters only)" % (cl, sv, cluster_pool, service_pool)
-       if legacy else "cluster %s / service %s inside the default ranges %s / %s" % (cl, sv, cluster_pool, service_pool))
+       if legacy else "cluster %s / service %s inside the default ranges %s / %s" % (cl, sv, cluster_pool, service_pool)) + realloc
 print(json.dumps({
     "clusterNetwork": cl, "serviceNetwork": sv, "machineNetwork": mc,
     "allocationSource": source, "legacy": legacy, "conflicts": conflicts, "message": msg,
