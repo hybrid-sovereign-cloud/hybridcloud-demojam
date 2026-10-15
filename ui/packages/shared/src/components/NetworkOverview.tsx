@@ -9,6 +9,7 @@ import {
   TopologyIcon,
 } from '@patternfly/react-icons';
 import { HybridSovereignKind, K8sResource } from '../types';
+import { HybridTopology } from './HybridTopology';
 import { useOverviewCRs } from '../hooks/overviewCrs';
 import { normalizeHealth } from './StatusBadge';
 
@@ -17,9 +18,10 @@ import { normalizeHealth } from './StatusBadge';
  *
  * Three views of the same data, in dependency order:
  *   1. Fabric summary  — each HybridFabric: ASN, border gateway, VNI pool use.
- *   2. Fabric map      — border gateway at the centre, one spoke per site
- *                        (CloudGateway -> CloudInfrastructure), link state on
- *                        the edge. This is the "across clouds" picture.
+ *   2. Topology        — HybridTopology: the layered fabric -> gateway ->
+ *                        site -> tenant VRF -> placement picture. This is the
+ *                        "across clouds" view and replaces the old radial
+ *                        fabric map, which only showed sites.
  *   3. VRF x backend   — rows are tenant HybridNetworks, columns are the cloud
  *                        projects they are placed on. A cell is one
  *                        NetworkPlacement.
@@ -109,13 +111,6 @@ function str(v: unknown): string {
 function num(v: unknown): number | undefined {
   return typeof v === 'number' ? v : undefined;
 }
-
-/** Geometry for the radial fabric map. */
-const MAP_W = 760;
-const HUB_R = 54;
-const SPOKE_W = 150;
-const SPOKE_H = 56;
-const ROW_GAP = 76;
 
 export function NetworkOverview({
   entityNamespace,
@@ -282,17 +277,9 @@ export function NetworkOverview({
         <FabricSummary key={f.metadata.name} fabric={f} spokes={model.spokes} />
       ))}
 
-      {model.spokes.length > 0 && (
-        <section className="sc-netov__section">
-          <h3 className="sc-netov__title">Fabric map</h3>
-          <p className="sc-netov__hint">
-            The border gateway and every site attached to it. Tenant clusters are deliberately not
-            fabric members — only cloud projects carry VRFs.
-          </p>
-          <FabricMap spokes={model.spokes} fabric={model.fabrics[0]} onSelect={onSelect} />
-          <Legend />
-        </section>
-      )}
+      <section className="sc-netov__section">
+        <HybridTopology items={items} entityNamespace={entityNamespace} onSelect={onSelect} />
+      </section>
 
       <section className="sc-netov__section">
         <div className="sc-netov__section-head">
@@ -400,103 +387,6 @@ function Fact({ label, value }: { label: string; value: string }): React.ReactEl
     <div className="sc-netov__fact">
       <dt>{label}</dt>
       <dd title={value}>{value}</dd>
-    </div>
-  );
-}
-
-function FabricMap({
-  spokes,
-  fabric,
-  onSelect,
-}: {
-  spokes: Spoke[];
-  fabric?: K8sResource;
-  onSelect?: NetworkOverviewProps['onSelect'];
-}): React.ReactElement {
-  const height = Math.max(spokes.length, 1) * ROW_GAP + 48;
-  const hubX = 110;
-  const hubY = height / 2;
-  const spokeX = MAP_W - SPOKE_W - 24;
-
-  return (
-    <div className="sc-netov__map-wrap">
-      <svg
-        className="sc-netov__map"
-        viewBox={`0 0 ${MAP_W} ${height}`}
-        role="img"
-        aria-label={`Fabric map: ${spokes.length} site${spokes.length === 1 ? '' : 's'} attached`}
-      >
-        {spokes.map((s, i) => {
-          const y = 24 + i * ROW_GAP + SPOKE_H / 2;
-          const x1 = hubX + HUB_R;
-          const mx = (x1 + spokeX) / 2;
-          const meta = STATE_META[s.state];
-          return (
-            <g key={s.gateway.metadata.name}>
-              <path
-                d={`M ${x1} ${hubY} C ${mx} ${hubY}, ${mx} ${y}, ${spokeX} ${y}`}
-                className={`sc-netov__edge sc-netov__edge--${meta.cls}`}
-              />
-              <text
-                x={mx}
-                y={(hubY + y) / 2 - 6}
-                textAnchor="middle"
-                className="sc-netov__edge-label"
-              >
-                {s.tunnel}
-              </text>
-            </g>
-          );
-        })}
-
-        <g transform={`translate(${hubX - HUB_R}, ${hubY - HUB_R})`}>
-          <circle cx={HUB_R} cy={HUB_R} r={HUB_R} className="sc-netov__hub" />
-          <text x={HUB_R} y={HUB_R - 4} textAnchor="middle" className="sc-netov__hub-kind">
-            Border GW
-          </text>
-          <text x={HUB_R} y={HUB_R + 12} textAnchor="middle" className="sc-netov__hub-name">
-            {fabric
-              ? fabric.metadata.name.length > 17
-                ? `${fabric.metadata.name.slice(0, 16)}…`
-                : fabric.metadata.name
-              : 'fabric'}
-          </text>
-        </g>
-
-        {spokes.map((s, i) => {
-          const y = 24 + i * ROW_GAP;
-          const meta = STATE_META[s.state];
-          return (
-            <g
-              key={`n-${s.gateway.metadata.name}`}
-              transform={`translate(${spokeX}, ${y})`}
-              className={`sc-netov__node sc-netov__node--${meta.cls}`}
-              role={onSelect ? 'button' : undefined}
-              tabIndex={onSelect ? 0 : undefined}
-              onClick={onSelect ? () => onSelect('CloudGateway', s.gateway) : undefined}
-              onKeyDown={
-                onSelect
-                  ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') onSelect('CloudGateway', s.gateway);
-                    }
-                  : undefined
-              }
-            >
-              <title>{`${s.siteName} (${s.siteType}) — ${meta.label}\n${s.detail}`}</title>
-              <rect width={SPOKE_W} height={SPOKE_H} rx={3} />
-              <text x={12} y={20} className="sc-netov__node-kind">
-                {s.siteType}
-              </text>
-              <text x={12} y={37} className="sc-netov__node-name">
-                {s.siteName.length > 17 ? `${s.siteName.slice(0, 16)}…` : s.siteName}
-              </text>
-              <text x={12} y={50} className="sc-netov__node-state">
-                {meta.label}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
     </div>
   );
 }
