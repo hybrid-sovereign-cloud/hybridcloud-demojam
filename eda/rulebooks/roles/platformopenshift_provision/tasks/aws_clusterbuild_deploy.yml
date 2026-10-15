@@ -151,7 +151,89 @@
           stringData:
             kubeconfig: "{{ lookup('file', '/tmp/' + cb_app_name + '-kubeconfig') }}"
 
-    - name: Require pre-staged mce-cluster-build chart ConfigMap
+    # The in-cluster Helm Job below mounts the chart from the
+    # mce-cluster-build-chart ConfigMap, but nothing in the platform ever
+    # created it: no gitops manifest, no Job, no earlier task. Every AWS build
+    # therefore died here on "Require pre-staged mce-cluster-build chart
+    # ConfigMap" with resources: []. Only the aws path was migrated to the
+    # ConfigMap-mounted Helm Job; openstack_clusterbuild.yml still helm-pulls
+    # the same chart straight from OCI, which is what proves the execution
+    # environment can reach the registry. So stage it here from that same OCI
+    # coordinate rather than depending on an out-of-band step.
+    # Staged on every deploy rather than only when absent: the ConfigMap name
+    # the Helm Job mounts is fixed, so a stage-if-missing would pin whatever
+    # chart version happened to be staged first and silently ignore
+    # mce_cluster_build_chart_version from then on.
+    - name: Stage the mce-cluster-build chart ConfigMap from OCI
+      block:
+        - name: Create a scratch directory for the chart pull
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: mce-chart
+          register: cb_chart_tmp
+
+        # Same bootstrap as openstack_clusterbuild.yml: the execution
+        # environment historically ships without helm, and helm_bin is only
+        # set on the openstack path, so it cannot be relied on here.
+        - name: Ensure helm CLI is available
+          ansible.builtin.shell: |
+            set -euo pipefail
+            if command -v helm >/dev/null 2>&1; then
+              command -v helm
+              exit 0
+            fi
+            curl -fsSL -o /tmp/helm.tgz https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz
+            tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+            mv /tmp/linux-amd64/helm /tmp/helm
+            chmod 755 /tmp/helm
+            echo /tmp/helm
+          args:
+            executable: /bin/bash
+          register: cb_helm_bin_path
+          changed_when: false
+
+        - name: Pull the mce-cluster-build chart from OCI
+          ansible.builtin.command:
+            argv:
+              - "{{ cb_helm_bin_path.stdout | trim }}"
+              - pull
+              - "oci://{{ oci_registry_host }}/mce-cluster-build"
+              - --version
+              - "{{ mce_cluster_build_chart_version }}"
+              - --destination
+              - "{{ cb_chart_tmp.path }}"
+          changed_when: true
+
+        - name: Read the pulled chart tarball
+          ansible.builtin.slurp:
+            src: "{{ cb_chart_tmp.path }}/mce-cluster-build-{{ mce_cluster_build_chart_version }}.tgz"
+          register: cb_chart_tgz
+
+        - name: Create the mce-cluster-build chart ConfigMap
+          kubernetes.core.k8s:
+            host: "{{ central_api_host }}"
+            api_key: "{{ central_bearer_token }}"
+            validate_certs: false
+            state: present
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: mce-cluster-build-chart
+                namespace: sovereign-cloud-jobs
+              binaryData:
+                # slurp already returns standard base64, which is exactly what
+                # binaryData wants. The Helm Job mounts this as /chart/chart.tgz.
+                chart.tgz: "{{ cb_chart_tgz.content }}"
+
+      always:
+        - name: Remove the chart scratch directory
+          ansible.builtin.file:
+            path: "{{ cb_chart_tmp.path }}"
+            state: absent
+          when: cb_chart_tmp.path is defined
+
+    - name: Require the mce-cluster-build chart ConfigMap
       kubernetes.core.k8s_info:
         host: "{{ central_api_host }}"
         api_key: "{{ central_bearer_token }}"

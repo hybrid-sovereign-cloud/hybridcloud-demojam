@@ -27,7 +27,11 @@ vault_init_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault.vault.s
 vault_kv_mount: hybridsovereign
 
 oci_registry_host: "{{ (lookup('env', 'OCI_HOST') | trim) or 'quay.io/gauravshankar' }}"
-mce_cluster_build_chart_version: "0.2.3"
+# Must match a tag actually published to oci://<registry>/mce-cluster-build.
+# Only 0.2.4 is published today; the previous default of 0.2.3 pointed at a
+# version that was never pushed, so the helm pull below could not have
+# succeeded even once the ConfigMap staging was in place.
+mce_cluster_build_chart_version: "0.2.4"
 
 eda_dashboard_host: ""
 
