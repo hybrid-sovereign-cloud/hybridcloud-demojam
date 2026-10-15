@@ -307,7 +307,7 @@
         definition:
           metadata:
             annotations:
-              hybridsovereign.redhat/reconcileNow: "{{ rbac_status_transition_time }}"
+              ansible.sdk.operatorframework.io/reconcileNow: "{{ rbac_status_transition_time }}"
       when:
         - entity_name is defined
         - (entity_name | default('')) | length > 0
