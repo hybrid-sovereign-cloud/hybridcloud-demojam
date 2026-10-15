@@ -240,6 +240,12 @@
     "networkAttachment": "Attachement réseau"
   },
   "form": {
+    "entityListRestricted": "Seule l'entité à laquelle vous avez accès est affichée — la liste complète nécessite un accès plateforme.",
+    "entityListUnavailable": "La liste des entités n'a pas pu être lue ; saisissez le nom de l'entité fourni par l'équipe plateforme.",
+    "entityNamePlaceholder": "Nom de l'entité, p. ex. acme-corp",
+    "entityNone": "Aucune entité visible avec vos droits — créez d'abord une entité",
+    "entityScopeHelp": "Créé dans l'espace de noms {{namespace}}.",
+    "entitySelectPlaceholder": "Sélectionner une entité…",
     "required": "Obligatoire",
     "optional": "Facultatif",
     "createTitle": "Créer {{kind}}",
@@ -252,6 +258,7 @@
     "noEditableFields": "Aucun champ modifiable pour ce type. Utilisez YAML/API.",
     "immutableHint": "Ce champ est immuable après la création.",
     "commaSeparated": "Liste séparée par des virgules",
+    "teamRbacIncomplete": "Le RBAC d'équipe doit définir admin, membre et lecteur ensemble — l'opérateur ne peut pas réconcilier une équipe partiellement définie.",
     "updateFailed": "Échec de la mise à jour",
     "saving": "Enregistrement…",
     "invalidJson": "JSON invalide pour {{field}}",
@@ -276,6 +283,7 @@
   },
   "fields": {
     "description": "Description",
+    "entity": "Entité (locataire)",
     "istio": "Istio",
     "argo": "Argo CD",
     "team": "Équipe",

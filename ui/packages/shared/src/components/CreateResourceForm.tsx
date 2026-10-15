@@ -19,6 +19,7 @@ import { HybridSovereignKind, K8sResource } from '../types';
 import { PageHeader } from './PageHeader';
 import { RbacMultiSelect } from './RbacMultiSelect';
 import { EntityMultiSelect } from './EntityMultiSelect';
+import { EntitySelect } from './EntitySelect';
 import { FabricSelect } from './FabricSelect';
 import { CloudGatewaySelect } from './CloudGatewaySelect';
 import { CloudInfrastructureSelect } from './CloudInfrastructureSelect';
@@ -125,6 +126,18 @@ const FORM_KINDS: Record<SelfServiceFormType, HybridSovereignKind> = {
   transportlink: 'TransportLink',
   uihealthchecker: 'UIHealthChecker',
 };
+
+/**
+ * Tenant-scoped kinds that live in entity-<tenant>. These forms get the
+ * EntitySelect dropdown so the target namespace is picked, not typed.
+ * Persona is handled separately: it already had its own inline Entity picker.
+ */
+const ENTITY_SCOPED_FORMS = new Set<SelfServiceFormType>([
+  'team',
+  'project',
+  'assignment',
+  'platformopenshift',
+]);
 
 const PERSONA_TYPES = [
   'entityAdmin',
@@ -253,6 +266,10 @@ export function CreateResourceForm({
   const [rbacOperator, setRbacOperator] = useState<string[]>([]);
   const [rbacViewer, setRbacViewer] = useState<string[]>([]);
   const [networkViewerRbac, setNetworkViewerRbac] = useState<string[]>([]);
+  // Team RBAC — the operator needs all three or none (see buildSpec 'team').
+  const [teamAdminRbac, setTeamAdminRbac] = useState<string[]>([]);
+  const [teamMemberRbac, setTeamMemberRbac] = useState<string[]>([]);
+  const [teamViewerRbac, setTeamViewerRbac] = useState<string[]>([]);
   const [personaRbacs, setPersonaRbacs] = useState<string[]>([]);
   // HybridFabric — entity tagging (§18.3) + full fabric options with lab defaults
   const [fabricEntityRefs, setFabricEntityRefs] = useState<string[]>([]);
@@ -319,6 +336,9 @@ export function CreateResourceForm({
   const title = t(`form.titles.${type}`, { defaultValue: FORM_TITLES[type] ?? 'Create Resource' });
   const kind = FORM_KINDS[type];
   const [entityName, setEntityName] = useState('');
+  const entityScoped = ENTITY_SCOPED_FORMS.has(type);
+  /** Namespace resolved from the Entity the user picked in EntitySelect. */
+  const [pickedEntityNs, setPickedEntityNs] = useState('');
   const entityNs =
     type === 'entity'
       ? 'sovereign-cloud'
@@ -326,7 +346,34 @@ export function CreateResourceForm({
         ? entityName
           ? `entity-${entityName}`
           : ''
-        : namespace;
+        : entityScoped
+          ? // Until the Entity list resolves, stay on whatever the host app scoped us to.
+            pickedEntityNs || namespace
+          : namespace;
+
+  /** Picking a different tenant invalidates every namespace-scoped reference below. */
+  const onEntityPicked = React.useCallback((next: string, nextNs: string) => {
+    setEntityName(next);
+    setPickedEntityNs(nextNs);
+    setTeamRef('');
+    setProjectRef('');
+    setProjectRefs('');
+    setPlatformRef('');
+    setPlatformEnv('');
+    setCloudosoRef('');
+    setCloudAwsRef('');
+    setCloudVirtRef('');
+    setAssignAdmin([]);
+    setAssignDev([]);
+    setAssignViewer([]);
+    setAssignOps([]);
+    setRbacMulti([]);
+    setRbacOperator([]);
+    setRbacViewer([]);
+    setTeamAdminRbac([]);
+    setTeamMemberRbac([]);
+    setTeamViewerRbac([]);
+  }, []);
 
   const entities = useK8sResourceList<K8sResource>('Entity', {
     namespace: 'sovereign-cloud',
@@ -360,7 +407,7 @@ export function CreateResourceForm({
   });
   const rbacs = useK8sResourceList<K8sResource>('Rbac', {
     namespace: entityNs,
-    enabled: (type === 'persona' || type === 'vaultkv' || type === 'aaporg' || type === 'quayorg' || type === 'assignment' || type === 'hybridnetwork' || type === 'platformopenshift') && !!entityNs,
+    enabled: (type === 'persona' || type === 'vaultkv' || type === 'aaporg' || type === 'quayorg' || type === 'assignment' || type === 'hybridnetwork' || type === 'platformopenshift' || type === 'team') && !!entityNs,
   });
   const rbacConfigs = useK8sResourceList<K8sResource>('RbacConfig', {
     enabled: type === 'rbac' || type === 'vault',
@@ -458,6 +505,13 @@ export function CreateResourceForm({
     vmNamespaceList.length <= 16 && vmNamespaceList.every((n) => n.length <= 63 && DNS_LABEL.test(n));
   const overlayMtuValid =
     !overlayMtu.trim() || (Number(overlayMtu) >= 1280 && Number(overlayMtu) <= 9216);
+  // Team RBAC is all-or-nothing: any one list filled means all three must be.
+  const teamRbacPartial =
+    [teamAdminRbac, teamMemberRbac, teamViewerRbac].some((l) => l.length > 0) &&
+    [teamAdminRbac, teamMemberRbac, teamViewerRbac].some((l) => l.length === 0);
+  const teamRbacComplete = [teamAdminRbac, teamMemberRbac, teamViewerRbac].every(
+    (l) => l.length > 0,
+  );
   const cinfraCredsSet =
     cinfraCredMode === 'vault' ? !!cinfraCredVaultPath.trim() : !!cinfraCredSecret.trim();
 
@@ -530,8 +584,19 @@ export function CreateResourceForm({
           ...(websiteLink ? { websiteLink } : {}),
         };
       case 'team':
+        // teamAdmin / teamMemberRbac / teamViewerRbac go in as a set: the
+        // operator fails to reconcile a Team that has teamAdmin but no
+        // teamViewerRbac, so a partial selection writes none of them
+        // (canSubmit blocks that case anyway).
         return {
           features: { argo: argoEnabled, istio: istioEnabled },
+          ...(teamRbacComplete
+            ? {
+                teamAdmin: teamAdminRbac,
+                teamMemberRbac,
+                teamViewerRbac,
+              }
+            : {}),
         };
       case 'project':
         return {
@@ -867,6 +932,9 @@ export function CreateResourceForm({
     if (!name) return false;
     if (type === 'entity' && !billingID) return false;
     if (type === 'persona' && !entityNs) return false;
+    // Entity-scoped kinds cannot be created without a resolved tenant namespace.
+    if (entityScoped && !entityNs) return false;
+    if (type === 'team' && teamRbacPartial) return false;
     if (type === 'assignment' && !teamRef) return false;
     if (type === 'cloudoso' && (!cloudRefName || !osoProject || !baseDomain)) return false;
     if (
@@ -979,6 +1047,20 @@ export function CreateResourceForm({
         <Card isCompact>
           <CardBody>
             <Form onSubmit={handleSubmit}>
+              {entityScoped && (
+                <EntitySelect
+                  id="entity-scope"
+                  value={entityName}
+                  onChange={onEntityPicked}
+                  fallbackNamespace={namespace}
+                  helperText={t('form.entityScopeHelp', {
+                    namespace: entityNs || '—',
+                    defaultValue: `The ${kind} is created in ${entityNs || '—'}.`,
+                  })}
+                  isRequired
+                />
+              )}
+
               <FormGroup label="Name" isRequired fieldId="name">
                 <TextInput id="name" value={name} onChange={(_e, v) => setName(v)} isRequired />
               </FormGroup>
@@ -1019,6 +1101,34 @@ export function CreateResourceForm({
                       onChange={(_e, checked) => setIstioEnabled(checked)}
                     />
                   </FormGroup>
+                  {/* Rbac CR names in the selected Entity's namespace. */}
+                  <RbacMultiSelect
+                    id="team-rbac-admin"
+                    label="Team admin RBAC"
+                    value={teamAdminRbac}
+                    onChange={setTeamAdminRbac}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  <RbacMultiSelect
+                    id="team-rbac-member"
+                    label="Team member RBAC"
+                    value={teamMemberRbac}
+                    onChange={setTeamMemberRbac}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  <RbacMultiSelect
+                    id="team-rbac-viewer"
+                    label="Team viewer RBAC"
+                    value={teamViewerRbac}
+                    onChange={setTeamViewerRbac}
+                    options={names(rbacs.items)}
+                    placeholder="Optional"
+                  />
+                  {teamRbacPartial && (
+                    <Alert variant="warning" isInline title={t('form.teamRbacIncomplete')} className="sc-mb" />
+                  )}
                 </>
               )}
 

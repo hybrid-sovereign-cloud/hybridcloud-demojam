@@ -66,17 +66,32 @@ export interface TeamSpec {
     argo?: boolean;
     istio?: boolean;
   };
+  /**
+   * Rbac CR names in the tenant namespace. The operator fails to reconcile a
+   * Team that sets teamAdmin without teamViewerRbac, so these three are always
+   * written together or not at all.
+   */
   teamAdmin?: string[];
+  teamMemberRbac?: string[];
+  teamViewerRbac?: string[];
 }
 
 export type Team = K8sResource<TeamSpec>;
 
 /** Assignment — binds team to projects and platforms */
+export interface AssignmentToolRbac {
+  assignmentAdmin?: string;
+  assignmentDeveloper?: string;
+  assignmentViewer?: string;
+  assignmentOps?: string;
+}
+
 export interface AssignmentSpec {
   team: string;
   projects?: string[];
   openshift?: string;
   aws?: string;
+  toolRbac?: AssignmentToolRbac;
 }
 
 export type Assignment = K8sResource<AssignmentSpec>;
