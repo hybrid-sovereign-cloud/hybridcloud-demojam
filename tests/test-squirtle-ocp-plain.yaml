@@ -197,13 +197,39 @@
             api_version: rbac.authorization.k8s.io/v1
             kind: RoleBinding
             namespace: "{{ ns }}"
+            # Only the Entity's own bindings. Without this the result is
+            # dominated by OpenShift's built-in system:* bindings, which exist
+            # in every namespace and say nothing about tenant RBAC.
+            label_selectors:
+              - app.kubernetes.io/managed-by=entity-operator
           register: _rb
 
-        - name: Assert tenant RoleBindings exist
+        # Counting RoleBindings is not enough: OpenShift creates system:deployers,
+        # system:image-builders and system:image-pullers in every namespace, so a
+        # bare "length > 0" passes even when none of the tenant's own bindings
+        # exist — and it passed for the whole estate while every namespaceRbac
+        # binding had subjects: []. Assert on the entity-operator's own bindings
+        # and require each to actually name its Keycloak group.
+        - name: Assert the tenant's own RoleBindings exist and have group subjects
           ansible.builtin.assert:
-            that: _rb.resources | length > 0
-            fail_msg: "No RoleBindings in {{ ns }} — cluster RBAC was not applied."
+            that:
+              - _tenant_rb | length > 0
+              - _tenant_rb | rejectattr('subjects', 'defined') | list | length == 0
+              - _tenant_rb | selectattr('subjects', 'defined')
+                  | map(attribute='subjects') | select('equalto', []) | list | length == 0
+            fail_msg: >-
+              Tenant RoleBindings in {{ ns }} are missing or unbound. The Entity
+              binds namespaceRbac subjects from each Rbac CR's .status.group; an
+              empty subject list means the groups exist but nothing is bound to
+              them, so the tenant's RBAC is declared but not enforced. Found:
+              {{ _tenant_rb | map(attribute='metadata.name') | zip(
+                   _tenant_rb | map(attribute='subjects', default=[])) | list }}
+            success_msg: >-
+              {{ _tenant_rb | length }} tenant RoleBinding(s) in {{ ns }} are
+              bound to their Keycloak groups.
             quiet: true
+          vars:
+            _tenant_rb: "{{ _rb.resources | default([]) }}"
 
     - name: Deprovision the cluster
       tags: [destroy]
