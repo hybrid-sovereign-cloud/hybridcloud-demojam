@@ -59,10 +59,27 @@
     r53_secret_access_key: "{{ r53_secret_os.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}"
   no_log: true
 
+# No credentials is a failure, not a skip: skipping leaves the OpenStack DNS
+# records behind while the teardown reports success.
+- name: Require Route53 credentials before removing OpenStack DNS records
+  when: not (skip_os_dns | bool)
+  ansible.builtin.assert:
+    that:
+      - r53_access_key_id is defined
+      - r53_access_key_id | length > 0
+      - r53_secret_access_key is defined
+      - r53_secret_access_key | length > 0
+    fail_msg: >-
+      PlatformOpenShift {{ platformopenshift_cr_name }}
+      ({{ platformopenshift_cr_namespace | default('unknown') }}) teardown could not
+      resolve Route53 credentials from vault path
+      {{ openstack_route53_vault_path | default('oso/accounts/route53-openstack') }}.
+      The OpenStack DNS records under {{ po_status_domain }} have NOT been removed.
+      Failing the teardown instead of reporting success.
+
 - name: Remove OpenStack API DNS record
   when:
     - not (skip_os_dns | bool)
-    - r53_access_key_id is defined
   amazon.aws.route53:
     state: absent
     zone: "{{ po_status_domain }}"
@@ -77,7 +94,6 @@
 - name: Remove OpenStack Apps wildcard DNS record
   when:
     - not (skip_os_dns | bool)
-    - r53_access_key_id is defined
   amazon.aws.route53:
     state: absent
     zone: "{{ po_status_domain }}"

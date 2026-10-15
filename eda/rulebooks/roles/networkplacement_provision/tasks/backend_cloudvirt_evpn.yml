@@ -320,6 +320,16 @@
             # OVN-K 4.22 rejects the object without these two (explicitly empty).
             frrConfigurationSelector: {}
             nodeSelector: {}
+            # The CUDN this advertises is an EVPN network with its own VRF, and
+            # OVN-K refuses such a RouteAdvertisements unless targetVRF names
+            # that VRF or is 'auto':
+            #   configuration error: EVPN network "cluster_udn_<net>" with VRF
+            #   "<net>" requires TargetVRF to be 'auto' or "<net>", got ""
+            # Without it the object stays Accepted=False for ever and the
+            # NetworkPlacement never leaves EvpnPrepPending. 'auto' keeps OVN-K
+            # resolving the VRF from the selected network, so this stays correct
+            # if the VRF naming ever changes.
+            targetVRF: auto
             networkSelectors:
               - networkSelectionType: ClusterUserDefinedNetworks
                 clusterUserDefinedNetworkSelector:

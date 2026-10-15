@@ -1,114 +1,208 @@
 ---
-- name: Create temporary ExternalSecret for AWS credentials
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: present
-    definition:
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
+# Credentials come from CloudInfrastructure.spec.credentialsRef, which is
+# "exactly one of vaultPath or secretRef" -- both forms are supported here,
+# mirroring cloudaws_provision/tasks/aws_environmentprep.yml.
+#
+# A teardown that cannot authenticate MUST FAIL. It must never skip the
+# deletions and still report success: that leaks a billable Route53 hosted
+# zone plus a lame NS delegation in the parent zone.
+- name: Decide which credentials form this teardown uses
+  ansible.builtin.set_fact:
+    aws_creds_secret_name: "{{ (aws_cloudinfra_secret | default({})).name | default('', true) }}"
+    aws_creds_secret_namespace: "{{ (aws_cloudinfra_secret | default({})).namespace | default(cloudaws_cr_namespace, true) }}"
+    aws_creds_form: >-
+      {{
+        ('credentialsRef.secretRef ' ~ (aws_cloudinfra_secret | default({})).namespace | default('', true)
+         ~ '/' ~ (aws_cloudinfra_secret | default({})).name | default('', true))
+        if ((aws_cloudinfra_secret | default({})).name | default('', true)) | length > 0
+        else ('credentialsRef.vaultPath ' ~ (ep_vault_path | default('', true)))
+      }}
+
+- name: Load AWS credentials from the credentialsRef Secret
+  when: aws_creds_secret_name | length > 0
+  block:
+    - name: Read the credentials Secret
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
+        name: "{{ aws_creds_secret_name }}"
+        namespace: "{{ aws_creds_secret_namespace }}"
+      register: aws_creds_secret
+      until: >-
+        aws_creds_secret.resources | length > 0 and
+        aws_creds_secret.resources[0].data is defined and
+        aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined and
+        aws_creds_secret.resources[0].data.AWS_SECRET_ACCESS_KEY is defined
+      retries: 12
+      delay: 5
+      ignore_errors: true
+
+    - name: Decode AWS credentials from the Secret
+      when: >-
+        aws_creds_secret.resources | default([]) | length > 0 and
+        aws_creds_secret.resources[0].data is defined and
+        aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
+      ansible.builtin.set_fact:
+        aws_access_key_id: "{{ aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID | b64decode }}"
+        aws_secret_access_key: "{{ aws_creds_secret.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}"
+      no_log: true
+
+- name: Load AWS credentials from Vault via a temporary ExternalSecret
+  when: aws_creds_secret_name | length == 0
+  block:
+    - name: Require a vaultPath when no secretRef was given
+      ansible.builtin.assert:
+        that: (ep_vault_path | default('', true)) | length > 0
+        fail_msg: >-
+          CloudAWS {{ cloudaws_cr_name }} teardown has neither a
+          credentialsRef.secretRef nor a credentialsRef.vaultPath to authenticate
+          with. Refusing to report success with Route53 resources still present.
+
+    - name: Create temporary ExternalSecret for AWS credentials
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: present
+        definition:
+          apiVersion: external-secrets.io/v1
+          kind: ExternalSecret
+          metadata:
+            name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
+            namespace: "{{ cloudaws_operator_namespace }}"
+          spec:
+            refreshInterval: 1m
+            secretStoreRef:
+              name: vault-backend
+              kind: ClusterSecretStore
+            target:
+              name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
+              creationPolicy: Owner
+            data:
+              - secretKey: AWS_ACCESS_KEY_ID
+                remoteRef:
+                  key: "{{ ep_vault_path }}"
+                  property: AWS_ACCESS_KEY_ID
+              - secretKey: AWS_SECRET_ACCESS_KEY
+                remoteRef:
+                  key: "{{ ep_vault_path }}"
+                  property: AWS_SECRET_ACCESS_KEY
+
+    - name: Wait for AWS credentials secret
+      kubernetes.core.k8s_info:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        api_version: v1
+        kind: Secret
         name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
         namespace: "{{ cloudaws_operator_namespace }}"
-      spec:
-        refreshInterval: 1m
-        secretStoreRef:
-          name: vault-backend
-          kind: ClusterSecretStore
-        target:
-          name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
-          creationPolicy: Owner
-        data:
-          - secretKey: AWS_ACCESS_KEY_ID
-            remoteRef:
-              key: "{{ ep_vault_path }}"
-              property: AWS_ACCESS_KEY_ID
-          - secretKey: AWS_SECRET_ACCESS_KEY
-            remoteRef:
-              key: "{{ ep_vault_path }}"
-              property: AWS_SECRET_ACCESS_KEY
+      register: aws_creds_secret
+      until: >-
+        aws_creds_secret.resources | length > 0 and
+        aws_creds_secret.resources[0].data is defined and
+        aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined and
+        aws_creds_secret.resources[0].data.AWS_SECRET_ACCESS_KEY is defined
+      retries: 20
+      delay: 5
+      ignore_errors: true
 
-- name: Wait for AWS credentials secret
-  kubernetes.core.k8s_info:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    api_version: v1
-    kind: Secret
-    name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
-    namespace: "{{ cloudaws_operator_namespace }}"
-  register: aws_creds_secret
-  until: aws_creds_secret.resources | length > 0
-  retries: 20
-  delay: 5
-  ignore_errors: true
+    - name: Decode AWS credentials
+      when: >-
+        aws_creds_secret.resources | default([]) | length > 0 and
+        aws_creds_secret.resources[0].data is defined and
+        aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
+      ansible.builtin.set_fact:
+        aws_access_key_id: "{{ aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID | b64decode }}"
+        aws_secret_access_key: "{{ aws_creds_secret.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}"
+      no_log: true
 
-- name: Decode AWS credentials
-  when: aws_creds_secret.resources | default([]) | length > 0
-  ansible.builtin.set_fact:
-    aws_access_key_id: "{{ aws_creds_secret.resources[0].data.AWS_ACCESS_KEY_ID | b64decode }}"
-    aws_secret_access_key: "{{ aws_creds_secret.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}"
-  no_log: true
+- name: Delete the Route53 slug zone
+  block:
+    # Hard gate. Everything below needs credentials; "no credentials" is a
+    # failure, not a reason to skip.
+    - name: Require AWS credentials before deleting anything
+      ansible.builtin.assert:
+        that:
+          - aws_access_key_id is defined
+          - aws_access_key_id | length > 0
+          - aws_secret_access_key is defined
+          - aws_secret_access_key | length > 0
+        fail_msg: >-
+          CloudAWS {{ cloudaws_cr_name }} ({{ cloudaws_cr_namespace }}) teardown
+          could not resolve AWS credentials via
+          {{ ('CloudInfrastructure ' ~ cloudaws_cloudinfra_name ~ ' ') if (cloudaws_cloudinfra_name | default('')) | length > 0 else '' }}{{ aws_creds_form }}.
+          Route53 hosted zone {{ cloudaws_domain }} and its NS delegation in
+          {{ ep_base_domain }} have NOT been deleted and are still billable.
+          Failing the teardown instead of reporting success.
 
-- name: List Route53 hosted zones
-  when: aws_access_key_id is defined
-  amazon.aws.route53_info:
-    query: hosted_zone
-  register: r53_zones
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
-    AWS_DEFAULT_REGION: "{{ default_aws_region }}"
-  ignore_errors: true
+    - name: List Route53 hosted zones
+      amazon.aws.route53_info:
+        query: hosted_zone
+      register: r53_zones
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+        AWS_DEFAULT_REGION: "{{ default_aws_region }}"
 
-- name: Find subdomain zone ID
-  when: aws_access_key_id is defined and r53_zones is not failed
-  ansible.builtin.set_fact:
-    ep_subdomain_zone_id: >-
-      {{ (r53_zones.hosted_zones
-          | selectattr('name', 'equalto', cloudaws_domain ~ '.')
-          | map(attribute='id')
-          | first
-          | default(''))
-         | regex_replace('^/hostedzone/', '') }}
+    - name: Find subdomain zone ID
+      ansible.builtin.set_fact:
+        ep_subdomain_zone_id: >-
+          {{ (r53_zones.hosted_zones
+              | selectattr('name', 'equalto', cloudaws_domain ~ '.')
+              | map(attribute='id')
+              | first
+              | default(''))
+             | regex_replace('^/hostedzone/', '') }}
 
-- name: Remove NS delegation in parent zone
-  when:
-    - aws_access_key_id is defined
-    - ep_subdomain_zone_id | default('') | length > 0
-  amazon.aws.route53:
-    state: absent
-    zone: "{{ ep_base_domain }}"
-    record: "{{ cloudaws_domain }}"
-    type: NS
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
-    AWS_DEFAULT_REGION: "{{ default_aws_region }}"
-  ignore_errors: true
+    - name: Remove NS delegation in parent zone
+      when: ep_subdomain_zone_id | default('') | length > 0
+      amazon.aws.route53:
+        state: absent
+        zone: "{{ ep_base_domain }}"
+        record: "{{ cloudaws_domain }}"
+        type: NS
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+        AWS_DEFAULT_REGION: "{{ default_aws_region }}"
 
-- name: Delete Route53 subdomain zone
-  when:
-    - aws_access_key_id is defined
-    - ep_subdomain_zone_id | default('') | length > 0
-  amazon.aws.route53_zone:
-    zone: "{{ cloudaws_domain }}"
-    state: absent
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
-    AWS_DEFAULT_REGION: "{{ default_aws_region }}"
-  ignore_errors: true
+    - name: Delete Route53 subdomain zone
+      when: ep_subdomain_zone_id | default('') | length > 0
+      amazon.aws.route53_zone:
+        zone: "{{ cloudaws_domain }}"
+        state: absent
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_access_key }}"
+        AWS_DEFAULT_REGION: "{{ default_aws_region }}"
 
-- name: Remove temporary AWS credentials secret
-  kubernetes.core.k8s:
-    host: "{{ services_api_host }}"
-    api_key: "{{ services_bearer_token }}"
-    validate_certs: false
-    state: absent
-    api_version: v1
-    kind: Secret
-    name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
-    namespace: "{{ cloudaws_operator_namespace }}"
-  ignore_errors: true
+  always:
+    - name: Remove temporary AWS credentials secret
+      when: aws_creds_secret_name | length == 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: v1
+        kind: Secret
+        name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
+        namespace: "{{ cloudaws_operator_namespace }}"
+      ignore_errors: true
+
+    - name: Remove temporary AWS credentials ExternalSecret
+      when: aws_creds_secret_name | length == 0
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: absent
+        api_version: external-secrets.io/v1
+        kind: ExternalSecret
+        name: "eda-cloudaws-teardown-{{ cloudaws_cr_name }}-aws-creds"
+        namespace: "{{ cloudaws_operator_namespace }}"
+      ignore_errors: true

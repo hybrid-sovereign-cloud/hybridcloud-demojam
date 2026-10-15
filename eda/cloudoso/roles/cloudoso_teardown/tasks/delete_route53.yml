@@ -45,14 +45,33 @@
   ignore_errors: true
 
 - name: Decode Route53 credentials
-  when: r53_secret.resources | default([]) | length > 0
+  when: >-
+    r53_secret.resources | default([]) | length > 0 and
+    r53_secret.resources[0].data is defined and
+    r53_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
   ansible.builtin.set_fact:
     r53_access_key_id: "{{ r53_secret.resources[0].data.AWS_ACCESS_KEY_ID | b64decode }}"
     r53_secret_access_key: "{{ r53_secret.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}"
   no_log: true
 
+# Unauthenticated teardown must fail, not skip: skipping leaves a lame NS
+# delegation for the slug zone in the parent zone.
+- name: Require Route53 credentials before removing the delegation
+  ansible.builtin.assert:
+    that:
+      - r53_access_key_id is defined
+      - r53_access_key_id | length > 0
+      - r53_secret_access_key is defined
+      - r53_secret_access_key | length > 0
+    fail_msg: >-
+      CloudOSO {{ cloudoso_cr_name }} ({{ cloudoso_cr_namespace }}) teardown could
+      not resolve Route53 credentials via route53VaultPath
+      {{ ep_route53_vault_path | default('', true) }}
+      {{ ('(from CloudInfrastructure ' ~ (oso_spec.cloudRef | default({}, true)).name | default('', true) ~ ')') if ((oso_spec.cloudRef | default({}, true)).name | default('')) | length > 0 else '' }}.
+      The NS delegation for {{ oso_domain }} in {{ ep_base_domain }} has NOT been
+      removed. Failing the teardown instead of reporting success.
+
 - name: Remove NS delegation for slug zone
-  when: r53_access_key_id is defined
   amazon.aws.route53:
     state: absent
     zone: "{{ ep_base_domain }}"

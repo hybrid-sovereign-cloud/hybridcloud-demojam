@@ -31,6 +31,8 @@
         ep_vault_path: "{{ cloudaws_cr_lookup.resources[0].spec.vaultPath | default('aws/accounts/shc_admin') }}"
         ep_base_domain: "{{ cloudaws_cr_lookup.resources[0].spec.baseDomain | default('sandbox5530.opentlc.com') }}"
         ep_account: "{{ cloudaws_cr_lookup.resources[0].spec.account | default('') }}"
+        aws_cloudinfra_secret: {}
+        cloudaws_cloudinfra_name: ""
       when: cloudaws_cr_lookup.resources | length > 0
 
     - name: Set CloudAWS teardown fallback facts
@@ -42,7 +44,50 @@
         ep_vault_path: aws/accounts/shc_admin
         ep_base_domain: sandbox5530.opentlc.com
         ep_account: ""
+        aws_cloudinfra_secret: {}
+        cloudaws_cloudinfra_name: ""
       when: cloudaws_cr_lookup.resources | length == 0
+
+    - name: Take credentials from the CloudInfrastructure (spec.cloudRef)
+      when: (cloudaws_spec.cloudRef | default({}, true)).name | default('') | length > 0
+      block:
+        - name: Read CloudInfrastructure
+          ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/resolve_cloud_infrastructure.yml"
+          vars:
+            ci_ref_name: "{{ cloudaws_spec.cloudRef.name }}"
+            ci_expected_type: aws
+
+        - name: Require the CloudInfrastructure to resolve
+          ansible.builtin.assert:
+            that: ci_error | length == 0
+            fail_msg: >-
+              CloudAWS {{ cloudaws_cr_name }} teardown cannot resolve its credentials:
+              {{ ci_error }}. Refusing to report teardown success while AWS resources
+              may still exist.
+
+        # Mirror of cloudaws_provision/tasks/main.yml "Use CloudInfrastructure
+        # credentials and defaults". credentialsRef is "exactly one of vaultPath or
+        # secretRef"; honouring only vaultPath here left the teardown unauthenticated
+        # and silently skipping every Route53 deletion.
+        - name: Use its credentialsRef (vaultPath or secretRef)
+          vars:
+            _cr: "{{ ci_spec.credentialsRef | default({}, true) }}"
+          ansible.builtin.set_fact:
+            cloudaws_cloudinfra_name: "{{ cloudaws_spec.cloudRef.name }}"
+            ep_vault_path: "{{ _cr.vaultPath | default('', true) }}"
+            aws_cloudinfra_secret: >-
+              {{
+                {'name': _cr.secretRef.name, 'namespace': ci_obj.metadata.namespace}
+                if ((_cr.secretRef | default({}, true)).name | default('')) | length > 0 else {}
+              }}
+
+        - name: Require credentials on the CloudInfrastructure
+          ansible.builtin.assert:
+            that: (ep_vault_path | length > 0) or (aws_cloudinfra_secret | length > 0)
+            fail_msg: >-
+              CloudInfrastructure {{ cloudaws_spec.cloudRef.name }} has no
+              spec.credentialsRef (vaultPath or secretRef). CloudAWS
+              {{ cloudaws_cr_name }} teardown cannot authenticate to AWS.
 
     - name: Tear down Route53 slug zone
       ansible.builtin.include_tasks: delete_route53.yml

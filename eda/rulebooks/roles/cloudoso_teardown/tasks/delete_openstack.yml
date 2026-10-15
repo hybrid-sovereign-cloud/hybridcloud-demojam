@@ -41,8 +41,25 @@
   delay: 5
   ignore_errors: true
 
+# A teardown that cannot authenticate must fail, not skip the deletions and
+# report success: that leaks the OpenStack project and its floating IPs.
+- name: Require OpenStack admin credentials before deleting anything
+  ansible.builtin.assert:
+    that:
+      - os_admin_secret.resources | default([]) | length > 0
+      - os_admin_secret.resources[0].data | default({}) | length > 0
+      - os_admin_secret.resources[0].data['clouds.yaml'] is defined
+    fail_msg: >-
+      CloudOSO {{ cloudoso_cr_name }} ({{ cloudoso_cr_namespace }}) teardown could
+      not resolve OpenStack admin credentials via
+      {{ ('CloudInfrastructure ' ~ (oso_spec.cloudRef | default({}, true)).name | default('', true) ~ ' ') if ((oso_spec.cloudRef | default({}, true)).name | default('')) | length > 0 else '' }}{{
+        ('credentialsRef.secretRef ' ~ ep_admin_secret.namespace | default('', true) ~ '/' ~ ep_admin_secret.name | default('', true))
+        if ((ep_admin_secret | default({})) | length > 0)
+        else ('credentialsRef.vaultPath ' ~ (ep_vault_path | default('', true)))
+      }}. Project {{ ep_project }} and its floating IPs have NOT been deleted.
+      Failing the teardown instead of reporting success.
+
 - name: Write clouds.yaml for teardown
-  when: os_admin_secret.resources | default([]) | length > 0
   ansible.builtin.copy:
     content: "{{ os_admin_secret.resources[0].data['clouds.yaml'] | b64decode }}"
     dest: "/tmp/eda-cloudoso-teardown-{{ cloudoso_cr_name }}-clouds.yaml"
@@ -50,7 +67,6 @@
   no_log: true
 
 - name: Release floating IPs and delete OpenStack project
-  when: os_admin_secret.resources | default([]) | length > 0
   ansible.builtin.shell: |
     python3 -c "
     import openstack, yaml, os, sys

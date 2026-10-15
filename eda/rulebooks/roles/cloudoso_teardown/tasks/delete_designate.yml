@@ -41,8 +41,25 @@
   delay: 5
   ignore_errors: true
 
+# No credentials is a failure, not a skip: skipping leaves the Designate
+# recordsets behind while the teardown reports success.
+- name: Require OpenStack credentials before removing Designate records
+  ansible.builtin.assert:
+    that:
+      - designate_secret.resources | default([]) | length > 0
+      - designate_secret.resources[0].data | default({}) | length > 0
+      - designate_secret.resources[0].data['clouds.yaml'] is defined
+    fail_msg: >-
+      CloudOSO {{ cloudoso_cr_name }} ({{ cloudoso_cr_namespace }}) teardown could
+      not resolve OpenStack credentials via
+      {{ ('CloudInfrastructure ' ~ (oso_spec.cloudRef | default({}, true)).name | default('', true) ~ ' ') if ((oso_spec.cloudRef | default({}, true)).name | default('')) | length > 0 else '' }}{{
+        ('credentialsRef.secretRef ' ~ ep_admin_secret.namespace | default('', true) ~ '/' ~ ep_admin_secret.name | default('', true))
+        if ((ep_admin_secret | default({})) | length > 0)
+        else ('credentialsRef.vaultPath ' ~ (ep_vault_path | default('', true)))
+      }}. Designate records for {{ cloudoso_cr_name }} have NOT been removed.
+      Failing the teardown instead of reporting success.
+
 - name: Write clouds.yaml for designate teardown
-  when: designate_secret.resources | default([]) | length > 0
   ansible.builtin.copy:
     content: "{{ designate_secret.resources[0].data['clouds.yaml'] | b64decode }}"
     dest: "/tmp/eda-cloudoso-teardown-{{ cloudoso_cr_name }}-designate.yaml"
@@ -50,7 +67,6 @@
   no_log: true
 
 - name: Remove Designate wildcard records for environment
-  when: designate_secret.resources | default([]) | length > 0
   ansible.builtin.shell: |
     python3 -c "
     import openstack, yaml, os
