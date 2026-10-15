@@ -206,7 +206,6 @@
             | default([])
             | selectattr('spec.network', 'defined')
             | selectattr('spec.network', 'equalto', hybridnetwork_cr_name)
-            | rejectattr('spec.state', 'equalto', 'absent')
             | list
           }}
 
