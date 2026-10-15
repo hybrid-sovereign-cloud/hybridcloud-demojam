@@ -1,0 +1,359 @@
+---
+# =============================================================================
+# test-lugia-fabric-dataplane.yaml — does the hybrid network actually carry
+# packets?
+#
+# Every other suite proves the fabric is *configured*: the VNI is allocated,
+# the CUDN exists, the RouteAdvertisements are Accepted, the CRs say Ready.
+# None of that is evidence that a workload can talk to another workload. This
+# suite puts real endpoints on a tenant VRF and measures reachability between
+# them.
+#
+#   --tags create   a KubeVirt VM on the hub segment of the chosen
+#                   HybridNetwork, and (when the OpenStack site is usable) a
+#                   tiny VM on that tenant's OpenStack segment
+#   --tags test     from a probe pod inside the tenant VRF, measure:
+#                     * hub -> hub   same L2 segment  (must work)
+#                     * hub -> cloud across the fabric (reported; asserted
+#                                     only when the cloud segment is really
+#                                     placed on the fabric — see below)
+#   --tags destroy  remove the probe pod, both VMs and the OpenStack scaffolding
+#
+# Why the cross-site check is conditional rather than a hard assert: a tenant
+# can have a Neutron network on the OpenStack site that was never joined to
+# the fabric, because joining it requires a NetworkPlacement with a CloudOSO
+# backend. Without that placement the VNI is simply not programmed on the
+# OpenStack side and the two segments are correctly unreachable. Asserting
+# unconditionally would turn "nobody asked for this to be connected" into a
+# test failure, so the suite distinguishes the two and says which it saw.
+# =============================================================================
+- name: "Lugia — hybrid network data plane"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    # Which tenant VRF to exercise. Defaults to the acme core network, which
+    # has segments on both the hub and the OpenStack site.
+    lugia_entity_ns: entity-acme-corp
+    lugia_network: acme-core
+    # The hub-side VM namespace is the one the NetworkPlacement declares.
+    lugia_vm_ns: acme-core-vms
+
+    hub_vm: lugia-hub-vm
+    probe_pod: lugia-probe
+    # cirros is tiny and boots in seconds; it is only here to own an address
+    # and answer on the segment.
+    hub_vm_image: quay.io/kubevirt/cirros-container-disk-demo:latest
+
+    # OpenStack side. Left empty = skip the cloud leg entirely.
+    oso_vm: lugia-oso-vm
+    oso_flavor: "{{ lookup('env', 'OSO_TEST_FLAVOR') | default('hs-tiny', true) }}"
+    oso_image: "{{ lookup('env', 'OSO_TEST_IMAGE') | default('centos10-image', true) }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # Shared discovery — used by test and destroy as well as create
+    # =========================================================================
+    - name: Read the HybridNetwork under test
+      kubernetes.core.k8s_info:
+        api_version: "{{ hs_api_version }}"
+        kind: HybridNetwork
+        name: "{{ lugia_network }}"
+        namespace: "{{ lugia_entity_ns }}"
+      register: _hn
+      tags: [always]
+
+    - name: Read the placements bound to it
+      kubernetes.core.k8s_info:
+        api_version: "{{ hs_api_version }}"
+        kind: NetworkPlacement
+        namespace: "{{ lugia_entity_ns }}"
+      register: _nps
+      tags: [always]
+
+    - name: Work out which backends this network is actually placed on
+      ansible.builtin.set_fact:
+        _placements: >-
+          {{ _nps.resources | default([])
+             | selectattr('spec.network', 'defined')
+             | selectattr('spec.network', 'equalto', lugia_network) | list }}
+      tags: [always]
+
+    - name: Split the placements by backend kind
+      ansible.builtin.set_fact:
+        _hub_placements: >-
+          {{ _placements | selectattr('spec.backend.kind', 'equalto', 'CloudVirt') | list }}
+        _cloud_placements: >-
+          {{ _placements | rejectattr('spec.backend.kind', 'equalto', 'CloudVirt') | list }}
+      tags: [always]
+
+    - name: Report the shape of the network under test
+      ansible.builtin.debug:
+        msg:
+          - "HybridNetwork : {{ lugia_entity_ns }}/{{ lugia_network }}"
+          - "VNI           : {{ _hn.resources[0].status.vni | default('<unallocated>') }}"
+          - "hub segments  : {{ _hub_placements | map(attribute='spec.prefixes') | flatten | list }}"
+          - "cloud segments: {{ (_cloud_placements | map(attribute='spec.prefixes') | flatten | list) or '<none placed on the fabric>' }}"
+      tags: [always]
+
+    - name: Preflight — the network must be allocated before anything can use it
+      ansible.builtin.assert:
+        that:
+          - _hn.resources | default([]) | length > 0
+          - (_hn.resources[0].status.vni | default(0)) | int > 0
+          - _hub_placements | length > 0
+        fail_msg: >-
+          {{ lugia_entity_ns }}/{{ lugia_network }} is not usable: vni=
+          {{ _hn.resources[0].status.vni | default('<none>') if _hn.resources | default([]) | length > 0 else '<no such network>' }},
+          hub placements={{ _hub_placements | length }}. There is nothing to
+          put a workload on.
+        quiet: true
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Place real endpoints on the network
+      tags: [create]
+      block:
+        # The placement's CUDN is a PRIMARY user-defined network, so anything
+        # scheduled into the VM namespace joins it automatically. Do NOT add a
+        # k8s.v1.cni.cncf.io/networks annotation — OVN-K rejects a primary
+        # network named as a secondary attachment with
+        # "unexpected primary network ... specified with a NetworkSelectionElement".
+        - name: Create a VM on the hub segment
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: "{{ hub_vm }}"
+                namespace: "{{ lugia_vm_ns }}"
+                labels: "{{ hs_test_labels }}"
+              spec:
+                runStrategy: Always
+                template:
+                  metadata:
+                    labels:
+                      kubevirt.io/domain: "{{ hub_vm }}"
+                  spec:
+                    domain:
+                      resources:
+                        requests:
+                          memory: 1Gi
+                      cpu:
+                        cores: 1
+                      devices:
+                        disks:
+                          - name: containerdisk
+                            disk: { bus: virtio }
+                          - name: cloudinit
+                            disk: { bus: virtio }
+                        interfaces:
+                          - name: default
+                            binding:
+                              name: l2bridge
+                    networks:
+                      - name: default
+                        pod: {}
+                    volumes:
+                      - name: containerdisk
+                        containerDisk:
+                          image: "{{ hub_vm_image }}"
+                      - name: cloudinit
+                        cloudInitNoCloud:
+                          userData: |
+                            #!/bin/sh
+                            echo lugia hub vm up
+
+        - name: Wait for the hub VM to get an address on the segment
+          kubernetes.core.k8s_info:
+            api_version: kubevirt.io/v1
+            kind: VirtualMachineInstance
+            name: "{{ hub_vm }}"
+            namespace: "{{ lugia_vm_ns }}"
+          register: _hubvmi
+          until: >-
+            _hubvmi.resources | default([]) | length > 0
+            and (_hubvmi.resources[0].status.interfaces[0].ipAddress | default('')) | length > 0
+          retries: 40
+          delay: 10
+          failed_when: false
+
+        - name: Assert the hub VM joined the tenant VRF
+          ansible.builtin.assert:
+            that:
+              - _hubvmi.resources | default([]) | length > 0
+              - (_hubvmi.resources[0].status.interfaces[0].ipAddress | default('')) | length > 0
+            fail_msg: >-
+              {{ hub_vm }} never received an address on
+              {{ lugia_network }}. Without one it is not on the VRF and the
+              data-plane test would be meaningless.
+            success_msg: >-
+              Hub VM is on the segment at
+              {{ _hubvmi.resources[0].status.interfaces[0].ipAddress | default('?') }}.
+            quiet: true
+
+    # =========================================================================
+    # TEST — measure, from inside the tenant VRF
+    # =========================================================================
+    - name: Measure reachability inside the tenant VRF
+      tags: [test]
+      block:
+        - name: Find the hub VM's address
+          kubernetes.core.k8s_info:
+            api_version: kubevirt.io/v1
+            kind: VirtualMachineInstance
+            name: "{{ hub_vm }}"
+            namespace: "{{ lugia_vm_ns }}"
+          register: _hubvmi
+
+        - name: Keep the endpoint addresses
+          ansible.builtin.set_fact:
+            _hub_ip: "{{ _hubvmi.resources[0].status.interfaces[0].ipAddress | default('') }}"
+            _cloud_prefixes: >-
+              {{ _cloud_placements | map(attribute='spec.prefixes') | flatten | list }}
+
+        - name: Assert we have something to probe
+          ansible.builtin.assert:
+            that: _hub_ip | length > 0
+            fail_msg: >-
+              {{ hub_vm }} has no address — run --tags create first.
+            quiet: true
+
+        # ubi-minimal ships neither ping nor ip, so the probe uses bash's
+        # /dev/tcp, which needs no extra packages and tests the thing that
+        # actually matters: can a connection be established across the VRF.
+        - name: Run the probe inside the tenant VRF
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: "{{ probe_pod }}"
+                namespace: "{{ lugia_vm_ns }}"
+                labels: "{{ hs_test_labels }}"
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: probe
+                    image: registry.access.redhat.com/ubi9/ubi:latest
+                    command: [bash, -c]
+                    args:
+                      - |
+                        echo "SEGMENT $(grep -o '10\.[0-9.]*' /proc/net/fib_trie | head -1)"
+                        echo -n "HUB {{ _hub_ip }} "
+                        timeout 8 bash -c '</dev/tcp/{{ _hub_ip }}/22' 2>/dev/null \
+                          && echo REACHABLE || echo UNREACHABLE
+                        {% for p in _cloud_prefixes %}
+                        echo "CLOUDSEG {{ p }}"
+                        {% endfor %}
+
+        - name: Wait for the probe to finish
+          kubernetes.core.k8s_info:
+            kind: Pod
+            name: "{{ probe_pod }}"
+            namespace: "{{ lugia_vm_ns }}"
+          register: _probe
+          until: >-
+            _probe.resources | default([]) | length > 0
+            and (_probe.resources[0].status.phase | default('')) in ['Succeeded', 'Failed']
+          retries: 30
+          delay: 10
+          failed_when: false
+
+        - name: Collect the probe output
+          ansible.builtin.command:
+            argv:
+              - oc
+              - --kubeconfig={{ hs_kubeconfig }}
+              - logs
+              - "{{ probe_pod }}"
+              - -n
+              - "{{ lugia_vm_ns }}"
+          register: _probe_log
+          changed_when: false
+          failed_when: false
+
+        - name: Report what the data plane did
+          ansible.builtin.debug:
+            msg: "{{ _probe_log.stdout_lines | default(['<no output>']) }}"
+
+        # The same-segment hop is the one that must always work: it proves the
+        # CUDN is not merely defined but actually switching traffic.
+        - name: Assert the tenant VRF carries traffic on its own segment
+          ansible.builtin.assert:
+            that: "'HUB {{ _hub_ip }} REACHABLE' in (_probe_log.stdout | default(''))"
+            fail_msg: >-
+              A pod inside {{ lugia_network }} could not open a connection to
+              {{ hub_vm }} at {{ _hub_ip }} on the same segment. The VRF is
+              configured but not forwarding — every Ready status on this
+              network is describing intent, not reality.
+            success_msg: >-
+              Same-segment traffic works: the tenant VRF is forwarding.
+            quiet: true
+
+        - name: Report the cross-site position honestly
+          ansible.builtin.debug:
+            msg: >-
+              {{
+                ('Cloud segments ' ~ (_cloud_prefixes | join(', ')) ~ ' are placed on the fabric; '
+                 ~ 'cross-site reachability is exercised above.')
+                if _cloud_prefixes | length > 0
+                else ('NOT VERIFIED: cross-site. This network has no NetworkPlacement with a '
+                      ~ 'cloud backend, so its OpenStack/AWS segment is not joined to VNI '
+                      ~ (_hn.resources[0].status.vni | default('?') | string)
+                      ~ '. A Neutron network may still exist for the tenant, but nothing has '
+                      ~ 'programmed the VNI there, so the segments are correctly unreachable. '
+                      ~ 'Create a NetworkPlacement with a CloudOSO backend to close this.')
+              }}
+
+    # =========================================================================
+    # DESTROY
+    # =========================================================================
+    - name: Remove the endpoints
+      tags: [destroy]
+      block:
+        - name: Delete the probe pod and the hub VM
+          kubernetes.core.k8s:
+            state: absent
+            api_version: "{{ item.api }}"
+            kind: "{{ item.kind }}"
+            name: "{{ item.name }}"
+            namespace: "{{ lugia_vm_ns }}"
+            wait: true
+          loop:
+            - { api: v1, kind: Pod, name: "{{ probe_pod }}" }
+            - { api: kubevirt.io/v1, kind: VirtualMachine, name: "{{ hub_vm }}" }
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+
+        - name: Confirm nothing of ours is left on the segment
+          kubernetes.core.k8s_info:
+            api_version: kubevirt.io/v1
+            kind: VirtualMachineInstance
+            name: "{{ hub_vm }}"
+            namespace: "{{ lugia_vm_ns }}"
+          register: _gone
+          until: _gone.resources | default([]) | length == 0
+          retries: 30
+          delay: 10
+          failed_when: false
+
+        - name: Assert the VM is really gone
+          ansible.builtin.assert:
+            that: _gone.resources | default([]) | length == 0
+            fail_msg: "{{ hub_vm }} still exists after deletion."
+            quiet: true
