@@ -1,0 +1,977 @@
+---
+# =============================================================================
+# test-onix-aws-ocp.yaml — a real OpenShift cluster built on AWS
+#
+# The AWS counterpart to test-squirtle-ocp-plain.yaml, and the next stage up
+# from test-jigglypuff-aws.yaml. Jigglypuff proves the AWS *environment* is
+# prepared (Entity -> Rbac -> CloudInfrastructure(aws) -> CloudAWS -> a real
+# delegated Route53 zone) and deliberately stops there so it stays fast. Onix
+# takes the same stack and puts a PlatformOpenshift(type: aws) on top of it,
+# so the whole AWS path is covered end to end by two suites instead of one
+# slow one.
+#
+# AWS IS NOT A HYBRID NETWORK / EVPN FABRIC PARTICIPANT.
+#
+# Same design rule as jigglypuff (design §15.0): the aws branch of
+# cloudinfrastructure_provision hard-codes capabilities.evpn=false with reason
+# AwsUnsupported. So this suite NEVER creates a HybridNetwork, a
+# NetworkPlacement, a CloudGateway or a TransportLink, and it entitles onix on
+# the AWS CloudInfrastructure and on nothing else — in particular not on the
+# HybridFabric. Like squirtle, it asserts the absence rather than trusting it.
+#
+# WHAT "READY" IS WORTH HERE. platformopenshift_provision patches the
+# PlatformOpenshift status with ready=true and an Available condition
+# unconditionally at the end of its aws branch, whether or not Hive actually
+# finished. status.ready is therefore necessary but nowhere near sufficient,
+# and this suite does not treat it as proof. The test tag goes to the three
+# places that cannot lie:
+#   * Hive — ClusterDeployment.spec.installed and its infraID,
+#   * ACM  — ManagedCluster Joined and Available,
+#   * AWS  — the EC2 instances tagged for that infraID, the VPC the installer
+#            built, and the Route53 records for the cluster API,
+# and finally talks to the cluster's own API endpoint.
+#
+#   --tags create   Entity -> Rbac -> admin Secret -> CloudInfrastructure(aws)
+#                   -> entitle on that infrastructure only -> CloudAWS
+#                   -> PlatformOpenshift(aws). A real install is 40-60+ min.
+#   --tags test     Hive + ACM + AWS + the live API, plus the negative
+#                   no-fabric assertions
+#   --tags destroy  deprovision, and prove ACM, EC2 and Route53 were reclaimed
+#
+# An AWS install is slow and it costs money. Override HS_READY_TIMEOUT or
+# onix_build_timeout if the lab is slower than 2h, and do not leave the
+# cluster running after a demo.
+# =============================================================================
+- name: "Onix — a real OpenShift cluster on AWS"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: onix
+    ns: entity-onix
+    cloudaws_name: onix-aws
+    aws_infra_name: onix-aws-infra
+    aws_creds_secret: onix-aws-admin-creds
+    cluster_name: onix-ocp
+    rbac_groups: [onix-cluster-admins, onix-cluster-viewers]
+
+    aws_access_key: "{{ lookup('env', 'AWS_ACCESSKEY') }}"
+    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_KEY') }}"
+    aws_account: "{{ lookup('env', 'AWS_ACCOUNT') }}"
+    aws_base_domain: "{{ lookup('env', 'AWS_BASE_DOMAIN') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-1', true) }}"
+
+    # cloudaws_provision derives the environment slug from sha256(<CR name>),
+    # and platformopenshift_provision then installs into
+    # <cluster>.<slug>.<baseDomain>. Deriving it the same way here means the
+    # suite knows the cluster's DNS name before the build starts, so it can
+    # verify AWS without reading it back out of the CR it is testing.
+    expected_slug: "{{ (cloudaws_name | hash('sha256'))[:5] }}"
+    expected_env_domain: "{{ expected_slug }}.{{ aws_base_domain }}"
+    expected_cluster_domain: "{{ cluster_name }}.{{ expected_slug }}.{{ aws_base_domain }}"
+
+    # Topology. Kept at the operator's own defaults so this suite exercises
+    # the documented path rather than a special case.
+    onix_control_plane_count: 3
+    onix_worker_count: 2
+    onix_controller_flavor: m5.xlarge
+    onix_worker_flavor: m5.large
+
+    # A full IPI install on AWS is 40-60 minutes before Hive even reports
+    # installed, and the operator itself polls Hive for up to 120 minutes
+    # (platformopenshift_hive_poll_retries). Two hours is the floor, not a
+    # generous allowance.
+    onix_build_timeout: "{{ lookup('env', 'ONIX_BUILD_TIMEOUT') | default(9000, true) | int }}"
+
+    aws_env:
+      AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+      AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+      AWS_DEFAULT_REGION: "{{ aws_region }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    - name: Require the AWS credentials this suite cannot run without
+      ansible.builtin.assert:
+        that:
+          - aws_access_key | length > 0
+          - aws_secret_key | length > 0
+          - aws_account | length == 12
+          - aws_base_domain | length > 0
+        fail_msg: >-
+          AWS_ACCESSKEY / AWS_SECRET_KEY / AWS_ACCOUNT (12 digits) /
+          AWS_BASE_DOMAIN must be set in tests/.env to run this suite.
+          See tests/.env.example section 2b.
+        quiet: true
+      tags: [always]
+
+    # -------------------------------------------------------------------
+    # Preconditions that belong to the platform, not to this suite.
+    #
+    # platformopenshift_provision reads the OCP pull secret and the installer
+    # SSH key from two fixed Vault paths (its default_pull_secret_vault_path
+    # and default_ssh_key_vault_path) and turns each into an ExternalSecret
+    # for Hive. If they are missing the operator does not fail fast — it sits
+    # in "Wait for pull secret and SSH key secrets to sync" for five minutes
+    # and only then dies, long after the Entity, the CloudAWS and a billable
+    # Route53 zone have been created. Checking first is cheaper and the
+    # failure message is actionable. This is a read-only check; the seeding
+    # itself is the platform's job, done by the hs-aws-clusterbuild-seed Job
+    # in gitops/infrastructure/security.
+    # -------------------------------------------------------------------
+    - name: Check the AWS cluster-build prerequisites in Vault
+      tags: [always]
+      block:
+        - name: Resolve the Vault endpoint
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            name: vault
+            namespace: vault
+          register: _vault_route
+          when: vault_addr_override | length == 0
+
+        - name: Resolve the Vault root token
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Secret
+            name: vault-init
+            namespace: vault
+          register: _vault_init
+          no_log: true
+          when: vault_token_override | length == 0
+
+        - name: Set the Vault connection facts
+          ansible.builtin.set_fact:
+            _vault_addr: >-
+              {{ vault_addr_override if vault_addr_override | length > 0
+                 else 'https://' ~ (_vault_route.resources[0].spec.host | default('')) }}
+            _vault_token: >-
+              {{ vault_token_override if vault_token_override | length > 0
+                 else (_vault_init.resources[0].data.rootToken | default('') | b64decode) }}
+          no_log: true
+
+        - name: Read the cluster-build material out of Vault
+          ansible.builtin.uri:
+            url: "{{ _vault_addr }}/v1/hybridsovereign/data/{{ item }}"
+            method: GET
+            headers:
+              X-Vault-Token: "{{ _vault_token }}"
+            validate_certs: false
+            status_code: [200, 403, 404]
+          register: _vault_prereq
+          no_log: true
+          loop:
+            - aws/ocp-pull-secret
+            - aws/ocp-ssh-key
+
+        - name: Record which prerequisite keys are present
+          ansible.builtin.set_fact:
+            _prereq_keys: >-
+              {{ dict(_vault_prereq.results | map(attribute='item')
+                      | zip(_vault_prereq.results
+                            | map(attribute='json', default={})
+                            | map('default', {}, true)
+                            | map('json_query', 'data.data')
+                            | map('default', {}, true)
+                            | map('dict2items') | map('map', attribute='key')
+                            | map('list') | map('sort'))) }}
+
+        - name: Assert the AWS cluster-build prerequisites are seeded
+          ansible.builtin.assert:
+            that:
+              - "'pull_secret' in _prereq_keys['aws/ocp-pull-secret']"
+              - "'ssh_public_key' in _prereq_keys['aws/ocp-ssh-key']"
+              - "'ssh_private_key' in _prereq_keys['aws/ocp-ssh-key']"
+            fail_msg: >-
+              The Vault paths platformopenshift_provision installs AWS
+              clusters from are not seeded. Found
+              hybridsovereign/aws/ocp-pull-secret = {{ _prereq_keys['aws/ocp-pull-secret'] }}
+              and hybridsovereign/aws/ocp-ssh-key = {{ _prereq_keys['aws/ocp-ssh-key'] }};
+              the operator needs pull_secret, ssh_public_key and
+              ssh_private_key. Run the hs-aws-clusterbuild-seed Job from
+              gitops/infrastructure/security (it copies the hub's
+              openshift-config/pull-secret and generates an installer
+              keypair). Without it every AWS build stalls five minutes
+              waiting for an ExternalSecret that can never sync, then fails.
+            success_msg: "AWS cluster-build material is present in Vault."
+            quiet: true
+
+    - name: Create the cluster
+      tags: [create]
+      block:
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Onix — QA tenant, OpenShift on AWS, no hybrid networking"
+                  billingID: "ONIX-TEST-001"
+                  namespaceRbac:
+                    entityAdmin: [onix-cluster-admins]
+                    cloudAWSAdmin: [onix-cluster-admins]
+                    cloudAWSView: [onix-cluster-viewers]
+                    platformOpenshiftAdmin: [onix-cluster-admins]
+                    platformOpenshiftView: [onix-cluster-viewers]
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Entity, cr_wait_name: "{{ e }}", cr_wait_namespace: "{{ hs_platform_ns }}" }
+
+        - name: Create the Rbac groups
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Rbac
+              metadata: { name: "{{ item }}", namespace: "{{ ns }}", labels: "{{ hs_test_labels }}" }
+              spec:
+                config: "{{ hs_rbac_config }}"
+                description: "QA group {{ item }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Rbac, cr_wait_name: "{{ item }}", cr_wait_namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        # The Entity's RoleBinding subjects are only resolved on a reconcile
+        # that happens after the Rbac CRs are Ready, so the first binding pass
+        # leaves them empty. Touching .spec forces a re-bind.
+        - name: Bump the Entity so the RoleBindings re-bind against the Rbac CRs
+          kubernetes.core.k8s:
+            state: patched
+            api_version: "{{ hs_api_version }}"
+            kind: Entity
+            name: "{{ e }}"
+            namespace: "{{ hs_platform_ns }}"
+            definition:
+              spec:
+                description: >-
+                  Onix — QA tenant, OpenShift on AWS, no hybrid networking
+                  (rebind {{ ansible_date_time.iso8601 | default('r2') }})
+
+        - name: Give the re-bind a moment to land
+          ansible.builtin.pause:
+            seconds: 20
+
+        # Two copies of the same Secret, because two different consumers read
+        # it from two different namespaces: CloudInfrastructure.credentialsRef
+        # resolves in the platform namespace, while the cluster build reads
+        # CloudAWS.credentialsSecretRef from the CloudAWS's own namespace
+        # (aws_clusterbuild_creds.yml looks it up in
+        # ansible_operator_meta.namespace). Jigglypuff only needed the first.
+        - name: Create the AWS admin credentials Secret in both namespaces
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ aws_creds_secret }}"
+                namespace: "{{ item }}"
+                labels: "{{ hs_test_labels }}"
+              type: Opaque
+              stringData:
+                AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+                AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+                ACCOUNT_ID: "{{ aws_account }}"
+          loop:
+            - "{{ hs_platform_ns }}"
+            - "{{ ns }}"
+          no_log: true
+
+        - name: Create the AWS CloudInfrastructure
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudInfrastructure
+                metadata: { name: "{{ aws_infra_name }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  type: aws
+                  displayName: "Onix QA AWS account"
+                  credentialsRef:
+                    secretRef: { name: "{{ aws_creds_secret }}" }
+                  aws:
+                    accountId: "{{ aws_account }}"
+                    region: "{{ aws_region }}"
+                    baseDomain: "{{ aws_base_domain }}"
+
+        - name: Wait for the AWS CloudInfrastructure
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudInfrastructure
+            cr_wait_name: "{{ aws_infra_name }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        # CloudInfrastructure carries an entityRefs allow-list and the
+        # operator refuses a tenant that is not on it. Onix is entitled on the
+        # AWS infrastructure and on nothing else — deliberately not on the
+        # HybridFabric, because AWS has no fabric landing at all.
+        - name: Entitle onix on the AWS infrastructure (and nowhere else)
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+
+        - name: Request the AWS account project the cluster installs into
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudAWS
+                metadata: { name: "{{ cloudaws_name }}", namespace: "{{ ns }}" }
+                spec:
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+                  account: "{{ aws_account }}"
+                  baseDomain: "{{ aws_base_domain }}"
+                  landingzone: default
+                  credentialsSecretRef: { name: "{{ aws_creds_secret }}" }
+
+        - name: Wait for the AWS environment to be prepared
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudAWS
+            cr_wait_name: "{{ cloudaws_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Confirm the environment slug is the one the cluster DNS assumes
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudAWS
+            name: "{{ cloudaws_name }}"
+            namespace: "{{ ns }}"
+          register: _ca_created
+
+        - name: Assert the CloudAWS slug matches the derived one
+          ansible.builtin.assert:
+            that: _ca_created.resources[0].status.slug | default('') == expected_slug
+            fail_msg: >-
+              CloudAWS/{{ cloudaws_name }} reports slug
+              '{{ _ca_created.resources[0].status.slug | default('<unset>') }}'
+              but this suite derived '{{ expected_slug }}' from
+              sha256({{ cloudaws_name }}). The AWS assertions below look up
+              DNS by name, so they would be checking the wrong zone.
+            success_msg: "Environment domain is {{ expected_env_domain }}."
+            quiet: true
+
+        - name: Request the OpenShift cluster on AWS — no hybrid network attached
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: PlatformOpenshift
+                metadata: { name: "{{ cluster_name }}", namespace: "{{ ns }}" }
+                spec:
+                  type: aws
+                  aws:
+                    environment: "{{ cloudaws_name }}"
+                    region: "{{ aws_region }}"
+                    clusterType: ha
+                    controlPlaneCount: "{{ onix_control_plane_count }}"
+                    workerCount: "{{ onix_worker_count }}"
+                    controllerFlavor: "{{ onix_controller_flavor }}"
+                    workerFlavor: "{{ onix_worker_flavor }}"
+                  toolRbac:
+                    clusterAdminRbac: [onix-cluster-admins]
+                    clusterViewerRbac: [onix-cluster-viewers]
+
+        - name: Wait for the AWS cluster build (40-60+ minutes)
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: PlatformOpenshift
+            cr_wait_name: "{{ cluster_name }}"
+            cr_wait_namespace: "{{ ns }}"
+            cr_wait_timeout: "{{ onix_build_timeout }}"
+
+    - name: Verify the cluster
+      tags: [test]
+      block:
+        - name: Read the PlatformOpenshift CR
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: PlatformOpenshift
+            name: "{{ cluster_name }}"
+            namespace: "{{ ns }}"
+          register: _po
+
+        # status.ready is set unconditionally by the operator, so it is only
+        # worth asserting alongside the fields that do reflect reality.
+        - name: Assert the CR describes an installed AWS cluster
+          ansible.builtin.assert:
+            that:
+              - _po.resources | length > 0
+              - _po.resources[0].status.ready | default(false) | bool
+              - _po.resources[0].status.platformType | default('') == 'aws'
+              - _po.resources[0].status.slug | default('') == expected_slug
+              - _po.resources[0].status.awsRegion | default('') == aws_region
+              - _po.resources[0].status.clusterInstalled | default(false) | bool
+              - _po.resources[0].status.acmAvailable | default(false) | bool
+              - _po.resources[0].status.apiURL | default('') == 'https://api.' ~ expected_cluster_domain ~ ':6443'
+            fail_msg: >-
+              PlatformOpenshift/{{ cluster_name }} does not describe a
+              finished AWS install. Note that status.ready alone proves
+              nothing here — the aws branch of platformopenshift_provision
+              sets it whether or not Hive succeeded; clusterInstalled and
+              acmAvailable are the fields that carry information. Got status=
+              {{ _po.resources[0].status | default('<CR not found>') }}
+            success_msg: >-
+              PlatformOpenshift/{{ cluster_name }} reports an installed AWS
+              cluster at {{ _po.resources[0].status.apiURL | default('?') }}.
+            quiet: true
+
+        - name: "Hive — the ClusterDeployment that actually ran the installer"
+          kubernetes.core.k8s_info:
+            api_version: hive.openshift.io/v1
+            kind: ClusterDeployment
+            name: "{{ cluster_name }}"
+            namespace: "{{ cluster_name }}"
+          register: _cd
+
+        - name: Assert Hive finished the install and recorded an infra ID
+          ansible.builtin.assert:
+            that:
+              - _cd.resources | length > 0
+              - _cd.resources[0].spec.installed | default(false) | bool
+              - _cd.resources[0].spec.baseDomain | default('') == expected_env_domain
+              - (_cd.resources[0].spec.clusterMetadata.infraID | default('')) | length > 0
+            fail_msg: >-
+              ClusterDeployment/{{ cluster_name }} is not installed.
+              installed={{ _cd.resources[0].spec.installed | default('<none>') }}
+              conditions=
+              {{ _cd.resources[0].status.conditions | default('<CD not found>') }}
+            success_msg: >-
+              Hive installed {{ cluster_name }} as infra ID
+              {{ _cd.resources[0].spec.clusterMetadata.infraID | default('?') }}.
+            quiet: true
+
+        # Everything the installer builds in AWS is tagged
+        # kubernetes.io/cluster/<infraID>=owned, and infraID is the cluster
+        # name plus a random suffix. Reading it from Hive rather than guessing
+        # is what lets the AWS assertions below be exact.
+        - name: Record the infra ID the installer tagged AWS with
+          ansible.builtin.set_fact:
+            _infra_id: "{{ _cd.resources[0].spec.clusterMetadata.infraID }}"
+            _cluster_tag: "kubernetes.io/cluster/{{ _cd.resources[0].spec.clusterMetadata.infraID }}"
+
+        - name: "ACM — the ManagedCluster was registered"
+          kubernetes.core.k8s_info:
+            api_version: cluster.open-cluster-management.io/v1
+            kind: ManagedCluster
+            name: "{{ cluster_name }}"
+          register: _mc
+
+        - name: Assert the ManagedCluster joined and is available
+          ansible.builtin.assert:
+            that:
+              - _mc.resources | length > 0
+              - >-
+                _mc.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'ManagedClusterConditionAvailable')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+              - >-
+                _mc.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'ManagedClusterJoined')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              ManagedCluster/{{ cluster_name }} is not Joined and Available.
+              Conditions:
+              {{ _mc.resources[0].status.conditions | default('<not found>') }}
+            success_msg: >-
+              ManagedCluster/{{ cluster_name }} is Joined and Available
+              (version
+              {{ _mc.resources[0].status.clusterClaims | default([])
+                 | selectattr('name', 'equalto', 'version.openshift.io')
+                 | map(attribute='value') | first | default('?') }}).
+            quiet: true
+
+        - name: "AWS — the credentials really belong to the expected account"
+          amazon.aws.aws_caller_info:
+          environment: "{{ aws_env }}"
+          register: _sts
+
+        - name: Assert STS agrees with the account under test
+          ansible.builtin.assert:
+            that: _sts.account == aws_account
+            fail_msg: >-
+              The test's AWS credentials are for account {{ _sts.account }},
+              but the cluster was built in {{ aws_account }} — this
+              verification would be reading the wrong account.
+            success_msg: "Verifying inside AWS account {{ aws_account }}."
+            quiet: true
+
+        - name: "AWS — the EC2 instances the installer owns"
+          amazon.aws.ec2_instance_info:
+            filters:
+              "tag:{{ _cluster_tag }}": owned
+              instance-state-name: [running]
+          environment: "{{ aws_env }}"
+          register: _ec2
+
+        - name: Assert the control plane and workers are running in AWS
+          vars:
+            _masters: >-
+              {{ _ec2.instances | default([])
+                 | selectattr('tags.Name', 'defined')
+                 | selectattr('tags.Name', 'search', '-master-') | list }}
+            _workers: >-
+              {{ _ec2.instances | default([])
+                 | selectattr('tags.Name', 'defined')
+                 | selectattr('tags.Name', 'search', '-worker-') | list }}
+          ansible.builtin.assert:
+            that:
+              - _masters | length == (onix_control_plane_count | int)
+              - _workers | length == (onix_worker_count | int)
+              - _masters | map(attribute='instance_type') | unique | list == [onix_controller_flavor]
+              - _workers | map(attribute='instance_type') | unique | list == [onix_worker_flavor]
+            fail_msg: >-
+              EC2 in {{ aws_region }} does not hold the cluster the CR claims.
+              Expected {{ onix_control_plane_count }} x {{ onix_controller_flavor }}
+              control plane and {{ onix_worker_count }} x {{ onix_worker_flavor }}
+              worker instances tagged {{ _cluster_tag }}=owned. Running
+              instances with that tag:
+              {{ _ec2.instances | default([])
+                 | map(attribute='tags.Name') | list }} /
+              {{ _ec2.instances | default([])
+                 | map(attribute='instance_type') | list }}
+            success_msg: >-
+              {{ _masters | length }} control plane +
+              {{ _workers | length }} worker EC2 instances are running:
+              {{ _ec2.instances | map(attribute='instance_id') | list }}
+            quiet: true
+
+        - name: Report the instances found, for the record
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.instance_id }} {{ item.instance_type }}
+              {{ item.tags.Name | default('?') }}
+              az={{ item.placement.availability_zone | default('?') }}
+              vpc={{ item.vpc_id | default('?') }}
+          loop: "{{ _ec2.instances | default([]) }}"
+          loop_control:
+            label: "{{ item.instance_id }}"
+
+        - name: "AWS — the VPC the installer created"
+          amazon.aws.ec2_vpc_net_info:
+            filters:
+              "tag:{{ _cluster_tag }}": owned
+          environment: "{{ aws_env }}"
+          register: _vpc
+
+        - name: Assert exactly one owned VPC exists and holds the instances
+          ansible.builtin.assert:
+            that:
+              - _vpc.vpcs | default([]) | length == 1
+              - _vpc.vpcs[0].state == 'available'
+              - >-
+                _ec2.instances | default([]) | map(attribute='vpc_id')
+                  | unique | list == [_vpc.vpcs[0].vpc_id]
+            fail_msg: >-
+              Expected exactly one available VPC tagged
+              {{ _cluster_tag }}=owned containing every cluster instance.
+              VPCs found:
+              {{ _vpc.vpcs | default([]) | map(attribute='vpc_id') | list }};
+              instance VPCs:
+              {{ _ec2.instances | default([]) | map(attribute='vpc_id') | unique | list }}.
+            success_msg: >-
+              Cluster VPC {{ _vpc.vpcs[0].vpc_id | default('?') }}
+              ({{ _vpc.vpcs[0].cidr_block | default('?') }}) holds all
+              {{ _ec2.instances | default([]) | length }} instances.
+            quiet: true
+
+        - name: "AWS — list Route53 hosted zones"
+          amazon.aws.route53_info:
+            query: hosted_zone
+          environment: "{{ aws_env }}"
+          register: _zones
+
+        - name: Locate the environment zone the cluster installed under
+          ansible.builtin.set_fact:
+            _env_zone_id: >-
+              {{ _zones.hosted_zones
+                 | selectattr('name', 'equalto', expected_env_domain ~ '.')
+                 | rejectattr('config.private_zone', 'equalto', true)
+                 | map(attribute='id') | first | default('')
+                 | regex_replace('^/hostedzone/', '') }}
+
+        - name: Assert the delegated environment zone is still there
+          ansible.builtin.assert:
+            that: _env_zone_id | length > 0
+            fail_msg: >-
+              No public Route53 hosted zone {{ expected_env_domain }} in
+              account {{ aws_account }}, so the cluster's API name cannot be
+              published. Zones present:
+              {{ _zones.hosted_zones | map(attribute='name') | list }}
+            success_msg: >-
+              Environment zone {{ expected_env_domain }} is {{ _env_zone_id }}.
+            quiet: true
+
+        - name: "AWS — the public records the installer published"
+          amazon.aws.route53_info:
+            query: record_sets
+            hosted_zone_id: "{{ _env_zone_id }}"
+          environment: "{{ aws_env }}"
+          register: _env_records
+
+        - name: Assert the cluster API and apps names resolve publicly
+          vars:
+            _names: >-
+              {{ _env_records.resource_record_sets | default([])
+                 | map(attribute='name') | list }}
+          ansible.builtin.assert:
+            that:
+              - "'api.' ~ expected_cluster_domain ~ '.' in _names"
+              - "'\\\\052.apps.' ~ expected_cluster_domain ~ '.' in _names
+                 or '*.apps.' ~ expected_cluster_domain ~ '.' in _names"
+            fail_msg: >-
+              Zone {{ expected_env_domain }} ({{ _env_zone_id }}) has no
+              api./*.apps. records for {{ expected_cluster_domain }}, so the
+              cluster is not reachable by name even though its instances are
+              running. Record names in the zone: {{ _names }}.
+              (Route53 returns the wildcard label escaped as \052.)
+            success_msg: >-
+              api.{{ expected_cluster_domain }} and
+              *.apps.{{ expected_cluster_domain }} are published in
+              {{ _env_zone_id }}.
+            quiet: true
+
+        - name: "AWS — the private zone the installer created for the cluster"
+          ansible.builtin.assert:
+            that: >-
+              _zones.hosted_zones
+                | selectattr('name', 'equalto', expected_cluster_domain ~ '.')
+                | selectattr('config.private_zone', 'equalto', true)
+                | list | length == 1
+            fail_msg: >-
+              Expected exactly one private hosted zone
+              {{ expected_cluster_domain }} for the cluster's internal names.
+              Zones matching that name:
+              {{ _zones.hosted_zones
+                 | selectattr('name', 'equalto', expected_cluster_domain ~ '.')
+                 | list }}.
+              More than one means the post-install duplicate-zone cleanup in
+              aws_clusterbuild_postinstall.yml did not run.
+            success_msg: "Private zone {{ expected_cluster_domain }} exists, exactly once."
+            quiet: true
+
+        # The strongest statement this suite can make: the cluster's own API
+        # server answers on the name AWS publishes for it.
+        - name: "The cluster's API server answers on its public name"
+          ansible.builtin.uri:
+            url: "https://api.{{ expected_cluster_domain }}:6443/version"
+            method: GET
+            validate_certs: false
+            status_code: [200]
+          register: _api
+          retries: 30
+          delay: 10
+          until: _api.status | default(0) == 200
+
+        - name: Assert the API server reports a Kubernetes version
+          ansible.builtin.assert:
+            that:
+              - _api.json.gitVersion | default('') | length > 0
+            fail_msg: >-
+              https://api.{{ expected_cluster_domain }}:6443/version did not
+              return a version document: {{ _api.json | default(_api) }}
+            success_msg: >-
+              {{ cluster_name }} is serving the Kubernetes API, version
+              {{ _api.json.gitVersion | default('?') }}.
+            quiet: true
+
+        - name: "RBAC — the tenant's bindings exist in the entity namespace"
+          kubernetes.core.k8s_info:
+            # api_version is explicit: OpenShift serves RoleBinding under both
+            # rbac.authorization.k8s.io/v1 and authorization.openshift.io/v1,
+            # and letting the client resolve the ambiguous kind sends it into
+            # "maximum recursion depth exceeded".
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rb
+
+        - name: Assert the admin/viewer groups are bound in the tenant namespace
+          ansible.builtin.assert:
+            that:
+              - _rb.resources | length > 0
+              - >-
+                rbac_groups | difference(
+                  _rb.resources | map(attribute='subjects') | select('defined')
+                    | flatten | map(attribute='name') | list
+                    | map('regex_replace', '^.*/', '') | list
+                ) | length == 0
+            fail_msg: >-
+              The Entity RoleBindings in {{ ns }} do not name
+              {{ rbac_groups }}. Subjects seen:
+              {{ _rb.resources | map(attribute='subjects') | select('defined')
+                 | flatten | map(attribute='name') | list }}.
+              If these are empty, the Entity re-bind in the create tag did not
+              take effect — subjects are only resolved on a reconcile that
+              happens after the Rbac CRs are Ready.
+            success_msg: "Cluster admin/viewer groups are bound in {{ ns }}."
+            quiet: true
+
+        - name: "Keycloak — the tenant's groups really exist"
+          ansible.builtin.include_role:
+            name: verify_keycloak_group
+          vars:
+            kc_entity: "{{ e }}"
+            kc_groups: "{{ rbac_groups }}"
+
+        # ---------------------------------------------------------------
+        # Negative assertions. Same control case as squirtle, and the same
+        # design rule as jigglypuff: an AWS cluster is never a fabric member.
+        # ---------------------------------------------------------------
+        - name: "Negative — no NetworkPlacement for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: NetworkPlacement
+            namespace: "{{ ns }}"
+          register: _np
+
+        - name: "Negative — no HybridNetwork for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+            namespace: "{{ ns }}"
+          register: _hn
+
+        - name: Assert no hybrid network was silently attached
+          ansible.builtin.assert:
+            that:
+              - _np.resources | length == 0
+              - _hn.resources | length == 0
+            fail_msg: >-
+              Onix is the AWS no-hybrid-network case, but {{ ns }} holds
+              {{ _np.resources | length }} NetworkPlacement(s) and
+              {{ _hn.resources | length }} HybridNetwork(s). Either the test
+              fixture leaked, or the platform attaches tenant clusters to the
+              fabric without being asked — which would contradict both the
+              documented isolation model and design §15.0, since AWS has no
+              EVPN fabric landing at all.
+            success_msg: "Confirmed: no fabric attachment for {{ cluster_name }}."
+            quiet: true
+
+        - name: "Negative — no CloudGateway or TransportLink for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item }}"
+            namespace: "{{ ns }}"
+          register: _fabric_objs
+          failed_when: false
+          loop: [CloudGateway, TransportLink]
+
+        - name: Assert no fabric transport objects were created
+          ansible.builtin.assert:
+            that: >-
+              _fabric_objs.results | map(attribute='resources')
+                | select('defined') | map('length') | sum == 0
+            fail_msg: >-
+              CloudGateway / TransportLink objects exist in {{ ns }}:
+              {{ _fabric_objs.results | map(attribute='resources')
+                 | select('defined') | flatten
+                 | map(attribute='metadata.name') | list }}.
+              AWS tenants must have no fabric transport at all.
+            success_msg: "Confirmed: no CloudGateway / TransportLink for {{ e }}."
+            quiet: true
+
+        - name: "Negative — read the hub fabric"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fabric
+
+        - name: "Negative — read the AWS CloudInfrastructure"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudInfrastructure
+            name: "{{ aws_infra_name }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _ci
+
+        - name: Assert the AWS infrastructure is not a fabric member
+          ansible.builtin.assert:
+            that:
+              - e not in (_fabric.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list)
+              - _ci.resources[0].status.capabilities.evpn | default(true) | bool == false
+            fail_msg: >-
+              AWS must not be on the EVPN fabric. HybridFabric/{{ hs_fabric }}
+              entityRefs =
+              {{ _fabric.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list }};
+              CloudInfrastructure/{{ aws_infra_name }} capabilities =
+              {{ _ci.resources[0].status.capabilities | default('<unset>') }}.
+              Either the entitlement role touched the fabric, or the aws
+              branch of cloudinfrastructure_provision stopped reporting
+              evpn=false.
+            success_msg: >-
+              Confirmed: {{ e }} is not on {{ hs_fabric }}, and
+              {{ aws_infra_name }} reports evpn=false.
+            quiet: true
+
+    - name: Deprovision the cluster
+      tags: [destroy]
+      block:
+        - name: Remember the infra ID and zone so AWS can be checked afterwards
+          kubernetes.core.k8s_info:
+            api_version: hive.openshift.io/v1
+            kind: ClusterDeployment
+            name: "{{ cluster_name }}"
+            namespace: "{{ cluster_name }}"
+          register: _cd_before
+          failed_when: false
+
+        - name: Record what must disappear from AWS
+          ansible.builtin.set_fact:
+            _doomed_tag: >-
+              kubernetes.io/cluster/{{ (_cd_before.resources[0].spec.clusterMetadata.infraID
+                                        | default('')) if _cd_before.resources | default([]) | length > 0 else '' }}
+
+        - name: Delete the cluster, then the account project
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_timeout: "{{ onix_build_timeout }}"
+            cr_destroy_defs:
+              - { kind: PlatformOpenshift, name: "{{ cluster_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudAWS, name: "{{ cloudaws_name }}", namespace: "{{ ns }}" }
+
+        - name: Assert the ManagedCluster was deregistered from ACM
+          kubernetes.core.k8s_info:
+            api_version: cluster.open-cluster-management.io/v1
+            kind: ManagedCluster
+            name: "{{ cluster_name }}"
+          register: _mc_gone
+          until: _mc_gone.resources | length == 0
+          retries: 60
+          delay: 10
+          failed_when: false
+
+        - name: ManagedCluster is gone
+          ansible.builtin.assert:
+            that: _mc_gone.resources | length == 0
+            fail_msg: >-
+              ManagedCluster/{{ cluster_name }} still exists after the
+              PlatformOpenshift CR was deleted — ACM was left with a stale
+              cluster registration.
+            success_msg: "ManagedCluster/{{ cluster_name }} deregistered."
+            quiet: true
+
+        - name: "AWS — wait for the cluster's EC2 instances to be terminated"
+          amazon.aws.ec2_instance_info:
+            filters:
+              "tag:{{ _doomed_tag }}": owned
+              instance-state-name: [pending, running, stopping, stopped, shutting-down]
+          environment: "{{ aws_env }}"
+          register: _ec2_after
+          until: _ec2_after.instances | default([]) | length == 0
+          retries: 60
+          delay: 30
+          failed_when: false
+          when: _doomed_tag | trim != 'kubernetes.io/cluster/'
+
+        - name: Assert no cluster instances are left running in AWS
+          ansible.builtin.assert:
+            that: _ec2_after.instances | default([]) | length == 0
+            fail_msg: >-
+              EC2 instances tagged {{ _doomed_tag }}=owned are still alive in
+              {{ aws_region }} after the cluster was deprovisioned — the
+              teardown left billable compute behind in account
+              {{ aws_account }}:
+              {{ _ec2_after.instances | default([]) | map(attribute='instance_id') | list }}
+            success_msg: "All cluster EC2 instances were terminated."
+            quiet: true
+          when: _doomed_tag | trim != 'kubernetes.io/cluster/'
+
+        - name: "AWS — wait for the environment hosted zone to be reclaimed"
+          amazon.aws.route53_info:
+            query: hosted_zone
+          environment: "{{ aws_env }}"
+          register: _zones_after
+          until: >-
+            _zones_after.hosted_zones | default([])
+              | selectattr('name', 'equalto', expected_env_domain ~ '.')
+              | list | length == 0
+          retries: 30
+          delay: 10
+          failed_when: false
+
+        - name: Assert the Route53 zones were reclaimed
+          ansible.builtin.assert:
+            that:
+              - >-
+                _zones_after.hosted_zones | default([])
+                  | selectattr('name', 'equalto', expected_env_domain ~ '.')
+                  | list | length == 0
+              - >-
+                _zones_after.hosted_zones | default([])
+                  | selectattr('name', 'equalto', expected_cluster_domain ~ '.')
+                  | list | length == 0
+            fail_msg: >-
+              Route53 still holds {{ expected_env_domain }} and/or
+              {{ expected_cluster_domain }} after teardown — billable zones
+              left behind in account {{ aws_account }}. Note cloudaws_teardown
+              reads its AWS keys from Vault via spec.cloudRef's
+              credentialsRef.vaultPath ONLY; when the CloudInfrastructure
+              supplies credentials as a secretRef, as this suite does, it can
+              fall back to the hard-coded default Vault path, fail to resolve
+              keys, and skip every Route53 deletion task because they are all
+              guarded on "aws_access_key_id is defined".
+            success_msg: "Route53 zones for {{ expected_env_domain }} were reclaimed."
+            quiet: true
+
+        - name: Withdraw onix's entitlement on the AWS infrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+
+        - name: Delete the groups, the infrastructure and the entity
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs: >-
+              {{ (rbac_groups | map('community.general.dict_kv', 'name')
+                  | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)
+                 + [{'kind': 'CloudInfrastructure', 'name': aws_infra_name, 'namespace': hs_platform_ns},
+                    {'kind': 'Entity', 'name': e, 'namespace': hs_platform_ns}] }}
+
+        - name: Remove the AWS admin credentials Secrets
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: Secret
+            name: "{{ aws_creds_secret }}"
+            namespace: "{{ item }}"
+          loop:
+            - "{{ hs_platform_ns }}"
+            - "{{ ns }}"

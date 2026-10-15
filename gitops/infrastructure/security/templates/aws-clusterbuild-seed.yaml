@@ -1,0 +1,150 @@
+# Seed the Vault KV material an AWS OpenShift cluster build needs.
+#
+# platformopenshift_provision (type: aws) reads two fixed Vault paths —
+# default_pull_secret_vault_path = aws/ocp-pull-secret
+# default_ssh_key_vault_path     = aws/ocp-ssh-key
+# — and turns each into an ExternalSecret that Hive consumes. Nothing in the
+# platform ever wrote those paths, so every AWS build stalled for five
+# minutes in "Wait for pull secret and SSH key secrets to sync" and then
+# failed. hs-plugin-cred-sync cannot do this job itself: its image
+# (openshift/cli) has no ssh-keygen and no python cryptography, so the
+# installer SSH keypair cannot be generated there. This Job therefore runs on
+# openshift/tools, which carries both ssh-keygen and oc.
+#
+# Both writes are strictly create-if-absent. An operator who has already put a
+# real pull secret or a managed SSH key in Vault keeps it; re-running this Job
+# must never rotate a key that existing clusters were installed with.
+#
+# No secret value appears in Git: the pull secret is copied from the hub's own
+# openshift-config/pull-secret, and the SSH keypair is generated in-cluster.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-aws-clusterbuild-seed
+  namespace: sovereign-secrets
+  labels:
+    hybridsovereign.redhat/gitops-owned: "true"
+  annotations:
+    # After hs-plugin-cred-sync (wave 46), which is what enables the
+    # hybridsovereign KV mount this Job writes into.
+    argocd.argoproj.io/sync-wave: "47"
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 8
+  template:
+    metadata:
+      labels:
+        hybridsovereign.redhat/gitops-owned: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: hs-plugin-cred-sync
+      containers:
+        - name: seed
+          image: image-registry.openshift-image-registry.svc:5000/openshift/tools:latest
+          env:
+            - name: VAULT_ADDR
+              value: http://vault.vault.svc:8200
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+
+              echo "Waiting for vault-init..."
+              for i in $(seq 1 60); do
+                oc -n vault get secret vault-init >/dev/null 2>&1 && break
+                sleep 5
+              done
+              export VAULT_TOKEN
+              VAULT_TOKEN=$(oc -n vault get secret vault-init -o jsonpath='{.data.rootToken}' | base64 -d)
+              [ -n "$VAULT_TOKEN" ] || { echo "vault-init missing; skip AWS clusterbuild seed"; exit 0; }
+
+              # Generate the installer keypair here rather than in python so the
+              # key is a real OpenSSH ed25519 key, and keep it in a mode-0700
+              # scratch dir that never leaves the pod.
+              export WORK
+              WORK=$(mktemp -d)
+              trap 'rm -rf "$WORK"' EXIT
+              ssh-keygen -q -t ed25519 -N '' -C "hybridsovereign-ocp-installer" -f "$WORK/id_ed25519"
+
+              python3 - <<'PY'
+              import json, os, subprocess, urllib.error, urllib.request
+
+              addr = os.environ["VAULT_ADDR"]
+              tok = os.environ["VAULT_TOKEN"]
+              work = os.environ["WORK"]
+
+              def vault(method, path, payload=None):
+                  data = None if payload is None else json.dumps(payload).encode()
+                  req = urllib.request.Request(
+                      f"{addr}/v1/{path}",
+                      data=data,
+                      headers={"X-Vault-Token": tok, "Content-Type": "application/json"},
+                      method=method,
+                  )
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          return r.status, r.read()
+                  except urllib.error.HTTPError as e:
+                      return e.code, e.read()
+
+              def read_kv(path):
+                  st, body = vault("GET", f"hybridsovereign/data/{path}")
+                  if st != 200:
+                      return {}
+                  try:
+                      return ((json.loads(body) or {}).get("data") or {}).get("data") or {}
+                  except ValueError:
+                      return {}
+
+              def put_kv(path, data):
+                  st, body = vault("POST", f"hybridsovereign/data/{path}", {"data": data})
+                  print(f"seeded {path} {st}")
+                  if st >= 400:
+                      raise SystemExit(f"vault put {path} failed: {body[:200]}")
+
+              # --- aws/ocp-pull-secret -----------------------------------------
+              # Key name 'pull_secret' is the property the operator's
+              # ExternalSecret asks for; do not rename it.
+              if read_kv("aws/ocp-pull-secret").get("pull_secret"):
+                  print("aws/ocp-pull-secret already present; left untouched")
+              else:
+                  b64 = subprocess.check_output(
+                      ["oc", "-n", "openshift-config", "get", "secret", "pull-secret",
+                       "-o", "jsonpath={.data.\\.dockerconfigjson}"],
+                      text=True,
+                  ).strip()
+                  raw = subprocess.check_output(["base64", "-d"], input=b64, text=True)
+                  auths = (json.loads(raw) or {}).get("auths") or {}
+                  if "registry.redhat.io" not in auths:
+                      raise SystemExit(
+                          "hub pull-secret has no registry.redhat.io entry "
+                          f"(registries: {sorted(auths)}); an AWS install would fail "
+                          "pulling the release payload"
+                      )
+                  put_kv("aws/ocp-pull-secret",
+                         {"pull_secret": json.dumps({"auths": auths}, separators=(",", ":"))})
+
+              # --- aws/ocp-ssh-key ---------------------------------------------
+              existing = read_kv("aws/ocp-ssh-key")
+              if existing.get("ssh_public_key") and existing.get("ssh_private_key"):
+                  print("aws/ocp-ssh-key already present; left untouched")
+              else:
+                  with open(os.path.join(work, "id_ed25519")) as fh:
+                      priv = fh.read()
+                  with open(os.path.join(work, "id_ed25519.pub")) as fh:
+                      pub = fh.read().strip()
+                  put_kv("aws/ocp-ssh-key",
+                         {"ssh_public_key": pub, "ssh_private_key": priv})
+
+              print("AWS clusterbuild vault seed complete")
+              PY
