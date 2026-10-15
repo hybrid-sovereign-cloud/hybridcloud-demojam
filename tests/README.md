@@ -262,6 +262,16 @@ rather than failing. A skip here is expected, not a regression. They also skip
 when `OSO_CLOUDS` is unset. Once the site comes up, the same suites run
 unchanged.
 
+**Two RHDP sandboxes at the same site cannot reach each other's public VIPs.**
+When the hub and the OpenStack cluster are both RHDP sandboxes on different
+host clusters of the same site, TLS from one to the other's `*.apps` routes
+times out in both directions (the return path inside the RHDP load balancers
+is broken; the internet reaches both fine). `CloudInfrastructure/oso1` then
+reports `CredentialsInvalid` with a Keystone timeout and the WireGuard
+transport never comes up. [`rhdp-relay/`](./rhdp-relay/README.md) builds a
+small SNI-routing TLS relay on an outside OpenStack cloud and the matching
+DNS forwarders on both clusters. It is an environment fix, not a suite.
+
 **The `IaaC` resource is only ever tested in place.** `test-ditto-iaac.yaml`
 never creates and never deletes an `IaaC`; it asserts against whatever exists.
 Running it with `--tags create` or `--tags destroy` is a no-op. This is
@@ -392,6 +402,7 @@ tests/
 │   ├── verify_vault/  verify_hybrid_network/
 │   └── assert_report/
 ├── reports/                            # run artifacts; never contains a credential
+├── rhdp-relay/                         # TLS relay + DNS forwarders for two RHDP sandboxes (environment fix)
 ├── run-tests.sh                        # the driver — start here
 ├── site.yaml                           # all eight suites, in dependency order
 └── test-<pokemon>-*.yaml               # the eight suites
