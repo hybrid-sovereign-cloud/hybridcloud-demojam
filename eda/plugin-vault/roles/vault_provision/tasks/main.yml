@@ -17,8 +17,15 @@
         cr_name: "{{ vault_cr_name }}"
         cr_namespace: "{{ vault_cr_namespace }}"
         cr_status_body:
+          # Deliberately does NOT touch .status.ready. This patch only
+          # announces that a reconcile is in flight; the terminal success or
+          # rescue patch owns the readiness flag. Clearing it here raced with
+          # the job that sets it true, so .status.ready oscillated while the
+          # Ready condition stayed stable — and every provisioner that gates
+          # on a dependency's .status.ready (hybridnetwork on its fabric,
+          # cloudgateway, networkplacement, assignment, aaporg) failed
+          # intermittently depending on when it happened to sample.
           status: reconciling
-          ready: false
           message: "AAP job started"
       when: lookup('env', 'TOWER_JOB_ID') | length > 0
 

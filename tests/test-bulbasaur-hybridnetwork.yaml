@@ -82,6 +82,18 @@
             cr_wait_name: "{{ e }}"
             cr_wait_namespace: "{{ hs_platform_ns }}"
 
+        # The hub fabric and hub CloudInfrastructure each carry an entityRefs
+        # allow-list. A tenant that is not on it is refused by the operator
+        # with "Require the entity to be allowed on this infrastructure", so
+        # the entitlement has to exist before any CloudVirt or HybridNetwork
+        # is created. The destroy block withdraws it again.
+        - name: Entitle the tenant on the shared fabric and infrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+
         - name: Create the CloudVirt environment on the hub
           ansible.builtin.include_role:
             name: cr_apply
@@ -240,6 +252,15 @@
               - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
               - { kind: CloudVirt, name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
               - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        # Leave the shared allow-lists exactly as we found them, otherwise
+        # every test run leaves a stale entry behind on the platform objects.
+        - name: Withdraw the tenant's entitlement
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
 
         - name: Assert the VNI is no longer claimed by anything
           kubernetes.core.k8s_info:

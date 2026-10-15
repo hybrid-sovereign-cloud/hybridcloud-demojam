@@ -1,0 +1,1797 @@
+---
+# =============================================================================
+# test-alakazam-rbac.yaml — end-to-end RBAC verification for one tenant
+#
+#   --tags create   Entity declaring ALL namespaceRbac role keys -> Rbac CRs ->
+#                   Team, Project, Persona, CloudVirt, Vault, VaultKV, AAPOrg,
+#                   QuayOrg, Assignment, so every toolRbac map is exercised.
+#                   Entitles the tenant on the shared fabric/infrastructure
+#                   first, and forces the Entity re-bind workaround (see the
+#                   big comment at the bottom of the create block).
+#   --tags test     four layers: (1) CR -> Role -> RoleBinding -> Keycloak
+#                   group mapping, (2) effective permissions via
+#                   SubjectAccessReview including cross-tenant denial,
+#                   (3) real Keycloak users and ServiceAccounts, (4) the
+#                   dashboards. Writes a report to hs_report_dir.
+#   --tags destroy  Keycloak users and ServiceAccounts, then every CR in
+#                   reverse dependency order, then the entitlement, then
+#                   proves the users and the tenant namespace are gone.
+#
+# Self-contained: every CR below is defined inline. Nothing here reads from
+# samples/, and no credential, token, domain or hostname is hardcoded.
+# =============================================================================
+- name: "Alakazam — RBAC verification"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    # This suite owns its own Entity, like every other suite. The name is kept
+    # local rather than added to poke.* in group_vars because nothing outside
+    # this file refers to it.
+    e: alakazam
+    ns: entity-alakazam
+
+    # The five Rbac CRs every role key below is mapped onto. One group per
+    # privilege level, so the allow/deny matrix in LAYER 2 has a clean subject
+    # for each rung of the ladder.
+    rbac_groups:
+      - alakazam-admins
+      - alakazam-operators
+      - alakazam-developers
+      - alakazam-viewers
+      - alakazam-auditors
+
+    # -- The namespaceRbac contract -----------------------------------------
+    #
+    # One row per declared role key. `role` is the name the Entity operator
+    # gives the Role *and* the RoleBinding it creates in the tenant namespace.
+    #
+    # The operator's naming is NOT a plain camelCase->kebab-case conversion:
+    # it lowercases everything and inserts a single hyphen before the final
+    # capitalised word. So cloudOSOAdmin becomes "cloudoso-admin", not
+    # "cloud-oso-admin", and platformOpenshiftView becomes
+    # "platformopenshift-view". Because that rule is undocumented and easy to
+    # change underneath us, the expected names are written out literally here
+    # instead of being derived — if the operator's naming shifts, this suite
+    # must fail loudly rather than quietly follow it.
+    role_map:
+      - { key: entityAdmin,            role: entity-admin,             rbacs: [alakazam-admins] }
+      - { key: auditor,                role: auditor,                  rbacs: [alakazam-auditors] }
+      - { key: cloudOSOAdmin,          role: cloudoso-admin,           rbacs: [alakazam-admins] }
+      - { key: cloudOSOView,           role: cloudoso-view,            rbacs: [alakazam-viewers] }
+      - { key: cloudAWSAdmin,          role: cloudaws-admin,           rbacs: [alakazam-admins] }
+      - { key: cloudAWSView,           role: cloudaws-view,            rbacs: [alakazam-viewers] }
+      - { key: platformOpenshiftAdmin, role: platformopenshift-admin,  rbacs: [alakazam-admins, alakazam-operators] }
+      - { key: platformOpenshiftView,  role: platformopenshift-view,   rbacs: [alakazam-viewers] }
+      - { key: teamAdmin,              role: team-admin,               rbacs: [alakazam-admins] }
+      - { key: teamView,               role: team-view,                rbacs: [alakazam-viewers] }
+      - { key: projectAdmin,           role: project-admin,            rbacs: [alakazam-admins, alakazam-developers] }
+      - { key: projectView,            role: project-view,             rbacs: [alakazam-viewers] }
+      - { key: assignmentAdmin,        role: assignment-admin,         rbacs: [alakazam-operators] }
+      - { key: identityAdmin,          role: identity-admin,           rbacs: [alakazam-admins] }
+
+    # The Entity spec is generated from role_map so there is exactly one place
+    # to change when a role key is added.
+    ns_rbac: >-
+      {{ dict(role_map | map(attribute='key')
+              | zip(role_map | map(attribute='rbacs'))) }}
+
+    # -- toolRbac-bearing CRs ------------------------------------------------
+    team_name: alakazam-platform-team
+    project_name: alakazam-api
+    assignment_name: alakazam-api-assignment
+    cloudvirt_name: alakazam-virt
+    vault_name: alakazam-vault
+    vaultkv_name: alakazam-app-secrets
+    aap_org: alakazam-automation
+    quay_org: alakazam-registry
+
+    # Every toolRbac field in the platform, with the Rbac CR each one points
+    # at. LAYER 1 walks this list and proves each referenced Rbac CR exists,
+    # is Ready, and has published a Keycloak group.
+    #
+    # CloudOSO is deliberately absent: its CRD defines no toolRbac, so a
+    # toolRbac block set on a CloudOSO is silently pruned by the API server
+    # and asserting on it would only ever produce a false failure.
+    tool_rbac_map:
+      - { kind: CloudVirt,         name: "{{ cloudvirt_name }}", path: "spec.toolRbac", field: environmentAdminRbac,     rbacs: [alakazam-admins] }
+      - { kind: CloudVirt,         name: "{{ cloudvirt_name }}", path: "spec.toolRbac", field: environmentPoweruserRbac, rbacs: [alakazam-operators] }
+      - { kind: CloudVirt,         name: "{{ cloudvirt_name }}", path: "spec.toolRbac", field: environmentViewerRbac,    rbacs: [alakazam-viewers] }
+      - { kind: Assignment,        name: "{{ assignment_name }}", path: "spec.toolRbac", field: assignmentAdmin,         rbacs: [alakazam-admins] }
+      - { kind: Assignment,        name: "{{ assignment_name }}", path: "spec.toolRbac", field: assignmentDeveloper,     rbacs: [alakazam-developers] }
+      - { kind: Assignment,        name: "{{ assignment_name }}", path: "spec.toolRbac", field: assignmentViewer,        rbacs: [alakazam-viewers] }
+      - { kind: Assignment,        name: "{{ assignment_name }}", path: "spec.toolRbac", field: assignmentOps,           rbacs: [alakazam-operators] }
+      - { kind: Team,              name: "{{ team_name }}",      path: "spec",          field: teamAdmin,                rbacs: [alakazam-admins] }
+      - { kind: Team,              name: "{{ team_name }}",      path: "spec",          field: teamMemberRbac,           rbacs: [alakazam-developers] }
+      - { kind: Team,              name: "{{ team_name }}",      path: "spec",          field: teamViewerRbac,           rbacs: [alakazam-viewers] }
+      - { kind: Project,           name: "{{ project_name }}",   path: "spec",          field: projectAdmin,             rbacs: [alakazam-admins] }
+      - { kind: Project,           name: "{{ project_name }}",   path: "spec",          field: projectDeveloperRbac,     rbacs: [alakazam-developers] }
+      - { kind: Project,           name: "{{ project_name }}",   path: "spec",          field: projectViewerRbac,        rbacs: [alakazam-viewers] }
+      - { kind: AAPOrg,            name: "{{ aap_org }}",        path: "spec",          field: aapAdminRbac,             rbacs: [alakazam-admins] }
+      - { kind: AAPOrg,            name: "{{ aap_org }}",        path: "spec",          field: aapJobExecutorRbac,       rbacs: [alakazam-operators] }
+      - { kind: QuayOrg,           name: "{{ quay_org }}",       path: "spec",          field: quayAdminRbac,            rbacs: [alakazam-admins] }
+      - { kind: QuayOrg,           name: "{{ quay_org }}",       path: "spec",          field: quayMemberRbac,           rbacs: [alakazam-developers] }
+      - { kind: VaultKV,           name: "{{ vaultkv_name }}",   path: "spec",          field: vaultAdminRbac,           rbacs: [alakazam-admins] }
+      - { kind: VaultKV,           name: "{{ vaultkv_name }}",   path: "spec",          field: vaultReaderRbac,          rbacs: [alakazam-developers] }
+
+    # One Persona per role key, to prove the Persona CRD's `type` enum really
+    # does cover the whole namespaceRbac vocabulary.
+    persona_rbac: alakazam-admins
+
+    # -- LAYER 2: the allow/deny matrix -------------------------------------
+    #
+    # Each row is one SubjectAccessReview against the tenant namespace. The
+    # subject is resolved at run time from the RoleBinding named by `role`, so
+    # the probe uses the exact group string the cluster was actually given —
+    # leading slash included if the operator put one there.
+    #
+    # `expect: false` rows are not filler. A viewer that can delete is a worse
+    # outcome than a viewer that cannot read, so the negatives are asserted
+    # exactly as hard as the positives.
+    sar_matrix:
+      # entity-admin — full read/write over the tenant's own objects ...
+      - { role: entity-admin,            verb: get,    resource: projects,            expect: true }
+      - { role: entity-admin,            verb: list,   resource: teams,               expect: true }
+      - { role: entity-admin,            verb: create, resource: projects,            expect: true }
+      - { role: entity-admin,            verb: delete, resource: vaults,              expect: true }
+      - { role: entity-admin,            verb: create, resource: rbacs,               expect: true }
+      - { role: entity-admin,            verb: get,    resource: secrets, api: "",    expect: true }
+      # ... but an entity admin is NOT a platform admin: the Role grants
+      # nothing over Entity itself, so a tenant cannot mint or edit tenants.
+      - { role: entity-admin,            verb: create, resource: entities,            expect: false }
+      - { role: entity-admin,            verb: delete, resource: entities,            expect: false }
+      - { role: entity-admin,            verb: create, resource: cloudinfrastructures, expect: false }
+
+      # auditor — read everything, write nothing.
+      - { role: auditor,                 verb: get,    resource: projects,            expect: true }
+      - { role: auditor,                 verb: list,   resource: vaults,              expect: true }
+      - { role: auditor,                 verb: watch,  resource: teams,               expect: true }
+      - { role: auditor,                 verb: create, resource: projects,            expect: false }
+      - { role: auditor,                 verb: update, resource: projects,            expect: false }
+      - { role: auditor,                 verb: patch,  resource: teams,               expect: false }
+      - { role: auditor,                 verb: delete, resource: rbacs,               expect: false }
+      - { role: auditor,                 verb: get,    resource: secrets, api: "",    expect: false }
+
+      # project-admin — owns projects, reads its neighbours, touches nothing else.
+      - { role: project-admin,           verb: create, resource: projects,            expect: true }
+      - { role: project-admin,           verb: delete, resource: projects,            expect: true }
+      - { role: project-admin,           verb: get,    resource: assignments,         expect: true }
+      - { role: project-admin,           verb: create, resource: teams,               expect: false }
+      - { role: project-admin,           verb: delete, resource: rbacs,               expect: false }
+      - { role: project-admin,           verb: create, resource: entities,            expect: false }
+      - { role: project-admin,           verb: delete, resource: vaults,              expect: false }
+
+      # project-view — the canonical read-only rung.
+      - { role: project-view,            verb: get,    resource: projects,            expect: true }
+      - { role: project-view,            verb: list,   resource: projects,            expect: true }
+      - { role: project-view,            verb: create, resource: projects,            expect: false }
+      - { role: project-view,            verb: update, resource: projects,            expect: false }
+      - { role: project-view,            verb: delete, resource: projects,            expect: false }
+      - { role: project-view,            verb: create, resource: rbacs,               expect: false }
+
+      # team-admin / team-view
+      - { role: team-admin,              verb: create, resource: teams,               expect: true }
+      - { role: team-admin,              verb: delete, resource: teams,               expect: true }
+      - { role: team-admin,              verb: create, resource: projects,            expect: false }
+      - { role: team-view,               verb: get,    resource: teams,               expect: true }
+      - { role: team-view,               verb: create, resource: teams,               expect: false }
+      - { role: team-view,               verb: delete, resource: teams,               expect: false }
+
+      # assignment-admin
+      - { role: assignment-admin,        verb: create, resource: assignments,         expect: true }
+      - { role: assignment-admin,        verb: delete, resource: assignments,         expect: true }
+      - { role: assignment-admin,        verb: get,    resource: projects,            expect: true }
+      - { role: assignment-admin,        verb: create, resource: projects,            expect: false }
+
+      # identity-admin — may manage the tenant's groups and nothing else.
+      - { role: identity-admin,          verb: create, resource: rbacs,               expect: true }
+      - { role: identity-admin,          verb: delete, resource: rbacs,               expect: true }
+      - { role: identity-admin,          verb: create, resource: projects,            expect: false }
+      - { role: identity-admin,          verb: create, resource: teams,               expect: false }
+
+      # cloud / platform rungs
+      - { role: cloudoso-admin,          verb: create, resource: cloudosos,           expect: true }
+      - { role: cloudoso-admin,          verb: delete, resource: cloudosos,           expect: true }
+      - { role: cloudoso-admin,          verb: create, resource: cloudawss,           expect: false }
+      - { role: cloudoso-view,           verb: get,    resource: cloudosos,           expect: true }
+      - { role: cloudoso-view,           verb: delete, resource: cloudosos,           expect: false }
+      - { role: cloudaws-admin,          verb: create, resource: cloudawss,           expect: true }
+      - { role: cloudaws-admin,          verb: create, resource: cloudosos,           expect: false }
+      - { role: cloudaws-view,           verb: list,   resource: cloudawss,           expect: true }
+      - { role: cloudaws-view,           verb: update, resource: cloudawss,           expect: false }
+      - { role: platformopenshift-admin, verb: create, resource: platformopenshifts,  expect: true }
+      - { role: platformopenshift-admin, verb: delete, resource: platformopenshifts,  expect: true }
+      - { role: platformopenshift-admin, verb: create, resource: cloudosos,           expect: false }
+      - { role: platformopenshift-view,  verb: get,    resource: platformopenshifts,  expect: true }
+      - { role: platformopenshift-view,  verb: patch,  resource: platformopenshifts,  expect: false }
+
+    # The cross-tenant isolation probe. acme-corp is a pre-existing tenant the
+    # suite never touches; its group must have no reach at all into alakazam's
+    # namespace. This is the single most important assertion in the file: if
+    # it ever fails, tenancy on this platform is not a boundary.
+    foreign_entity: acme-corp
+    foreign_rbac: acme-platform-admins
+    foreign_matrix:
+      - { verb: get,    resource: projects }
+      - { verb: list,   resource: projects }
+      - { verb: list,   resource: rbacs }
+      - { verb: create, resource: projects }
+      - { verb: delete, resource: projects }
+      - { verb: delete, resource: teams }
+      - { verb: get,    resource: secrets, api: "" }
+
+    # -- LAYER 3: real identities -------------------------------------------
+    #
+    # One Keycloak user and one ServiceAccount per privilege rung. The user
+    # proves the group plumbing; the ServiceAccount is bound straight to the
+    # Role and proves the Role's own rules, independently of Keycloak.
+    identity_levels:
+      - { level: admin,     rbac: alakazam-admins,     role: entity-admin }
+      - { level: operator,  rbac: alakazam-operators,  role: assignment-admin }
+      - { level: developer, rbac: alakazam-developers, role: project-admin }
+      - { level: viewer,    rbac: alakazam-viewers,    role: project-view }
+      - { level: auditor,   rbac: alakazam-auditors,   role: auditor }
+
+    # The same shape of allow/deny reasoning as LAYER 2, re-run against
+    # system:serviceaccount:<ns>:<name>. Same Roles, no Keycloak in the path.
+    sa_matrix:
+      - { level: admin,     verb: create, resource: projects,    expect: true }
+      - { level: admin,     verb: delete, resource: vaults,      expect: true }
+      - { level: admin,     verb: create, resource: entities,    expect: false }
+      - { level: operator,  verb: create, resource: assignments, expect: true }
+      - { level: operator,  verb: create, resource: projects,    expect: false }
+      - { level: developer, verb: create, resource: projects,    expect: true }
+      - { level: developer, verb: create, resource: teams,       expect: false }
+      - { level: viewer,    verb: get,    resource: projects,    expect: true }
+      - { level: viewer,    verb: create, resource: projects,    expect: false }
+      - { level: viewer,    verb: delete, resource: projects,    expect: false }
+      - { level: auditor,   verb: list,   resource: teams,       expect: true }
+      - { level: auditor,   verb: update, resource: teams,       expect: false }
+
+    # -- LAYER 4: the dashboards --------------------------------------------
+    # Hosts are resolved from the Route objects at run time. Nothing here may
+    # contain a lab domain.
+    ui_routes:
+      - { name: sovereign-cloud-dashboard, namespace: sovereign-ui }
+      - { name: tenancy-dashboard, namespace: sovereign-ui }
+    ui_probe_paths: [/healthz, /api/health, /api/v1, /api/v1/entities]
+
+    hs_api_group: hybridsovereign.redhat
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the RBAC fixture stack
+      tags: [create]
+      block:
+        # HybridFabric and CloudInfrastructure both carry entityRefs
+        # allow-lists. CloudVirt is refused outright for a tenant that is not
+        # on them, so the entitlement has to land before the Entity does.
+        - name: Entitle the tenant on the shared fabric and infrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+
+        - name: Create the Entity declaring every namespaceRbac role key
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata:
+                  name: "{{ e }}"
+                  namespace: "{{ hs_platform_ns }}"
+                spec:
+                  description: "Alakazam — RBAC verification tenant (HybridSovereign test suite)"
+                  billingID: "ALAKAZAM-RBAC-001"
+                  namespaceRbac: "{{ ns_rbac }}"
+
+        - name: Wait for the Entity to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        # The operator creates entity-<name>; every tenant-scoped CR below
+        # lives there, starting with the Rbac CRs the role keys point at.
+        - name: Create each Rbac CR
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Rbac
+              metadata:
+                name: "{{ item }}"
+                namespace: "{{ ns }}"
+                labels: "{{ hs_test_labels }}"
+              spec:
+                config: "{{ hs_rbac_config }}"
+                description: "QA group {{ item }} for tenant {{ e }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for every Rbac CR to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Rbac
+            cr_wait_name: "{{ item }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Confirm every Rbac CR published a Keycloak group path
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: Rbac
+            namespace: "{{ ns }}"
+          register: _rbac_after_create
+          until: >-
+            _rbac_after_create.resources
+            | selectattr('status.group', 'defined')
+            | list | length == (rbac_groups | length)
+          retries: 30
+          delay: 10
+
+        # =====================================================================
+        # WORKAROUND — remove this when the Entity operator is fixed.
+        #
+        # The Entity binds its RoleBinding subjects exactly once, during the
+        # initial reconcile. At that moment the Rbac CRs it references have
+        # not yet resolved .status.group, so the operator has no group path to
+        # bind and writes `subjects: []`. It never revisits the decision when
+        # the Rbac CRs later become Ready.
+        #
+        # The result, verified on the long-lived acme-corp tenant and on a
+        # freshly created one, is a complete set of correctly-named Roles and
+        # RoleBindings in which every single binding has EMPTY subjects — so
+        # the tenant's RBAC looks right to `oc get` and grants nobody
+        # anything.
+        #
+        # Touching the Entity after the Rbac CRs are Ready re-runs the bind
+        # with the group paths now available, and the subjects populate. The
+        # bump below is that touch: it writes a new description so the spec
+        # genuinely changes (a no-op apply would not trigger a reconcile).
+        #
+        # This is a workaround for a platform bug, NOT the intended flow. The
+        # test block asserts on the bug explicitly — see "subjects are not
+        # empty" in LAYER 1. When the operator learns to re-bind on Rbac
+        # readiness, delete this task and the wait that follows it; the LAYER 1
+        # assertion will then pass on its own and prove the fix.
+        # =====================================================================
+        - name: "WORKAROUND — bump the Entity spec to force a subject re-bind"
+          kubernetes.core.k8s:
+            state: patched
+            api_version: "{{ hs_api_version }}"
+            kind: Entity
+            name: "{{ e }}"
+            namespace: "{{ hs_platform_ns }}"
+            definition:
+              spec:
+                description: >-
+                  Alakazam — RBAC verification tenant (HybridSovereign test
+                  suite); re-bind forced at
+                  {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+
+        - name: "WORKAROUND — wait for the re-bind to populate RoleBinding subjects"
+          kubernetes.core.k8s_info:
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rb_rebind
+          until: >-
+            (_rb_rebind.resources
+             | selectattr('metadata.name', 'in', role_map | map(attribute='role') | list)
+             | selectattr('subjects', 'defined')
+             | rejectattr('subjects', 'equalto', [])
+             | list | length) == (role_map | length)
+          retries: 30
+          delay: 10
+          failed_when: false
+
+        - name: Create the toolRbac-bearing tenant CRs
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Team
+                metadata: { name: "{{ team_name }}", namespace: "{{ ns }}" }
+                spec:
+                  rbacConfig: "{{ hs_rbac_config }}"
+                  features: { argo: true, istio: false }
+                  # All three lists are mandatory in practice: the Team
+                  # operator's viewer-subject step fails when teamAdmin is set
+                  # and teamViewerRbac is not, so a partial spec never reaches
+                  # Ready.
+                  teamAdmin: [alakazam-admins]
+                  teamMemberRbac: [alakazam-developers]
+                  teamViewerRbac: [alakazam-viewers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Project
+                metadata: { name: "{{ project_name }}", namespace: "{{ ns }}" }
+                spec:
+                  displayName: "Alakazam API"
+                  description: "QA project for the RBAC suite"
+                  rbacConfig: "{{ hs_rbac_config }}"
+                  projectAdmin: [alakazam-admins]
+                  projectDeveloperRbac: [alakazam-developers]
+                  projectViewerRbac: [alakazam-viewers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: AAPOrg
+                metadata: { name: "{{ aap_org }}", namespace: "{{ ns }}" }
+                spec:
+                  aapConfig: "{{ hs_aap_config }}"
+                  description: "QA automation organization for {{ e }}"
+                  aapAdminRbac: [alakazam-admins]
+                  aapJobExecutorRbac: [alakazam-operators]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: QuayOrg
+                metadata: { name: "{{ quay_org }}", namespace: "{{ ns }}" }
+                spec:
+                  quayConfig: "{{ hs_quay_config }}"
+                  quayAdminRbac: [alakazam-admins]
+                  quayMemberRbac: [alakazam-developers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Vault
+                metadata: { name: "{{ vault_name }}", namespace: "{{ ns }}" }
+                spec:
+                  ha: false
+                  rbacConfig: "{{ hs_rbac_config }}"
+
+              # CloudVirt needs the entitlement granted at the top of this
+              # block; cloudRef points at the hub CloudInfrastructure.
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudVirt
+                metadata: { name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
+                spec:
+                  baseDomain: "{{ e }}.cnv.local"
+                  cloudRef:
+                    kind: CloudInfrastructure
+                    name: "{{ hs_hub_cloudinfra }}"
+                  toolRbac:
+                    environmentAdminRbac: [alakazam-admins]
+                    environmentPoweruserRbac: [alakazam-operators]
+                    environmentViewerRbac: [alakazam-viewers]
+
+        # Personas are created with a plain loop rather than cr_apply, because
+        # there is one per role key and the definition differs only by name
+        # and type. The Persona CRD's `type` enum is the authoritative list of
+        # namespaceRbac keys, so creating one of each also proves role_map has
+        # not drifted from the CRD.
+        - name: Create one Persona per declared role key
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Persona
+              metadata:
+                name: "{{ e }}-{{ item.role }}"
+                namespace: "{{ ns }}"
+                labels: "{{ hs_test_labels }}"
+              spec:
+                rbac: "{{ persona_rbac }}"
+                type: "{{ item.key }}"
+          loop: "{{ role_map }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: Wait for the toolRbac-bearing CRs to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: "{{ item.kind }}"
+            cr_wait_name: "{{ item.name }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop:
+            - { kind: Team, name: "{{ team_name }}" }
+            - { kind: Project, name: "{{ project_name }}" }
+            - { kind: AAPOrg, name: "{{ aap_org }}" }
+            - { kind: QuayOrg, name: "{{ quay_org }}" }
+            - { kind: Vault, name: "{{ vault_name }}" }
+            - { kind: CloudVirt, name: "{{ cloudvirt_name }}" }
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+
+        - name: Wait for every Persona to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Persona
+            cr_wait_name: "{{ e }}-{{ item.role }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ role_map }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        # VaultKV mounts onto the Vault and Assignment references the Team and
+        # Project, so both come after their dependencies are Ready.
+        - name: Create the VaultKV mount and the Assignment
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: VaultKV
+                metadata: { name: "{{ vaultkv_name }}", namespace: "{{ ns }}" }
+                spec:
+                  vault: "{{ vault_name }}"
+                  vaultAdminRbac: [alakazam-admins]
+                  vaultReaderRbac: [alakazam-developers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Assignment
+                metadata: { name: "{{ assignment_name }}", namespace: "{{ ns }}" }
+                spec:
+                  team: "{{ team_name }}"
+                  projects: ["{{ project_name }}"]
+                  toolRbac:
+                    assignmentAdmin: [alakazam-admins]
+                    assignmentDeveloper: [alakazam-developers]
+                    assignmentViewer: [alakazam-viewers]
+                    assignmentOps: [alakazam-operators]
+
+        - name: Wait for the VaultKV mount and the Assignment to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: "{{ item.kind }}"
+            cr_wait_name: "{{ item.name }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop:
+            - { kind: VaultKV, name: "{{ vaultkv_name }}" }
+            - { kind: Assignment, name: "{{ assignment_name }}" }
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the tenant's RBAC
+      tags: [test]
+      block:
+
+        # -------------------------------------------------------------------
+        # Shared reads: everything the four layers assert on, fetched once.
+        # -------------------------------------------------------------------
+        - name: Read every Rbac CR in the tenant namespace
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: Rbac
+            namespace: "{{ ns }}"
+          register: _rbacs
+
+        - name: Read every Role in the tenant namespace
+          kubernetes.core.k8s_info:
+            api_version: rbac.authorization.k8s.io/v1
+            kind: Role
+            namespace: "{{ ns }}"
+          register: _roles
+
+        - name: Read every RoleBinding in the tenant namespace
+          kubernetes.core.k8s_info:
+            # api_version is explicit: OpenShift serves RoleBinding under both
+            # rbac.authorization.k8s.io/v1 and authorization.openshift.io/v1,
+            # and letting the client resolve the ambiguous kind sends it into
+            # "maximum recursion depth exceeded".
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rbs
+
+        - name: Index the Keycloak group path published by each Rbac CR
+          ansible.builtin.set_fact:
+            group_of: >-
+              {{ dict(_rbacs.resources | map(attribute='metadata.name')
+                      | zip(_rbacs.resources
+                            | map(attribute='status.group', default=''))) }}
+            ns_role_names: "{{ _roles.resources | map(attribute='metadata.name') | list }}"
+            rb_by_name: >-
+              {{ dict(_rbs.resources | map(attribute='metadata.name')
+                      | zip(_rbs.resources)) }}
+
+        # ===================================================================
+        # LAYER 1 — mapping correctness: CR -> Role -> RoleBinding -> Group
+        # ===================================================================
+        - name: "LAYER 1 — resolve expected and actual subjects for each role key"
+          ansible.builtin.set_fact:
+            layer1: >-
+              {{ layer1 | default([]) + [{
+                   'key': item.key,
+                   'role': item.role,
+                   'rbacs': item.rbacs,
+                   'role_exists': item.role in ns_role_names,
+                   'rb_exists': item.role in rb_by_name,
+                   'roleref_ok': (rb_by_name[item.role].roleRef.kind | default('')) == 'Role'
+                                 and (rb_by_name[item.role].roleRef.name | default('')) == item.role
+                                 if item.role in rb_by_name else false,
+                   'expected': item.rbacs | map('extract', group_of) | list | sort,
+                   'actual': (rb_by_name[item.role].subjects | default([]))
+                             | map(attribute='name') | list | sort
+                             if item.role in rb_by_name else [],
+                   'actual_canonical': ((rb_by_name[item.role].subjects | default([]))
+                             | map(attribute='name') | map('regex_replace', '^/', '')
+                             | list | sort) if item.role in rb_by_name else [],
+                   'slashed': ((rb_by_name[item.role].subjects | default([]))
+                             | map(attribute='name') | select('match', '^/')
+                             | list | length) if item.role in rb_by_name else 0
+                 }] }}
+          loop: "{{ role_map }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: "LAYER 1 — the mapping table"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-24s %-26s %-7s %-7s %-9s %s'
+                 | format(item.key, item.role,
+                          'ROLE ok' if item.role_exists else 'ROLE **',
+                          'RB ok' if item.rb_exists else 'RB **',
+                          'REF ok' if item.roleref_ok else 'REF **',
+                          (item.actual | join(', ')) if item.actual | length > 0
+                          else '<EMPTY SUBJECTS>') }}
+          loop: "{{ layer1 }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: "LAYER 1 — every declared role key produced a Role"
+          ansible.builtin.assert:
+            that: item.role_exists
+            fail_msg: >-
+              namespaceRbac key '{{ item.key }}' did not produce
+              Role/{{ item.role }} in {{ ns }}. Roles present:
+              {{ ns_role_names }}
+            success_msg: "Role/{{ item.role }} exists for key {{ item.key }}."
+            quiet: true
+          loop: "{{ layer1 }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: "LAYER 1 — every declared role key produced a RoleBinding bound to its Role"
+          ansible.builtin.assert:
+            that:
+              - item.rb_exists
+              - item.roleref_ok
+            fail_msg: >-
+              namespaceRbac key '{{ item.key }}' has no RoleBinding named
+              '{{ item.role }}' pointing at Role/{{ item.role }}. A Role that
+              nothing binds grants nobody anything.
+            success_msg: "RoleBinding/{{ item.role }} -> Role/{{ item.role }}."
+            quiet: true
+          loop: "{{ layer1 }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        # The known bug, asserted head-on. The create block works around it by
+        # bumping the Entity spec; if that workaround is ever removed before
+        # the operator is fixed, this is what fails.
+        - name: "LAYER 1 — RoleBinding subjects are not empty (PLATFORM BUG CHECK)"
+          ansible.builtin.assert:
+            that: item.actual | length > 0
+            fail_msg: >-
+              PLATFORM BUG — RoleBinding/{{ item.role }} in {{ ns }} has EMPTY
+              subjects. The Entity operator binds subjects exactly once during
+              its initial reconcile, before the Rbac CRs it references have
+              resolved .status.group, and never re-binds when they become
+              Ready. The tenant's RBAC therefore looks correct to `oc get` and
+              grants nobody anything. Workaround: bump the Entity spec (e.g.
+              .spec.description) after all Rbac CRs are Ready. The create block
+              of this suite does exactly that, so seeing this failure means
+              either the workaround was removed or the re-bind did not take.
+            success_msg: >-
+              RoleBinding/{{ item.role }} has {{ item.actual | length }}
+              subject(s).
+            quiet: true
+          loop: "{{ layer1 }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: "LAYER 1 — subjects exactly match the Rbac CRs' Keycloak group paths"
+          ansible.builtin.assert:
+            that: item.actual_canonical == item.expected
+            fail_msg: >-
+              RoleBinding/{{ item.role }} is bound to the wrong groups.
+              namespaceRbac.{{ item.key }} names {{ item.rbacs }}, whose
+              published .status.group values are {{ item.expected }}, but the
+              binding's subjects (leading slash ignored) are
+              {{ item.actual_canonical }}.
+            success_msg: >-
+              RoleBinding/{{ item.role }} binds exactly {{ item.expected }}.
+            quiet: true
+          loop: "{{ layer1 }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        # -- the leading-slash inconsistency --------------------------------
+        - name: "LAYER 1 — collect Team-created RoleBindings for comparison"
+          ansible.builtin.set_fact:
+            team_rb_subjects: >-
+              {{ _rbs.resources
+                 | rejectattr('metadata.name', 'in', role_map | map(attribute='role') | list)
+                 | selectattr('metadata.name', 'match', '^' ~ team_name)
+                 | map(attribute='subjects') | select('defined') | list | flatten
+                 | selectattr('kind', 'equalto', 'Group')
+                 | map(attribute='name') | list }}
+            entity_rb_subjects: >-
+              {{ layer1 | map(attribute='actual') | list | flatten }}
+
+        - name: "LAYER 1 — classify the subject-string form each operator writes"
+          ansible.builtin.set_fact:
+            entity_slashed: "{{ entity_rb_subjects | select('match', '^/') | list }}"
+            entity_plain: "{{ entity_rb_subjects | reject('match', '^/') | list }}"
+            team_slashed: "{{ team_rb_subjects | select('match', '^/') | list }}"
+            team_plain: "{{ team_rb_subjects | reject('match', '^/') | list }}"
+
+        - name: "LAYER 1 — report the leading-slash inconsistency"
+          ansible.builtin.debug:
+            msg:
+              - "Rbac CR .status.group (canonical form) : {{ group_of.values() | list }}"
+              - "Entity-created binding subjects         : with-slash={{ entity_slashed | length }} without={{ entity_plain | length }}"
+              - "Team-created binding subjects           : with-slash={{ team_slashed | length }} without={{ team_plain | length }}"
+              - >-
+                {{ 'MISMATCH — Entity and Team write the group subject in
+                different forms. The OIDC group claim can only equal one of
+                them, so at most one of these two binding families can ever
+                match a real login.'
+                if (entity_slashed | length > 0) != (team_slashed | length > 0)
+                else 'Entity and Team agree on the subject-string form.' }}
+
+        - name: "LAYER 1 — the two operators must write the group subject the same way"
+          ansible.builtin.assert:
+            that: (entity_slashed | length > 0) == (team_slashed | length > 0)
+            fail_msg: >-
+              PLATFORM INCONSISTENCY — Entity-created RoleBindings write the
+              Keycloak group subject as
+              '{{ entity_rb_subjects | first | default("<none>") }}' while
+              Team-created RoleBindings write it as
+              '{{ team_rb_subjects | first | default("<none>") }}'. The Rbac
+              CRs themselves publish the canonical form without a leading
+              slash ({{ group_of.values() | list | first | default("<none>") }}).
+              An OIDC group claim is a single literal string, so only one of
+              these two forms can ever match it — whichever is wrong, those
+              RoleBindings grant nothing at login time. This is reported, not
+              normalised away: the suite will not paper over a mismatch that
+              silently disables half the platform's RBAC.
+            success_msg: >-
+              Entity and Team write the group subject in the same form.
+            quiet: true
+          # Reported as a failure, but the remaining layers still run so the
+          # report is complete.
+          ignore_errors: true
+          register: _slash_check
+
+        # -- toolRbac fields -------------------------------------------------
+        - name: "LAYER 1 — read each toolRbac-bearing CR"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item.kind }}"
+            name: "{{ item.name }}"
+            namespace: "{{ ns }}"
+          loop: "{{ tool_rbac_map | unique(attribute='name') }}"
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+          register: _tool_crs
+
+        - name: "LAYER 1 — index the toolRbac-bearing CRs"
+          ansible.builtin.set_fact:
+            tool_cr_by_name: >-
+              {{ dict(_tool_crs.results | map(attribute='item.name')
+                      | zip(_tool_crs.results
+                            | map(attribute='resources')
+                            | map('default', [{}], true) | map('first'))) }}
+
+        - name: "LAYER 1 — evaluate every toolRbac field"
+          ansible.builtin.set_fact:
+            layer1_tool: >-
+              {{ layer1_tool | default([]) + [{
+                   'kind': item.kind,
+                   'name': item.name,
+                   'field': item.field,
+                   'declared': item.rbacs,
+                   'on_cluster': (((tool_cr_by_name[item.name] | default({})).spec | default({})).toolRbac | default({}))[item.field] | default([])
+                                 if item.path == 'spec.toolRbac'
+                                 else ((tool_cr_by_name[item.name] | default({})).spec | default({}))[item.field] | default([]),
+                   'groups': item.rbacs | map('extract', group_of) | list,
+                   'ready': ((tool_cr_by_name[item.name] | default({})).status.conditions | default([])
+                             | selectattr('type', 'equalto', 'Ready')
+                             | selectattr('status', 'equalto', 'True')
+                             | list | length) > 0
+                 }] }}
+          loop: "{{ tool_rbac_map }}"
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}.{{ item.field }}"
+
+        - name: "LAYER 1 — the toolRbac table"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-18s %-24s %-26s %-6s %s'
+                 | format(item.kind, item.name, item.field,
+                          'Ready' if item.ready else 'NOTRDY',
+                          item.declared | join(',') ~ ' -> ' ~ (item.groups | join(','))) }}
+          loop: "{{ layer1_tool }}"
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}.{{ item.field }}"
+
+        - name: "LAYER 1 — every toolRbac field survived admission and names a real, Ready Rbac CR"
+          ansible.builtin.assert:
+            that:
+              - item.ready
+              - item.on_cluster | default([]) | sort == item.declared | sort
+              - item.groups | select('equalto', '') | list | length == 0
+            fail_msg: >-
+              {{ item.kind }}/{{ item.name }}.{{ item.field }} is wrong.
+              Declared {{ item.declared }}; the API server kept
+              {{ item.on_cluster | default([]) }} (an empty list here means the
+              CRD does not define this field and it was silently pruned);
+              resolved group paths {{ item.groups }}; CR Ready={{ item.ready }}.
+            success_msg: >-
+              {{ item.kind }}/{{ item.name }}.{{ item.field }} =
+              {{ item.groups }}
+            quiet: true
+          loop: "{{ layer1_tool }}"
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}.{{ item.field }}"
+
+        - name: "LAYER 1 — CloudOSO must not be given a toolRbac (the CRD prunes it)"
+          ansible.builtin.assert:
+            that: tool_rbac_map | selectattr('kind', 'equalto', 'CloudOSO') | list | length == 0
+            fail_msg: >-
+              tool_rbac_map contains a CloudOSO entry. CloudOSO's CRD defines
+              no spec.toolRbac, so the API server prunes it without complaint
+              and any assertion on it is guaranteed to be a false failure.
+            success_msg: "CloudOSO correctly excluded from the toolRbac checks."
+            quiet: true
+
+        # ===================================================================
+        # LAYER 2 — effective permissions, via the authorization API
+        #
+        # SubjectAccessReview asks the API server's own authorizer "could
+        # subject S do verb V on resource R in namespace N". It is the
+        # authoritative answer — it accounts for every Role, ClusterRole and
+        # binding at once — and it needs no user to exist. Each review is a
+        # virtual object: nothing is persisted by asking.
+        #
+        # The subject is taken from the RoleBinding as written, so if the
+        # operator put a leading slash there, the probe uses the slashed
+        # string. That is deliberate: LAYER 2 answers "does what is on the
+        # cluster work", and LAYER 3 answers "is what is on the cluster what a
+        # real login actually presents".
+        # ===================================================================
+        - name: "LAYER 2 — resolve the probe subject for each role"
+          ansible.builtin.set_fact:
+            subject_of: >-
+              {{ dict(layer1 | map(attribute='role')
+                      | zip(layer1 | map(attribute='actual')
+                            | map('default', [''], true) | map('first'))) }}
+
+        - name: "LAYER 2 — run the allow/deny matrix"
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: authorization.k8s.io/v1
+              kind: SubjectAccessReview
+              spec:
+                groups: ["{{ subject_of[item.role] }}"]
+                resourceAttributes:
+                  namespace: "{{ ns }}"
+                  group: "{{ item.api | default(hs_api_group, true) }}"
+                  resource: "{{ item.resource }}"
+                  verb: "{{ item.verb }}"
+          loop: "{{ sar_matrix }}"
+          loop_control:
+            label: "{{ item.role }}: {{ item.verb }} {{ item.resource }}"
+          register: _sar
+          when: subject_of[item.role] | default('') | length > 0
+          changed_when: false
+
+        - name: "LAYER 2 — normalise each outcome"
+          ansible.builtin.set_fact:
+            layer2_rows: >-
+              {{ layer2_rows | default([]) + [{
+                   'subject': subject_of[item.item.role],
+                   'role': item.item.role,
+                   'verb': item.item.verb,
+                   'resource': item.item.resource,
+                   'expect': item.item.expect,
+                   'allowed': item.result.status.allowed | default(false),
+                   'pass': (item.result.status.allowed | default(false)) == item.item.expect
+                 }] }}
+          loop: "{{ _sar.results | rejectattr('skipped', 'defined') | list }}"
+          loop_control:
+            label: "{{ item.item.role }}: {{ item.item.verb }} {{ item.item.resource }}"
+
+        - name: "LAYER 2 — the allow/deny matrix"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-26s %-7s %-22s expect=%-5s got=%-5s %s'
+                 | format(item.role, item.verb, item.resource,
+                          item.expect | string, item.allowed | string,
+                          'PASS' if item.pass else '*** FAIL ***') }}
+          loop: "{{ layer2_rows }}"
+          loop_control:
+            label: "{{ item.role }}: {{ item.verb }} {{ item.resource }}"
+
+        - name: "LAYER 2 — every permission matches the matrix (negatives included)"
+          ansible.builtin.assert:
+            that: item.pass
+            fail_msg: >-
+              {{ 'OVER-PERMISSIVE' if item.allowed else 'UNDER-PERMISSIVE' }} —
+              group '{{ item.subject }}' (role {{ item.role }})
+              {{ 'CAN' if item.allowed else 'CANNOT' }}
+              {{ item.verb }} {{ item.resource }} in {{ ns }}, but the matrix
+              expects {{ 'allow' if item.expect else 'DENY' }}.
+              {{ 'A role that grants more than its name promises is a privilege
+                  escalation, not a convenience.' if item.allowed else
+                 'The role does not grant what the platform documents it
+                  grants.' }}
+            success_msg: >-
+              {{ item.role }}: {{ item.verb }} {{ item.resource }} =
+              {{ item.allowed }} as expected.
+            quiet: true
+          loop: "{{ layer2_rows }}"
+          loop_control:
+            label: "{{ item.role }}: {{ item.verb }} {{ item.resource }}"
+
+        # -- cross-tenant isolation -----------------------------------------
+        - name: "LAYER 2 — resolve the foreign tenant's group path"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: Rbac
+            name: "{{ foreign_rbac }}"
+            namespace: "entity-{{ foreign_entity }}"
+          register: _foreign
+
+        - name: "LAYER 2 — build both spellings of the foreign group"
+          ansible.builtin.set_fact:
+            # Both the canonical form the Rbac CR publishes and the slashed
+            # form the Entity operator writes are probed. Isolation that holds
+            # for one spelling and not the other is not isolation.
+            foreign_subjects: >-
+              {{ [ (_foreign.resources | first).status.group,
+                   '/' ~ (_foreign.resources | first).status.group ]
+                 if _foreign.resources | length > 0
+                 else [foreign_entity ~ '/' ~ foreign_rbac,
+                       '/' ~ foreign_entity ~ '/' ~ foreign_rbac] }}
+
+        - name: "LAYER 2 — a different tenant's group must reach nothing here"
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: authorization.k8s.io/v1
+              kind: SubjectAccessReview
+              spec:
+                groups: ["{{ item.0 }}"]
+                resourceAttributes:
+                  namespace: "{{ ns }}"
+                  group: "{{ item.1.api | default(hs_api_group, true) }}"
+                  resource: "{{ item.1.resource }}"
+                  verb: "{{ item.1.verb }}"
+          loop: "{{ foreign_subjects | product(foreign_matrix) | list }}"
+          loop_control:
+            label: "{{ item.0 }}: {{ item.1.verb }} {{ item.1.resource }}"
+          register: _sar_foreign
+          changed_when: false
+
+        - name: "LAYER 2 — the cross-tenant isolation table"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-40s %-7s %-16s got=%-5s %s'
+                 | format(item.item.0, item.item.1.verb, item.item.1.resource,
+                          item.result.status.allowed | default(false) | string,
+                          'PASS (denied)' if not (item.result.status.allowed | default(false))
+                          else '*** TENANT ISOLATION BREACH ***') }}
+          loop: "{{ _sar_foreign.results }}"
+          loop_control:
+            label: "{{ item.item.0 }}: {{ item.item.1.verb }} {{ item.item.1.resource }}"
+
+        - name: "LAYER 2 — CROSS-TENANT ISOLATION (the suite's most important assertion)"
+          ansible.builtin.assert:
+            that: not (item.result.status.allowed | default(false))
+            fail_msg: >-
+              TENANT ISOLATION BREACH — group '{{ item.item.0 }}', which
+              belongs to tenant '{{ foreign_entity }}', CAN
+              {{ item.item.1.verb }} {{ item.item.1.resource }} inside
+              '{{ ns }}', the namespace of tenant '{{ e }}'. One tenant can
+              reach another tenant's resources. Nothing else in this suite
+              matters while this is true.
+            success_msg: >-
+              {{ foreign_entity }}'s group cannot {{ item.item.1.verb }}
+              {{ item.item.1.resource }} in {{ ns }}.
+            quiet: true
+          loop: "{{ _sar_foreign.results }}"
+          loop_control:
+            label: "{{ item.item.0 }}: {{ item.item.1.verb }} {{ item.item.1.resource }}"
+
+        # ===================================================================
+        # LAYER 3 — real identities
+        #
+        # Part A: a Keycloak user per rung, added to the matching tenant
+        # group, with a password grant used to read the group claim out of a
+        # real access token. That claim is the ground truth for the
+        # leading-slash question LAYER 1 raises.
+        #
+        # Part B: a ServiceAccount per rung, bound directly to the Role, and
+        # the LAYER 2 matrix re-run for it. Keycloak is not in that path at
+        # all, so it isolates "are the Role's rules right" from "is the group
+        # plumbing right".
+        # ===================================================================
+        - name: "LAYER 3 — obtain a Keycloak admin token"
+          ansible.builtin.include_role:
+            name: keycloak_admin_token
+
+        # Generated per run, never written to the report, never logged. The
+        # password lookup with /dev/null as its path generates without
+        # persisting anything to disk.
+        - name: "LAYER 3 — generate a throwaway password for the test users"
+          ansible.builtin.set_fact:
+            kc_test_password: >-
+              {{ lookup('ansible.builtin.password', '/dev/null',
+                        length=28,
+                        chars=['ascii_letters', 'digits']) }}Aa1!
+          no_log: true
+
+        - name: "LAYER 3 — create one Keycloak user per privilege level"
+          ansible.builtin.uri:
+            url: "{{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            body_format: json
+            body:
+              username: "{{ e }}-qa-{{ item.level }}"
+              enabled: true
+              emailVerified: true
+              firstName: "Alakazam QA"
+              lastName: "{{ item.level }}"
+              attributes:
+                hybridsovereign-test-suite: ["true"]
+              credentials:
+                - type: password
+                  value: "{{ kc_test_password }}"
+                  temporary: false
+            validate_certs: false
+            # 409 means a previous run left the user behind; the lookup below
+            # finds it either way and destroy removes it.
+            status_code: [201, 409]
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-qa-{{ item.level }}"
+          no_log: true
+
+        - name: "LAYER 3 — look each test user up again"
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users?username={{ (e ~ '-qa-' ~ item.level) | urlencode }}&exact=true
+            method: GET
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            return_content: true
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-qa-{{ item.level }}"
+          register: _kc_users
+
+        - name: "LAYER 3 — index the test users by level"
+          ansible.builtin.set_fact:
+            kc_user_id: >-
+              {{ dict(_kc_users.results | map(attribute='item.level')
+                      | zip(_kc_users.results | map(attribute='json')
+                            | map('default', [{}], true) | map('first')
+                            | map(attribute='id', default=''))) }}
+
+        - name: "LAYER 3 — every test user was created"
+          ansible.builtin.assert:
+            that: kc_user_id[item.level] | length > 0
+            fail_msg: >-
+              Keycloak user '{{ e }}-qa-{{ item.level }}' was not created in
+              realm '{{ rhbk.realm }}'.
+            success_msg: "Keycloak user {{ e }}-qa-{{ item.level }} exists."
+            quiet: true
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ item.level }}"
+
+        # The group id comes from the Rbac CR's own .status.groupId, so the
+        # suite joins the user to exactly the group the platform created
+        # rather than to one it looked up by name and hoped was the right one.
+        - name: "LAYER 3 — index each Rbac CR's Keycloak group id"
+          ansible.builtin.set_fact:
+            group_id_of: >-
+              {{ dict(_rbacs.resources | map(attribute='metadata.name')
+                      | zip(_rbacs.resources
+                            | map(attribute='status.groupId', default=''))) }}
+
+        - name: "LAYER 3 — every Rbac CR published a Keycloak group id"
+          ansible.builtin.assert:
+            that: group_id_of[item] | length > 0
+            fail_msg: >-
+              Rbac/{{ item }} has no .status.groupId, so the suite cannot join
+              a user to the group the platform actually created.
+            success_msg: "Rbac/{{ item }} published a group id."
+            quiet: true
+          loop: "{{ rbac_groups }}"
+
+        - name: "LAYER 3 — join each user to its tenant group"
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users/{{ kc_user_id[item.level] }}/groups/{{ group_id_of[item.rbac] }}
+            method: PUT
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            status_code: [204]
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ item.level }} -> {{ item.rbac }}"
+
+        - name: "LAYER 3 — read the memberships back"
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users/{{ kc_user_id[item.level] }}/groups
+            method: GET
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            return_content: true
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ item.level }}"
+          register: _kc_memberships
+
+        - name: "LAYER 3 — membership reads back as the expected group"
+          ansible.builtin.assert:
+            that: >-
+              item.json | map(attribute='name') | list
+              | select('equalto', item.item.rbac) | list | length > 0
+            fail_msg: >-
+              User '{{ e }}-qa-{{ item.item.level }}' is not a member of
+              '{{ item.item.rbac }}' after the join. Groups read back:
+              {{ item.json | map(attribute='path') | list }}
+            success_msg: >-
+              {{ e }}-qa-{{ item.item.level }} is a member of
+              {{ item.json | map(attribute='path') | list }}
+            quiet: true
+          loop: "{{ _kc_memberships.results }}"
+          loop_control:
+            label: "{{ item.item.level }}"
+
+        # -- the group claim, which settles the leading-slash question -------
+        - name: "LAYER 3 — find a realm client that permits a direct password grant"
+          ansible.builtin.uri:
+            url: "{{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/clients"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            return_content: true
+          register: _kc_clients
+
+        - name: "LAYER 3 — pick the client to authenticate the test user with"
+          ansible.builtin.set_fact:
+            # A public client with direct access grants enabled is the only
+            # kind that can be driven from a playbook without a client secret.
+            # If the realm has none, the token check is skipped and reported
+            # as unverified rather than faked.
+            kc_grant_client: >-
+              {{ (_kc_clients.json
+                  | selectattr('publicClient', 'defined')
+                  | selectattr('publicClient')
+                  | selectattr('directAccessGrantsEnabled', 'defined')
+                  | selectattr('directAccessGrantsEnabled')
+                  | map(attribute='clientId') | list | first) | default('', true) }}
+
+        - name: "LAYER 3 — obtain an access token for the admin-level test user"
+          ansible.builtin.uri:
+            url: "{{ kc_base_url }}/realms/{{ rhbk.realm }}/protocol/openid-connect/token"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              grant_type: password
+              client_id: "{{ kc_grant_client }}"
+              scope: "openid profile"
+              username: "{{ e }}-qa-admin"
+              password: "{{ kc_test_password }}"
+            validate_certs: false
+            status_code: [200, 400, 401]
+          register: _kc_user_token
+          when: kc_grant_client | length > 0
+          no_log: true
+
+        - name: "LAYER 3 — decode the access token's payload"
+          ansible.builtin.set_fact:
+            # JWTs are base64url with the padding stripped, so the segment is
+            # translated back to standard base64 and re-padded before decode.
+            token_claims: >-
+              {{ ((_kc_user_token.json.access_token.split('.')[1]
+                   | replace('-', '+') | replace('_', '/'))
+                  ~ ('=' * ((4 - (_kc_user_token.json.access_token.split('.')[1] | length) % 4) % 4)))
+                 | b64decode | from_json }}
+          when:
+            - kc_grant_client | length > 0
+            - _kc_user_token.status | default(0) == 200
+
+        - name: "LAYER 3 — extract whatever claim carries the group membership"
+          ansible.builtin.set_fact:
+            # Keycloak's group mapper is conventionally called "groups", but
+            # realms rename it, so every list-of-strings claim that contains
+            # the tenant name is considered.
+            token_groups: >-
+              {{ (token_claims | default({})
+                  | dict2items
+                  | selectattr('value', 'iterable')
+                  | rejectattr('value', 'string')
+                  | rejectattr('value', 'mapping')
+                  | map(attribute='value') | list | flatten
+                  | select('string')
+                  | select('search', '(^/?' ~ e ~ '/)')
+                  | list | unique) }}
+          when: token_claims is defined
+
+        - name: "LAYER 3 — report what the token actually claims"
+          ansible.builtin.debug:
+            msg: >-
+              {{ 'Access token for ' ~ e ~ '-qa-admin carries group claim(s): '
+                 ~ (token_groups | join(', ') | default('<none>', true))
+                 ~ '. Entity bindings use '
+                 ~ (entity_rb_subjects | first | default('<none>'))
+                 ~ ' and Team bindings use '
+                 ~ (team_rb_subjects | first | default('<none>'))
+                 ~ '.'
+                 if token_claims is defined
+                 else 'UNVERIFIED — no public Keycloak client in realm '
+                      ~ rhbk.realm ~ ' permits a direct password grant'
+                      ' (or the grant was refused), so the suite could not'
+                      ' read a real access token and the leading-slash'
+                      ' question is settled only by the RoleBinding contents,'
+                      ' not by an actual login.' }}
+
+        - name: "LAYER 3 — the group claim must match a RoleBinding subject verbatim"
+          ansible.builtin.assert:
+            that: >-
+              token_groups | select('in', entity_rb_subjects) | list | length > 0
+            fail_msg: >-
+              The access token issued to '{{ e }}-qa-admin' carries group
+              claim(s) {{ token_groups }}, and NONE of them is byte-for-byte
+              equal to any subject in the Entity-created RoleBindings
+              ({{ entity_rb_subjects | unique }}). RBAC matches group subjects
+              as literal strings, so these RoleBindings grant this user
+              nothing at login time regardless of how correct they look. This
+              is the leading-slash inconsistency biting: the Rbac CRs publish
+              '{{ group_of.values() | list | first | default("?") }}', the
+              token claims '{{ token_groups | first | default("?") }}', and the
+              Entity binds '{{ entity_rb_subjects | first | default("?") }}'.
+            success_msg: >-
+              Token group claim {{ token_groups }} matches the Entity
+              RoleBinding subjects exactly.
+            quiet: true
+          when: token_groups is defined and token_groups | length > 0
+          ignore_errors: true
+          register: _claim_check
+
+        # -- Part B: ServiceAccounts ----------------------------------------
+        - name: "LAYER 3 — create a ServiceAccount per privilege level"
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: "{{ e }}-sa-{{ item.level }}"
+                namespace: "{{ ns }}"
+                labels: "{{ hs_test_labels }}"
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-sa-{{ item.level }}"
+
+        - name: "LAYER 3 — bind each ServiceAccount to its Role"
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: RoleBinding
+              metadata:
+                name: "{{ e }}-sa-{{ item.level }}"
+                namespace: "{{ ns }}"
+                labels: "{{ hs_test_labels }}"
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: Role
+                name: "{{ item.role }}"
+              subjects:
+                - kind: ServiceAccount
+                  name: "{{ e }}-sa-{{ item.level }}"
+                  namespace: "{{ ns }}"
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-sa-{{ item.level }} -> {{ item.role }}"
+
+        - name: "LAYER 3 — re-run the matrix against the ServiceAccount users"
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: authorization.k8s.io/v1
+              kind: SubjectAccessReview
+              spec:
+                user: "system:serviceaccount:{{ ns }}:{{ e }}-sa-{{ item.level }}"
+                resourceAttributes:
+                  namespace: "{{ ns }}"
+                  group: "{{ item.api | default(hs_api_group, true) }}"
+                  resource: "{{ item.resource }}"
+                  verb: "{{ item.verb }}"
+          loop: "{{ sa_matrix }}"
+          loop_control:
+            label: "sa-{{ item.level }}: {{ item.verb }} {{ item.resource }}"
+          register: _sar_sa
+          changed_when: false
+
+        - name: "LAYER 3 — the ServiceAccount matrix"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-14s %-7s %-16s expect=%-5s got=%-5s %s'
+                 | format('sa-' ~ item.item.level, item.item.verb, item.item.resource,
+                          item.item.expect | string,
+                          item.result.status.allowed | default(false) | string,
+                          'PASS' if (item.result.status.allowed | default(false)) == item.item.expect
+                          else '*** FAIL ***') }}
+          loop: "{{ _sar_sa.results }}"
+          loop_control:
+            label: "sa-{{ item.item.level }}: {{ item.item.verb }} {{ item.item.resource }}"
+
+        - name: "LAYER 3 — the Roles' own rules are correct, independent of Keycloak"
+          ansible.builtin.assert:
+            that: (item.result.status.allowed | default(false)) == item.item.expect
+            fail_msg: >-
+              ServiceAccount '{{ e }}-sa-{{ item.item.level }}', bound directly
+              to its Role with no Keycloak in the path,
+              {{ 'CAN' if item.result.status.allowed | default(false) else 'CANNOT' }}
+              {{ item.item.verb }} {{ item.item.resource }} in {{ ns }} but the
+              matrix expects {{ 'allow' if item.item.expect else 'DENY' }}. The
+              fault is in the Role's rules themselves, not in the group
+              plumbing.
+            success_msg: >-
+              sa-{{ item.item.level }}: {{ item.item.verb }}
+              {{ item.item.resource }} = {{ item.item.expect }} as expected.
+            quiet: true
+          loop: "{{ _sar_sa.results }}"
+          loop_control:
+            label: "sa-{{ item.item.level }}: {{ item.item.verb }} {{ item.item.resource }}"
+
+        # ===================================================================
+        # LAYER 4 — the dashboards
+        #
+        # Hosts come from the Route objects, never from a literal.
+        # ===================================================================
+        - name: "LAYER 4 — read the dashboard Routes"
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            name: "{{ item.name }}"
+            namespace: "{{ item.namespace }}"
+          loop: "{{ ui_routes }}"
+          loop_control:
+            label: "{{ item.namespace }}/{{ item.name }}"
+          register: _ui_routes
+
+        - name: "LAYER 4 — both dashboards are exposed"
+          ansible.builtin.assert:
+            that: item.resources | length > 0
+            fail_msg: >-
+              Route {{ item.item.namespace }}/{{ item.item.name }} does not
+              exist, so the dashboard is not reachable at all.
+            success_msg: >-
+              Route {{ item.item.namespace }}/{{ item.item.name }} ->
+              {{ (item.resources | first).spec.host | default('?') }}
+            quiet: true
+          loop: "{{ _ui_routes.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: "LAYER 4 — resolve the dashboard hosts"
+          ansible.builtin.set_fact:
+            ui_hosts: >-
+              {{ dict(_ui_routes.results | map(attribute='item.name')
+                      | zip(_ui_routes.results | map(attribute='resources')
+                            | map('default', [{}], true) | map('first')
+                            | map(attribute='spec.host', default=''))) }}
+
+        # What actually guards these dashboards is an OpenShift oauth-proxy
+        # sidecar (-provider=openshift), not Keycloak. So the probes below
+        # establish the shape of the edge: which paths are public and which
+        # demand an OpenShift session.
+        - name: "LAYER 4 — probe each dashboard path unauthenticated"
+          ansible.builtin.uri:
+            url: "https://{{ item.0.value }}{{ item.1 }}"
+            method: GET
+            validate_certs: "{{ ocp_validate_certs }}"
+            follow_redirects: none
+            status_code: [200, 301, 302, 303, 307, 401, 403, 404]
+          loop: "{{ ui_hosts | dict2items | product(ui_probe_paths) | list }}"
+          loop_control:
+            label: "{{ item.0.key }}{{ item.1 }}"
+          register: _ui_probe
+          failed_when: false
+
+        - name: "LAYER 4 — the dashboard edge"
+          ansible.builtin.debug:
+            msg: >-
+              {{ '%-28s %-18s -> %s'
+                 | format(item.item.0.key, item.item.1,
+                          item.status | default('unreachable') | string) }}
+          loop: "{{ _ui_probe.results }}"
+          loop_control:
+            label: "{{ item.item.0.key }}{{ item.item.1 }}"
+
+        - name: "LAYER 4 — every dashboard answers on at least one path"
+          ansible.builtin.assert:
+            that: >-
+              _ui_probe.results
+              | selectattr('item.0.key', 'equalto', item.name)
+              | selectattr('status', 'defined')
+              | selectattr('status', 'gt', 0) | list | length > 0
+            fail_msg: >-
+              Dashboard '{{ item.name }}' at
+              '{{ ui_hosts[item.name] | default("?") }}' did not answer on any
+              probed path. The route exists but nothing is serving behind it.
+            success_msg: "Dashboard '{{ item.name }}' is reachable."
+            quiet: true
+          loop: "{{ ui_routes }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: "LAYER 4 — every non-public dashboard path refuses an unauthenticated caller"
+          ansible.builtin.assert:
+            that: item.status | default(0) != 200
+            fail_msg: >-
+              {{ item.item.0.key }}{{ item.item.1 }} returned 200 to a caller
+              with no credentials at all. A dashboard path that serves tenant
+              data anonymously defeats every role check beneath it.
+            success_msg: >-
+              {{ item.item.0.key }}{{ item.item.1 }} refused anonymous access
+              ({{ item.status | default('unreachable') }}).
+            quiet: true
+          # /healthz is intentionally public — the oauth-proxy is configured
+          # with -skip-auth-regex=^/healthz so the kubelet can probe it.
+          when: item.item.1 != '/healthz'
+          loop: "{{ _ui_probe.results }}"
+          loop_control:
+            label: "{{ item.item.0.key }}{{ item.item.1 }}"
+
+        - name: "LAYER 4 — record exactly what could NOT be verified"
+          ansible.builtin.set_fact:
+            ui_unverified:
+              - >-
+                Per-role UI behaviour. Both dashboards sit behind an OpenShift
+                oauth-proxy sidecar started with -provider=openshift and
+                -client-id=<the route's own OAuthClient>. It authenticates
+                against the CLUSTER's OAuth server, not against Keycloak realm
+                '{{ rhbk.realm }}'. The LAYER 3 users exist only in Keycloak
+                and have no OpenShift identity, so their tokens cannot be
+                exchanged for a dashboard session. There is no supported way
+                to drive the UI as a tenant role from this playbook.
+              - >-
+                Role-differentiated API responses. Every path other than the
+                proxy's -skip-auth-regex (^/healthz) answers 302 to the
+                OpenShift authorize endpoint before the application is
+                reached, including when a valid OpenShift bearer token is
+                presented, so no authorization-bearing application endpoint is
+                callable from here. The suite deliberately asserts nothing
+                about what an admin or a viewer would see in the UI rather
+                than inventing a check that would pass for the wrong reason.
+              - >-
+                What LAYER 4 does establish: both Routes exist and resolve,
+                each dashboard answers, /healthz is public by design, and
+                every other probed path rejects an unauthenticated caller.
+
+        - name: "LAYER 4 — state the gap plainly"
+          ansible.builtin.debug:
+            msg: "{{ ui_unverified }}"
+
+        # ===================================================================
+        # REPORT
+        # ===================================================================
+        - name: Ensure the report directory exists
+          ansible.builtin.file:
+            path: "{{ hs_report_dir }}"
+            state: directory
+            mode: "0755"
+
+        # No credential, token or password reaches this file — only resource
+        # names, group paths, verbs and outcomes.
+        - name: Write the RBAC report
+          ansible.builtin.copy:
+            dest: "{{ hs_report_dir }}/alakazam-rbac.txt"
+            mode: "0644"
+            content: |
+              =========================================================================
+              HybridSovereign RBAC verification — tenant {{ e }} (namespace {{ ns }})
+              =========================================================================
+
+              LAYER 1 — namespaceRbac: CR -> Role -> RoleBinding -> Keycloak group
+              -------------------------------------------------------------------------
+              {{ '%-24s %-26s %-6s %-6s %-6s %s' | format('KEY', 'ROLE', 'ROLE', 'BIND', 'REF', 'SUBJECTS') }}
+              {% for r in layer1 %}
+              {{ '%-24s %-26s %-6s %-6s %-6s %s' | format(r.key, r.role,
+                   'ok' if r.role_exists else 'FAIL',
+                   'ok' if r.rb_exists else 'FAIL',
+                   'ok' if r.roleref_ok else 'FAIL',
+                   (r.actual | join(', ')) if r.actual | length > 0 else '<EMPTY — PLATFORM BUG>') }}
+              {% endfor %}
+
+              Subject-string form
+              -------------------------------------------------------------------------
+              Rbac CR .status.group (canonical) : {{ group_of.values() | list | unique | join(', ') }}
+              Entity-created bindings           : {{ entity_rb_subjects | unique | join(', ') | default('<none>', true) }}
+              Team-created bindings             : {{ team_rb_subjects | unique | join(', ') | default('<none>', true) }}
+              Verdict                           : {{ 'MISMATCH — Entity writes a leading slash, Team does not. Only one form can equal the OIDC group claim.' if (entity_slashed | length > 0) != (team_slashed | length > 0) else 'consistent' }}
+              {% if token_groups is defined %}
+              Group claim in a real access token: {{ token_groups | join(', ') }}
+              Claim matches Entity bindings     : {{ 'YES' if (token_groups | select('in', entity_rb_subjects) | list | length > 0) else 'NO — those bindings grant nothing at login' }}
+              Claim matches Team bindings       : {{ 'YES' if (token_groups | select('in', team_rb_subjects) | list | length > 0) else 'NO — those bindings grant nothing at login' }}
+              {% else %}
+              Group claim in a real access token: NOT OBTAINED (see unverified list)
+              {% endif %}
+
+              LAYER 1 — toolRbac fields
+              -------------------------------------------------------------------------
+              {{ '%-14s %-24s %-26s %-6s %s' | format('KIND', 'NAME', 'FIELD', 'READY', 'DECLARED -> GROUP PATH') }}
+              {% for r in layer1_tool %}
+              {{ '%-14s %-24s %-26s %-6s %s' | format(r.kind, r.name, r.field,
+                   'ok' if r.ready else 'FAIL',
+                   (r.declared | join(',')) ~ ' -> ' ~ (r.groups | join(','))) }}
+              {% endfor %}
+              CloudOSO: intentionally untested — its CRD defines no spec.toolRbac
+              and the API server prunes the field without reporting an error.
+
+              LAYER 2 — effective permissions (SubjectAccessReview)
+              -------------------------------------------------------------------------
+              {{ '%-26s %-7s %-22s %-8s %-8s %s' | format('ROLE', 'VERB', 'RESOURCE', 'EXPECT', 'ACTUAL', 'RESULT') }}
+              {% for r in layer2_rows %}
+              {{ '%-26s %-7s %-22s %-8s %-8s %s' | format(r.role, r.verb, r.resource,
+                   'allow' if r.expect else 'DENY',
+                   'allow' if r.allowed else 'deny',
+                   'pass' if r.pass else 'FAIL') }}
+              {% endfor %}
+
+              LAYER 2 — cross-tenant isolation ({{ foreign_entity }} -> {{ ns }})
+              -------------------------------------------------------------------------
+              {% for r in _sar_foreign.results %}
+              {{ '%-42s %-7s %-16s %s' | format(r.item.0, r.item.1.verb, r.item.1.resource,
+                   'denied (pass)' if not (r.result.status.allowed | default(false)) else 'ALLOWED — ISOLATION BREACH') }}
+              {% endfor %}
+
+              LAYER 3 — real identities
+              -------------------------------------------------------------------------
+              Keycloak users created in realm {{ rhbk.realm }} (passwords generated at
+              run time, never recorded here):
+              {% for l in identity_levels %}
+                {{ '%-28s member of %s' | format(e ~ '-qa-' ~ l.level, l.rbac) }}
+              {% endfor %}
+
+              ServiceAccounts bound directly to each Role:
+              {{ '%-20s %-7s %-16s %-8s %-8s %s' | format('SUBJECT', 'VERB', 'RESOURCE', 'EXPECT', 'ACTUAL', 'RESULT') }}
+              {% for r in _sar_sa.results %}
+              {{ '%-20s %-7s %-16s %-8s %-8s %s' | format('sa-' ~ r.item.level, r.item.verb, r.item.resource,
+                   'allow' if r.item.expect else 'DENY',
+                   'allow' if (r.result.status.allowed | default(false)) else 'deny',
+                   'pass' if ((r.result.status.allowed | default(false)) == r.item.expect) else 'FAIL') }}
+              {% endfor %}
+
+              LAYER 4 — dashboards
+              -------------------------------------------------------------------------
+              {% for r in _ui_probe.results %}
+              {{ '%-28s %-18s %s' | format(r.item.0.key, r.item.1, r.status | default('unreachable')) }}
+              {% endfor %}
+
+              NOT VERIFIED
+              =========================================================================
+              {% for u in ui_unverified %}
+              * {{ u | regex_replace('\s+', ' ') | trim }}
+              {% endfor %}
+              {% if token_groups is not defined %}
+              * The group claim of a real access token. No public client in realm
+                {{ rhbk.realm }} permits a direct password grant, so the suite could
+                not log a test user in. The leading-slash question is answered only
+                from the RoleBinding contents, not from an actual login.
+              {% endif %}
+              * Keycloak-side authorization inside AAP, Quay and Vault. This suite
+                verifies the mapping from CR to group to Kubernetes permission; that
+                each tool honours its own group grants is covered by
+                test-pikachu-tenancy.yaml.
+              =========================================================================
+
+        - name: Report where the report went
+          ansible.builtin.debug:
+            msg: "RBAC report written to {{ hs_report_dir }}/alakazam-rbac.txt"
+
+        # Deferred failures are re-raised here, after the report exists, so a
+        # known-bad platform still produces a full report instead of stopping
+        # at the first bad row.
+        - name: Re-raise the deferred mapping failures
+          ansible.builtin.assert:
+            that:
+              - not (_slash_check.failed | default(false))
+              - not (_claim_check.failed | default(false))
+            fail_msg: >-
+              RBAC verification failed on the group-subject form. See
+              {{ hs_report_dir }}/alakazam-rbac.txt — section "Subject-string
+              form" — for the exact strings involved.
+            success_msg: "Group-subject form is consistent end to end."
+            quiet: true
+
+    # =========================================================================
+    # DESTROY — identities first, then CRs in reverse dependency order
+    # =========================================================================
+    - name: Tear the RBAC fixture stack down
+      tags: [destroy]
+      block:
+        - name: Obtain a Keycloak admin token
+          ansible.builtin.include_role:
+            name: keycloak_admin_token
+
+        - name: Find the test users
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users?username={{ (e ~ '-qa-' ~ item.level) | urlencode }}&exact=true
+            method: GET
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            return_content: true
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-qa-{{ item.level }}"
+          register: _kc_doomed
+
+        - name: Delete each Keycloak test user
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users/{{ (item.json | first).id }}
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            status_code: [204, 404]
+          loop: "{{ _kc_doomed.results }}"
+          loop_control:
+            label: "{{ e }}-qa-{{ item.item.level }}"
+          when: item.json | length > 0
+
+        - name: Confirm the test users are gone
+          ansible.builtin.uri:
+            url: >-
+              {{ kc_base_url }}/admin/realms/{{ rhbk.realm }}/users?username={{ (e ~ '-qa-' ~ item.level) | urlencode }}&exact=true
+            method: GET
+            headers:
+              Authorization: "Bearer {{ kc_token }}"
+            validate_certs: false
+            return_content: true
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-qa-{{ item.level }}"
+          register: _kc_check
+
+        - name: Assert no test user survived
+          ansible.builtin.assert:
+            that: item.json | length == 0
+            fail_msg: >-
+              Keycloak user '{{ e }}-qa-{{ item.item.level }}' still exists in
+              realm '{{ rhbk.realm }}' after destroy. A leftover test identity
+              is a standing credential on a shared realm.
+            success_msg: "{{ e }}-qa-{{ item.item.level }} removed."
+            quiet: true
+          loop: "{{ _kc_check.results }}"
+          loop_control:
+            label: "{{ item.item.level }}"
+
+        - name: Delete the ServiceAccount RoleBindings
+          kubernetes.core.k8s:
+            state: absent
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            name: "{{ e }}-sa-{{ item.level }}"
+            namespace: "{{ ns }}"
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-sa-{{ item.level }}"
+
+        - name: Delete the ServiceAccounts
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: ServiceAccount
+            name: "{{ e }}-sa-{{ item.level }}"
+            namespace: "{{ ns }}"
+          loop: "{{ identity_levels }}"
+          loop_control:
+            label: "{{ e }}-sa-{{ item.level }}"
+
+        - name: Delete dependants first
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Assignment, name: "{{ assignment_name }}", namespace: "{{ ns }}" }
+              - { kind: VaultKV, name: "{{ vaultkv_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudVirt, name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
+              - { kind: AAPOrg, name: "{{ aap_org }}", namespace: "{{ ns }}" }
+              - { kind: QuayOrg, name: "{{ quay_org }}", namespace: "{{ ns }}" }
+              - { kind: Vault, name: "{{ vault_name }}", namespace: "{{ ns }}" }
+              - { kind: Project, name: "{{ project_name }}", namespace: "{{ ns }}" }
+              - { kind: Team, name: "{{ team_name }}", namespace: "{{ ns }}" }
+
+        - name: Delete every Persona
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Persona, name: "{{ e }}-{{ item.role }}", namespace: "{{ ns }}" }
+          loop: "{{ role_map }}"
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: Delete each Rbac CR
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Rbac, name: "{{ item }}", namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        - name: Delete the Entity last
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        # The allow-lists are shared, platform-owned state. Leaving the entry
+        # behind would grow a stale ref on every run of this suite.
+        - name: Withdraw the tenant's entitlement
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
+
+        - name: Wait for the tenant namespace to be reclaimed
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Namespace
+            name: "{{ ns }}"
+          register: _ns_gone
+          until: _ns_gone.resources | length == 0
+          retries: "{{ ((hs_destroy_timeout | int) / 10) | round(0, 'ceil') | int }}"
+          delay: 10
+          failed_when: false
+
+        - name: Assert the tenant namespace is gone
+          ansible.builtin.assert:
+            that: _ns_gone.resources | length == 0
+            fail_msg: >-
+              Namespace {{ ns }} still exists after the Entity was deleted.
+              phase={{ (_ns_gone.resources | first).status.phase | default('?') }}
+              finalizers={{ (_ns_gone.resources | first).metadata.finalizers | default([]) }}
+            success_msg: "Namespace {{ ns }} was reclaimed."
+            quiet: true

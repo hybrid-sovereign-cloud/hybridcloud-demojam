@@ -1,0 +1,109 @@
+---
+# Grant or revoke a tenant's entitlement to shared platform objects.
+#
+# HybridFabric and CloudInfrastructure both carry a spec.entityRefs allow-list.
+# A tenant that is not on the list cannot be provisioned against them — the
+# operator refuses with "Require the entity to be allowed on this
+# infrastructure". So a suite that creates its own Entity must entitle it
+# first, and must withdraw that entitlement on destroy or the allow-lists grow
+# a stale entry for every test run.
+#
+# These are SHARED, platform-owned objects. This role therefore edits only the
+# single list element it owns and never rewrites the rest of the spec.
+#
+# Required:
+#   ee_entity : entity name
+#   ee_state  : present | absent
+# Optional:
+#   ee_targets: list of {kind, name}; defaults to the hub fabric + hub virt
+
+- name: Decide which shared objects to entitle on
+  ansible.builtin.set_fact:
+    _ee_targets: >-
+      {{ ee_targets | default([
+           {'kind': 'HybridFabric', 'name': hs_fabric},
+           {'kind': 'CloudInfrastructure', 'name': hs_hub_cloudinfra}
+         ]) }}
+
+- name: Read the current allow-lists
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    namespace: "{{ hs_platform_ns }}"
+  loop: "{{ _ee_targets }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.name }}"
+  register: _ee_current
+
+- name: "Entitle {{ ee_entity }} on each shared object"
+  kubernetes.core.k8s:
+    state: patched
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.item.kind }}"
+    name: "{{ item.item.name }}"
+    namespace: "{{ hs_platform_ns }}"
+    definition:
+      spec:
+        entityRefs: >-
+          {{ (item.resources[0].spec.entityRefs | default([]))
+             + [{'name': ee_entity}] }}
+  loop: "{{ _ee_current.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"
+  when:
+    - ee_state | default('present') == 'present'
+    - ee_entity not in (item.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list)
+
+- name: "Withdraw {{ ee_entity }}'s entitlement"
+  kubernetes.core.k8s:
+    state: patched
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.item.kind }}"
+    name: "{{ item.item.name }}"
+    namespace: "{{ hs_platform_ns }}"
+    definition:
+      spec:
+        entityRefs: >-
+          {{ item.resources[0].spec.entityRefs | default([])
+             | rejectattr('name', 'equalto', ee_entity) | list }}
+  loop: "{{ _ee_current.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"
+  when:
+    - ee_state | default('present') == 'absent'
+    - ee_entity in (item.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list)
+
+- name: Confirm the resulting allow-lists
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    namespace: "{{ hs_platform_ns }}"
+  loop: "{{ _ee_targets }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.name }}"
+  register: _ee_after
+
+- name: Report the allow-lists
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.kind }}/{{ item.item.name }} entityRefs =
+      {{ item.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list }}
+  loop: "{{ _ee_after.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"
+
+- name: Assert the entitlement reached the intended state
+  ansible.builtin.assert:
+    that: >-
+      {{ (ee_entity in (item.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list))
+         == (ee_state | default('present') == 'present') }}
+    fail_msg: >-
+      {{ item.item.kind }}/{{ item.item.name }} did not reach
+      entityRefs state '{{ ee_state | default('present') }}' for
+      '{{ ee_entity }}'.
+    quiet: true
+  loop: "{{ _ee_after.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"
