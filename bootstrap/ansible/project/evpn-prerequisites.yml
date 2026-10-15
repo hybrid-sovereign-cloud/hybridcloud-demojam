@@ -219,10 +219,38 @@
             name: vault
           register: _vroute
 
+        - name: Assert the Vault init Secret and route were found
+          ansible.builtin.assert:
+            that:
+              - _vinit.resources | default([]) | length > 0
+              - _vroute.resources | default([]) | length > 0
+            fail_msg: >-
+              Could not resolve Vault: secret
+              {{ vault_namespace }}/{{ vault_init_secret }} found=
+              {{ _vinit.resources | default([]) | length }}, route
+              {{ vault_namespace }}/vault found=
+              {{ _vroute.resources | default([]) | length }}.
+            quiet: true
+
+        # The hub's Secret uses camelCase (rootToken); older bring-ups wrote
+        # snake_case. Accept either rather than failing on a naming detail.
+        - name: Assert the init Secret carries a root token under a known key
+          ansible.builtin.assert:
+            that: >-
+              ('rootToken' in _vinit.resources[0].data)
+              or ('root_token' in _vinit.resources[0].data)
+            fail_msg: >-
+              {{ vault_namespace }}/{{ vault_init_secret }} has neither
+              'rootToken' nor 'root_token'. Keys present:
+              {{ _vinit.resources[0].data.keys() | list }}
+            quiet: true
+
         - name: Keep the Vault connection details
           ansible.builtin.set_fact:
             _vault_addr: "https://{{ _vroute.resources[0].spec.host }}"
-            _vault_token: "{{ _vinit.resources[0].data.root_token | b64decode }}"
+            _vault_token: >-
+              {{ (_vinit.resources[0].data.rootToken
+                  | default(_vinit.resources[0].data.root_token, true)) | b64decode }}
           no_log: true
 
         - name: Decide what to seed
@@ -293,6 +321,21 @@
           register: _verify
           when: evpn_apply | bool
           no_log: true
+
+        # Looping over a skipped register yields an empty list, and a loop with
+        # no items "passes" without asserting anything. Prove the verify step
+        # actually ran and covered every entry before trusting its result.
+        - name: Confirm the verification actually covered every seeded entry
+          ansible.builtin.assert:
+            that:
+              - _verify is not skipped
+              - (_verify.results | default([])) | length == (_seed | length)
+            fail_msg: >-
+              The Vault verification did not run for all {{ _seed | length }}
+              entries (got {{ _verify.results | default([]) | length }}), so a
+              pass here would prove nothing.
+            quiet: true
+          when: evpn_apply | bool
 
         - name: Confirm the key landed (reporting names and sizes, never values)
           ansible.builtin.assert:
