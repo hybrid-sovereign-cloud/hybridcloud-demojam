@@ -383,6 +383,40 @@
     state: present
     definition: "{{ lookup('template', 'nodepool-kubevirt.yaml.j2') | from_yaml }}"
 
+# Submitting a HostedCluster is not the same as having a cluster. This used to
+# patch ready=true and Available=True the moment the HostedCluster and NodePool
+# were applied, so PlatformOpenshift reported Ready about a minute after apply
+# while the control plane was still bringing up its network, dns, ingress and
+# olm operators, and the ManagedCluster did not exist for another two and a
+# half minutes. Anything that waited on the CR — the test suites included —
+# raced the cluster it had just asked for.
+- name: Wait for the HostedCluster control plane to become Available
+  kubernetes.core.k8s_info:
+    host: "{{ services_api_host }}"
+    api_key: "{{ services_bearer_token }}"
+    validate_certs: false
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ hc_name }}"
+    namespace: "{{ hc_namespace }}"
+  register: hc_ready
+  until: >-
+    hc_ready.resources | default([]) | length > 0
+    and (hc_ready.resources[0].status.conditions | default([])
+         | selectattr('type', 'equalto', 'Available')
+         | selectattr('status', 'equalto', 'True') | list | length > 0)
+  retries: "{{ hc_available_retries | default(80) }}"
+  delay: 15
+  failed_when: false
+
+- name: Record whether the control plane actually came up
+  ansible.builtin.set_fact:
+    hc_is_available: >-
+      {{ (hc_ready.resources | default([]) | length > 0)
+         and (hc_ready.resources[0].status.conditions | default([])
+              | selectattr('type', 'equalto', 'Available')
+              | selectattr('status', 'equalto', 'True') | list | length > 0) }}
+
 - name: Get current timestamp
   ansible.builtin.set_fact:
     event_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%S.000000Z') }}"
@@ -396,9 +430,9 @@
     cr_name: "{{ platformopenshift_cr_name }}"
     cr_namespace: "{{ platformopenshift_cr_namespace }}"
     cr_status_body:
-      status: ready
-      ready: true
-      phase: provisioning
+      status: "{{ 'ready' if hc_is_available | bool else 'provisioning' }}"
+      ready: "{{ hc_is_available | bool }}"
+      phase: "{{ 'ready' if hc_is_available | bool else 'provisioning' }}"
       observedGeneration: "{{ platformopenshift_generation }}"
       lastReconciledAt: "{{ event_time }}"
       name: "{{ platformopenshift_cr_name }}"
@@ -409,16 +443,22 @@
       platformType: hosted
       slug: "{{ virt_slug }}"
       domain: "{{ virt_domain }}"
-      clusterInstalled: false
+      clusterInstalled: "{{ hc_is_available | bool }}"
       message: >-
         HostedCluster {{ hc_name }} (Hypershift containerized CP + KubeVirt workers)
-        created in {{ hc_namespace }}; NodePool replicas={{ hc_node_replicas }}
+        in {{ hc_namespace }}; NodePool replicas={{ hc_node_replicas }};
+        control plane
+        {{ 'Available' if hc_is_available | bool else 'still provisioning' }}
       conditions:
         - type: Available
-          status: "True"
+          status: "{{ 'True' if hc_is_available | bool else 'False' }}"
           lastTransitionTime: "{{ transition_time }}"
-          reason: EDASucceeded
-          message: HostedCluster {{ hc_name }} submitted (HCP, not AgentClusterInstall)
+          reason: "{{ 'EDASucceeded' if hc_is_available | bool else 'ControlPlaneProvisioning' }}"
+          message: >-
+            {{ ('HostedCluster ' ~ hc_name ~ ' control plane is Available.')
+               if hc_is_available | bool
+               else ('HostedCluster ' ~ hc_name ~ ' was submitted but its control plane has not
+                      reported Available yet; the cluster is not usable.') }}
 
 # Hypershift creates ManagedCluster asynchronously — wait before labeling.
 - name: Wait for HostedCluster ManagedCluster
