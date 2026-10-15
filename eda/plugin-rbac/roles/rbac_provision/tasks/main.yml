@@ -284,6 +284,35 @@
               message: >-
                 Keycloak subgroup {{ rbac_group_path_display }} is present in realm {{ plugin_rbac_keycloak_realm }}.
 
+    # The Entity binds its namespaceRbac RoleBinding subjects by looking up each
+    # referenced Rbac CR's .status.group. On a fresh tenant the Entity reconciles
+    # first — before any Rbac exists — so that lookup returns nothing and every
+    # RoleBinding is written with an EMPTY subject list. Nothing re-ran the bind
+    # afterwards, so the tenant's RBAC was declared but never enforced, on every
+    # tenant in the estate.
+    #
+    # Now that this Rbac has published its group path, poke the parent Entity so
+    # it re-renders its RoleBindings with this group included. The Entity's own
+    # reconcile creates no Rbac CRs, so this cannot loop.
+    - name: Re-bind the parent Entity now that this Rbac has a group path
+      kubernetes.core.k8s:
+        host: "{{ services_api_host }}"
+        api_key: "{{ services_bearer_token }}"
+        validate_certs: false
+        state: patched
+        api_version: hybridsovereign.redhat/v1alpha1
+        kind: Entity
+        name: "{{ entity_name }}"
+        namespace: sovereign-cloud
+        definition:
+          metadata:
+            annotations:
+              hybridsovereign.redhat/reconcileNow: "{{ rbac_status_transition_time }}"
+      when:
+        - entity_name is defined
+        - (entity_name | default('')) | length > 0
+      failed_when: false
+
   rescue:
     - name: Mark Rbac as failed on services cluster
       ansible.builtin.include_tasks: "{{ role_path }}/../../../common/tasks/patch_cr_status.yml"

@@ -12,11 +12,8 @@ spec:
   account: '000000000000'
   vaultPath: aws/accounts/acme-dev
   baseDomain: sandbox.example.com
-  toolRbac:
-    accountAdminRbac:
-    - acme-platform-admins
-    accountPoweruserRbac:
-    - acme-infra-team
-    accountViewerRbac:
-    - acme-devs
-    - acme-viewers
+# spec.toolRbac is deliberately absent. The CloudAWS CRD does not define it and
+# no operator reads it, so the API server prunes it on write — a sample that
+# sets it silently promises tenant RBAC that is never applied. Tenant access to
+# an AWS project is granted through Entity.namespaceRbac (cloudAWSAdmin /
+# cloudAWSView), which is what the platform actually enforces.
