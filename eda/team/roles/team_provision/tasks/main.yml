@@ -80,9 +80,12 @@
           register: team_viewer_rbacs
           loop: "{{ team_viewer_rbac_list }}"
 
-        - name: Build team viewer group subjects
+        # Collect the Keycloak group paths the viewer Rbac CRs resolved to.
+        - name: Collect team viewer group paths
           ansible.builtin.set_fact:
-            team_per_cr_subjects: >-
+            # Reset the accumulator so a repeat reconcile cannot double up.
+            team_per_cr_subjects: []
+            team_viewer_group_paths: >-
               {{
                 team_viewer_rbacs.results
                 | default([])
@@ -91,10 +94,22 @@
                 | flatten
                 | selectattr('status.group', 'defined')
                 | map(attribute='status.group')
-                | map('community.general.dict_kv', 'name')
-                | map('combine', {'kind': 'Group', 'apiGroup': 'rbac.authorization.k8s.io'})
                 | list
               }}
+
+        # Built with ansible.builtin only, on purpose: these playbooks run in
+        # AAP's Default execution environment, which does not ship
+        # community.general. The previous community.general.dict_kv form threw
+        # an opaque "line 0" template error there and left every Team with
+        # a non-empty teamViewerRbac stuck not-Ready.
+        - name: Build team viewer group subjects
+          ansible.builtin.set_fact:
+            team_per_cr_subjects: >-
+              {{ team_per_cr_subjects | default([])
+                 + [{'kind': 'Group',
+                     'apiGroup': 'rbac.authorization.k8s.io',
+                     'name': item}] }}
+          loop: "{{ team_viewer_group_paths }}"
 
     - name: Default team viewer subjects to empty
       when: team_viewer_rbac_list | length == 0
