@@ -59,6 +59,30 @@
     cluster_name: onix-ocp
     rbac_groups: [onix-cluster-admins, onix-cluster-viewers]
 
+    # Assignment — Layer 2 tenancy landed on the AWS spoke.
+    #
+    # The Assignment operator renders the sovereign-assignment chart and ships
+    # it to the spoke as an ACM Policy, so the namespaces it creates are named
+    # <entity>-<team>-devops and <entity>-<project>. Keeping the Team CR named
+    # "platform" and the Project CR named "api" therefore gives the readable
+    # spoke namespaces onix-platform-devops and onix-api rather than the
+    # doubled-up onix-onix-... that a Team called "onix-platform" would make.
+    team_name: platform
+    project_name: api
+    assignment_name: onix-assignment
+    assignment_devops_ns: "{{ e }}-{{ team_name }}-devops"
+    assignment_project_ns: "{{ e }}-{{ project_name }}"
+
+    # assignment_provision's own default: the root ACM Policy is created in
+    # sovereign-cloud-helpers and ACM propagates a copy into the spoke's
+    # namespace as sovereign-cloud-helpers.<name>. The root is the one that
+    # carries per-cluster compliance, so that is the one to read.
+    assignment_policy_namespace: sovereign-cloud-helpers
+
+    # Hive's admin kubeconfig for the spoke, staged on disk only long enough
+    # to run the spoke assertions and removed immediately afterwards.
+    onix_spoke_kubeconfig: "/tmp/onix-ocp-spoke.kubeconfig"
+
     aws_access_key: "{{ lookup('env', 'AWS_ACCESSKEY') }}"
     aws_secret_key: "{{ lookup('env', 'AWS_SECRET_KEY') }}"
     aws_account: "{{ lookup('env', 'AWS_ACCOUNT') }}"
@@ -224,6 +248,14 @@
                     cloudAWSView: [onix-cluster-viewers]
                     platformOpenshiftAdmin: [onix-cluster-admins]
                     platformOpenshiftView: [onix-cluster-viewers]
+                    # The Assignment leg of the suite needs the tenant to be
+                    # able to own Team, Project and Assignment CRs in its own
+                    # namespace, so those role keys have to be bound too.
+                    teamAdmin: [onix-cluster-admins]
+                    teamView: [onix-cluster-viewers]
+                    projectAdmin: [onix-cluster-admins]
+                    projectView: [onix-cluster-viewers]
+                    assignmentAdmin: [onix-cluster-admins]
 
         - name: Wait for the Entity
           ansible.builtin.include_role:
@@ -409,6 +441,91 @@
             cr_wait_namespace: "{{ ns }}"
             cr_wait_timeout: "{{ onix_build_timeout }}"
 
+        # -------------------------------------------------------------------
+        # Layer 2 tenancy on the finished AWS cluster.
+        #
+        # Everything above proves the platform can *build* a cluster on AWS.
+        # The Assignment proves it can then hand that cluster to a team: the
+        # assignment operator renders the sovereign-assignment chart, wraps it
+        # in an ACM Policy placed on this spoke, and ACM applies it there. The
+        # Team and the Project are the Assignment's own dependencies — it
+        # names them, so they have to exist and be Ready first.
+        # -------------------------------------------------------------------
+        - name: Create the Team and the Project the Assignment binds together
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Team
+                metadata: { name: "{{ team_name }}", namespace: "{{ ns }}" }
+                spec:
+                  rbacConfig: "{{ hs_rbac_config }}"
+                  # istio off deliberately: it pulls a ServiceMeshControlPlane
+                  # onto the spoke and this suite is about the AWS cluster
+                  # build, not about the mesh.
+                  features: { argo: true, istio: false }
+                  # All three lists are mandatory in practice — the Team
+                  # operator's viewer-subject step fails when teamAdmin is set
+                  # and teamViewerRbac is not, so a partial spec never reaches
+                  # Ready. Same trap alakazam documents.
+                  teamAdmin: [onix-cluster-admins]
+                  teamMemberRbac: [onix-cluster-admins]
+                  teamViewerRbac: [onix-cluster-viewers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Project
+                metadata: { name: "{{ project_name }}", namespace: "{{ ns }}" }
+                spec:
+                  displayName: "Onix API"
+                  description: "QA project for the AWS OCP suite"
+                  rbacConfig: "{{ hs_rbac_config }}"
+                  projectAdmin: [onix-cluster-admins]
+                  projectDeveloperRbac: [onix-cluster-admins]
+                  projectViewerRbac: [onix-cluster-viewers]
+
+        - name: Wait for the Team and the Project
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: "{{ item.kind }}"
+            cr_wait_name: "{{ item.name }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop:
+            - { kind: Team, name: "{{ team_name }}" }
+            - { kind: Project, name: "{{ project_name }}" }
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+
+        # Unlike PlatformOpenshift.toolRbac, whose fields are lists, every
+        # Assignment.spec.toolRbac field is a *single* Rbac CR name (string) —
+        # the CRD types them as string, so a list is rejected outright.
+        - name: Assign the team to the AWS cluster
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Assignment
+                metadata: { name: "{{ assignment_name }}", namespace: "{{ ns }}" }
+                spec:
+                  team: "{{ team_name }}"
+                  projects: ["{{ project_name }}"]
+                  openshift: "{{ cluster_name }}"
+                  toolRbac:
+                    assignmentAdmin: onix-cluster-admins
+                    assignmentDeveloper: onix-cluster-admins
+                    assignmentViewer: onix-cluster-viewers
+                    assignmentOps: onix-cluster-admins
+
+        - name: Wait for the Assignment
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Assignment
+            cr_wait_name: "{{ assignment_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
     - name: Verify the cluster
       tags: [test]
       block:
@@ -525,11 +642,18 @@
             success_msg: "Verifying inside AWS account {{ aws_account }}."
             quiet: true
 
+        # The filters dict is built as a single Jinja expression rather than
+        # as a mapping with a "tag:{{ _cluster_tag }}" key, because Ansible
+        # does not template dictionary *keys* in module arguments: the key
+        # would reach boto3 as the literal string "tag:{{ _cluster_tag }}".
+        # That is a perfectly valid EC2 filter — for a tag that happens to be
+        # named "{{ _cluster_tag }}" — so AWS answers 0 instances instead of
+        # raising, and the assertion below fails claiming the cluster has no
+        # EC2 at all while the instances are sitting there running.
         - name: "AWS — the EC2 instances the installer owns"
           amazon.aws.ec2_instance_info:
-            filters:
-              "tag:{{ _cluster_tag }}": owned
-              instance-state-name: [running]
+            filters: "{{ {'tag:' ~ _cluster_tag: 'owned',
+                          'instance-state-name': ['running']} }}"
           environment: "{{ aws_env }}"
           register: _ec2
 
@@ -576,10 +700,10 @@
           loop_control:
             label: "{{ item.instance_id }}"
 
+        # Same templated-dict-key trap as the EC2 lookup above.
         - name: "AWS — the VPC the installer created"
           amazon.aws.ec2_vpc_net_info:
-            filters:
-              "tag:{{ _cluster_tag }}": owned
+            filters: "{{ {'tag:' ~ _cluster_tag: 'owned'} }}"
           environment: "{{ aws_env }}"
           register: _vpc
 
@@ -744,6 +868,207 @@
             kc_groups: "{{ rbac_groups }}"
 
         # ---------------------------------------------------------------
+        # Assignment — Layer 2 tenancy actually landed on the AWS spoke.
+        #
+        # Three levels, weakest to strongest, for the same reason the cluster
+        # itself is checked three ways: the CR's own status, the ACM Policy
+        # that is supposed to carry it, and finally the spoke cluster, which
+        # is the only one of the three that cannot be fabricated by an
+        # operator patching its own status.
+        # ---------------------------------------------------------------
+        - name: "Assignment — the CR the operator reconciled"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: Assignment
+            name: "{{ assignment_name }}"
+            namespace: "{{ ns }}"
+          register: _asg
+
+        - name: Assert the Assignment is Ready and points at the AWS cluster
+          vars:
+            _asg_ready_cond: >-
+              {{ _asg.resources[0].status.conditions | default([])
+                 | selectattr('type', 'equalto', 'Ready')
+                 | selectattr('status', 'equalto', 'True') | list }}
+          ansible.builtin.assert:
+            that:
+              - _asg.resources | length > 0
+              # Judged on the Ready condition, not the status.ready field or
+              # the READY printer column: the operator resets status.ready to
+              # false at the start of every reconcile while leaving the
+              # condition True, so the column flaps and the condition does not.
+              - _asg_ready_cond | length > 0
+              - _asg.resources[0].status.openshift | default('') == cluster_name
+              - _asg.resources[0].status.team | default('') == team_name
+              # status.projects is a list of {name, ready} objects, not a
+              # list of names — so the project has to be matched on .name,
+              # and while we are here it is worth insisting it came back
+              # ready rather than merely mentioned.
+              - >-
+                _asg.resources[0].status.projects | default([])
+                  | selectattr('name', 'equalto', project_name)
+                  | selectattr('ready') | list | length == 1
+              - (_asg.resources[0].status.acmPolicyName | default('')) | length > 0
+            fail_msg: >-
+              Assignment/{{ assignment_name }} did not reconcile onto
+              {{ cluster_name }}. Ready condition=
+              {{ _asg.resources[0].status.conditions | default('<no status>') }}
+              openshift={{ _asg.resources[0].status.openshift | default('<unset>') }}
+              team={{ _asg.resources[0].status.team | default('<unset>') }}
+              projects={{ _asg.resources[0].status.projects | default('<unset>') }}
+              acmPolicyName={{ _asg.resources[0].status.acmPolicyName | default('<unset>') }}
+            success_msg: >-
+              Assignment/{{ assignment_name }} is Ready on {{ cluster_name }}
+              via ACM Policy
+              {{ _asg.resources[0].status.acmPolicyName | default('?') }}.
+            quiet: true
+
+        - name: Record the ACM Policy the Assignment created
+          ansible.builtin.set_fact:
+            _asg_policy: "{{ _asg.resources[0].status.acmPolicyName }}"
+
+        - name: "ACM — the Policy and Placement that carry the Assignment"
+          kubernetes.core.k8s_info:
+            api_version: policy.open-cluster-management.io/v1
+            kind: Policy
+            name: "{{ _asg_policy }}"
+            namespace: "{{ assignment_policy_namespace }}"
+          register: _asg_pol
+          # ACM has to place the Policy, propagate it to the spoke and get a
+          # compliance report back. Retrying here gives it time to converge
+          # rather than lowering the bar to whatever it managed immediately.
+          retries: 60
+          delay: 10
+          until: >-
+            _asg_pol.resources | default([]) | length > 0
+            and (_asg_pol.resources[0].status.compliant | default('')) == 'Compliant'
+
+        - name: Assert the Policy is Compliant on the AWS spoke
+          vars:
+            _spoke_status: >-
+              {{ _asg_pol.resources[0].status.status | default([])
+                 | selectattr('clustername', 'equalto', cluster_name)
+                 | map(attribute='compliant') | list }}
+          ansible.builtin.assert:
+            that:
+              - _asg_pol.resources | length > 0
+              - _spoke_status | length > 0
+              - "'NonCompliant' not in _spoke_status"
+              - _asg_pol.resources[0].status.compliant | default('') == 'Compliant'
+            fail_msg: >-
+              ACM Policy {{ assignment_policy_namespace }}/{{ _asg_policy }} is
+              not Compliant on {{ cluster_name }}. overall=
+              {{ _asg_pol.resources[0].status.compliant | default('<unset>') }}
+              per-cluster={{ _asg_pol.resources[0].status.status | default('<unset>') }}.
+              A NonCompliant Policy means ACM could not apply the
+              sovereign-assignment resources to the spoke, so the team has no
+              access there no matter what the Assignment CR says.
+            success_msg: >-
+              ACM Policy {{ _asg_policy }} is Compliant on {{ cluster_name }}.
+            quiet: true
+
+        # The strongest Assignment statement: go to the AWS cluster itself,
+        # with its own admin credentials, and look for the namespaces and
+        # RoleBindings the chart is supposed to have created there.
+        - name: Resolve the spoke admin kubeconfig Secret name from Hive
+          ansible.builtin.set_fact:
+            _kubeconfig_secret: >-
+              {{ _cd.resources[0].spec.clusterMetadata.adminKubeconfigSecretRef.name }}
+
+        - name: Read the spoke admin kubeconfig
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Secret
+            name: "{{ _kubeconfig_secret }}"
+            namespace: "{{ cluster_name }}"
+          register: _kc
+          no_log: true
+
+        - name: Stage the spoke kubeconfig on disk
+          ansible.builtin.copy:
+            content: "{{ _kc.resources[0].data.kubeconfig | b64decode }}"
+            dest: "{{ onix_spoke_kubeconfig }}"
+            mode: "0600"
+          no_log: true
+          changed_when: false
+
+        - name: "Spoke — the namespaces the Assignment created on AWS"
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ onix_spoke_kubeconfig }}"
+            api_version: v1
+            kind: Namespace
+            name: "{{ item }}"
+          register: _spoke_ns
+          loop:
+            - "{{ assignment_devops_ns }}"
+            - "{{ assignment_project_ns }}"
+
+        - name: Assert both Assignment namespaces exist on the AWS cluster
+          ansible.builtin.assert:
+            that:
+              - _spoke_ns.results | map(attribute='resources') | map('length') | min > 0
+            fail_msg: >-
+              The Assignment did not create its namespaces on
+              {{ cluster_name }}. Expected {{ assignment_devops_ns }} and
+              {{ assignment_project_ns }}; found
+              {{ _spoke_ns.results | map(attribute='resources') | flatten
+                 | map(attribute='metadata.name') | list }}.
+            success_msg: >-
+              {{ assignment_devops_ns }} and {{ assignment_project_ns }} exist
+              on {{ cluster_name }}.
+            quiet: true
+
+        - name: "Spoke — the RoleBindings the Assignment's toolRbac asked for"
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ onix_spoke_kubeconfig }}"
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            namespace: "{{ item }}"
+          register: _spoke_rb
+          loop:
+            - "{{ assignment_devops_ns }}"
+            - "{{ assignment_project_ns }}"
+
+        - name: Assert the admin group really holds admin on the AWS cluster
+          vars:
+            # Every namespace the chart writes gets an "assignment-admin"
+            # RoleBinding onto the cluster-wide admin ClusterRole, subject =
+            # the group named by toolRbac.assignmentAdmin.
+            _admin_rbs: >-
+              {{ _spoke_rb.results | map(attribute='resources') | flatten
+                 | selectattr('metadata.name', 'equalto', 'assignment-admin')
+                 | list }}
+          ansible.builtin.assert:
+            that:
+              - _admin_rbs | length == 2
+              - _admin_rbs | map(attribute='roleRef.name') | unique | list == ['admin']
+              # Subjects arrive entity-qualified as "onix/onix-cluster-admins",
+              # so the entity prefix is stripped before comparing — the same
+              # normalisation the hub-side RoleBinding assertion above uses.
+              - >-
+                _admin_rbs | map(attribute='subjects') | flatten
+                  | map(attribute='name') | map('regex_replace', '^.*/', '')
+                  | unique | list == ['onix-cluster-admins']
+            fail_msg: >-
+              The assignment-admin RoleBindings on {{ cluster_name }} do not
+              grant onix-cluster-admins admin in both
+              {{ assignment_devops_ns }} and {{ assignment_project_ns }}.
+              Found {{ _admin_rbs | length }} binding(s), roleRefs
+              {{ _admin_rbs | map(attribute='roleRef.name') | list }},
+              subjects {{ _admin_rbs | map(attribute='subjects') | flatten
+                          | map(attribute='name') | list }}.
+            success_msg: >-
+              onix-cluster-admins holds admin in {{ assignment_devops_ns }}
+              and {{ assignment_project_ns }} on {{ cluster_name }}.
+            quiet: true
+
+        - name: Remove the staged spoke kubeconfig
+          ansible.builtin.file:
+            path: "{{ onix_spoke_kubeconfig }}"
+            state: absent
+          changed_when: false
+
+        # ---------------------------------------------------------------
         # Negative assertions. Same control case as squirtle, and the same
         # design rule as jigglypuff: an AWS cluster is never a fabric member.
         # ---------------------------------------------------------------
@@ -883,11 +1208,19 @@
             success_msg: "ManagedCluster/{{ cluster_name }} deregistered."
             quiet: true
 
+        # Built as one Jinja expression for the same reason as the EC2 and VPC
+        # lookups in the test tag — Ansible does not template dictionary keys
+        # in module args. Here the consequence was worse than a false failure:
+        # the literal "tag:{{ _doomed_tag }}" key matches nothing, so this
+        # lookup always returned zero instances and the assertion below always
+        # passed, certifying that AWS had been reclaimed even if the entire
+        # cluster were still running and billing.
         - name: "AWS — wait for the cluster's EC2 instances to be terminated"
           amazon.aws.ec2_instance_info:
-            filters:
-              "tag:{{ _doomed_tag }}": owned
-              instance-state-name: [pending, running, stopping, stopped, shutting-down]
+            filters: "{{ {'tag:' ~ _doomed_tag: 'owned',
+                          'instance-state-name': ['pending', 'running',
+                                                  'stopping', 'stopped',
+                                                  'shutting-down']} }}"
           environment: "{{ aws_env }}"
           register: _ec2_after
           until: _ec2_after.instances | default([]) | length == 0
