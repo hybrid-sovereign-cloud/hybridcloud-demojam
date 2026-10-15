@@ -1,0 +1,320 @@
+---
+# =============================================================================
+# evpn-prerequisites.yml — Day-0 prerequisites for the hybrid EVPN fabric
+#
+# The fabric jobs deliberately only *check* these; they never apply them,
+# because enabling FRR rewrites the hub's cluster networking and rolls
+# ovnkube-node on every node — including the nodes running AAP, ArgoCD, Vault,
+# Keycloak and the operators. That is cluster configuration, so it lives here
+# as an explicit, reviewable step rather than inside a reconcile loop.
+#
+# What it does, in order:
+#   1. Enables the FRR routing provider and OVN route advertisements on the
+#      hub network operator, then waits for the roll to finish and the EVPN
+#      CRDs (vteps, routeadvertisements) and frr-k8s DaemonSet to appear.
+#   2. Seeds the two Vault entries that describe an OpenStack site and cannot
+#      be generated: the admin clouds.yaml and the management-cluster
+#      kubeconfig. The fabric's WireGuard and SSH key pairs are deliberately
+#      NOT seeded here — hybridfabric_provision generates and stores those
+#      itself via common/tasks/wg_keypair_ensure.yml.
+#
+# Safe to re-run: every step is a check-then-act, and the Vault seeding only
+# writes when a key is actually absent (unless evpn_force_vault_overwrite).
+#
+# Usage:
+#   ansible-playbook bootstrap/ansible/project/evpn-prerequisites.yml \
+#     -e oso_clouds_file=$OSO_CLOUDS \
+#     -e oso_mgmt_kubeconfig_file=/path/to/site-kubeconfig
+#
+#   # check the prerequisites without changing anything:
+#   ansible-playbook ... -e evpn_apply=false
+#
+#   # skip the disruptive half, seed Vault only:
+#   ansible-playbook ... --tags vault
+# =============================================================================
+- name: "EVPN fabric prerequisites"
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # --- what to do -------------------------------------------------------
+    # false = report the current state and change nothing (a dry audit).
+    evpn_apply: true
+    # Overwrite Vault keys that already hold a value. Off by default so a
+    # re-run never clobbers a hand-seeded credential.
+    evpn_force_vault_overwrite: false
+
+    # --- hub cluster ------------------------------------------------------
+    evpn_kubeconfig: "{{ lookup('env', 'KUBECONFIG') | default(omit, true) }}"
+    evpn_node_roll_timeout: 2400      # ovnkube-node rolls one node at a time
+
+    # --- the OpenStack site being registered ------------------------------
+    oso_site_name: oso1
+    oso_clouds_file: ""               # admin clouds.yaml for the site
+    oso_mgmt_kubeconfig_file: ""      # kubeconfig for the RHOSO mgmt cluster
+
+    # --- Vault ------------------------------------------------------------
+    # Mount matches eda/common/tasks/vault_kv_read.yml, which defaults to
+    # `hybridsovereign` unless vault_kv_mount is overridden.
+    vault_kv_mount: hybridsovereign
+    vault_namespace: vault
+    vault_init_secret: vault-init
+
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ evpn_kubeconfig }}"
+      validate_certs: false
+
+  tasks:
+    # =========================================================================
+    # Part 1 — hub network operator: FRR + route advertisements
+    # =========================================================================
+    - name: "Hub networking"
+      tags: [network, frr]
+      block:
+        - name: Read the hub network operator
+          kubernetes.core.k8s_info:
+            api_version: operator.openshift.io/v1
+            kind: Network
+            name: cluster
+          register: _net
+
+        - name: Work out what is already in place
+          ansible.builtin.set_fact:
+            _frr_on: >-
+              {{ 'FRR' in (_net.resources[0].spec.additionalRoutingCapabilities.providers
+                           | default([])) }}
+            _ra_on: >-
+              {{ (_net.resources[0].spec.defaultNetwork.ovnKubernetesConfig.routeAdvertisements
+                  | default('')) == 'Enabled' }}
+
+        - name: Report the current state
+          ansible.builtin.debug:
+            msg:
+              - "FRR provider          : {{ 'enabled' if _frr_on else 'MISSING' }}"
+              - "routeAdvertisements   : {{ 'Enabled' if _ra_on else 'MISSING' }}"
+              - "action                : {{ 'none needed' if (_frr_on and _ra_on)
+                                            else ('would patch (evpn_apply=false)'
+                                                  if not (evpn_apply | bool) else 'patching') }}"
+
+        - name: Enable FRR and OVN route advertisements
+          # Rolls ovnkube-node on every node. Everything below waits it out.
+          kubernetes.core.k8s:
+            state: patched
+            api_version: operator.openshift.io/v1
+            kind: Network
+            name: cluster
+            definition:
+              spec:
+                additionalRoutingCapabilities:
+                  providers: [FRR]
+                defaultNetwork:
+                  ovnKubernetesConfig:
+                    routeAdvertisements: Enabled
+          when:
+            - evpn_apply | bool
+            - not (_frr_on and _ra_on)
+          register: _patched
+
+        - name: Give the network operator a moment to start reconciling
+          ansible.builtin.pause:
+            seconds: 30
+          when: _patched is changed
+
+        - name: Wait for the network cluster operator to settle
+          kubernetes.core.k8s_info:
+            api_version: config.openshift.io/v1
+            kind: ClusterOperator
+            name: network
+          register: _co
+          until: >-
+            (_co.resources[0].status.conditions
+              | selectattr('type', 'equalto', 'Progressing')
+              | map(attribute='status') | first) == 'False'
+            and
+            (_co.resources[0].status.conditions
+              | selectattr('type', 'equalto', 'Available')
+              | map(attribute='status') | first) == 'True'
+            and
+            (_co.resources[0].status.conditions
+              | selectattr('type', 'equalto', 'Degraded')
+              | map(attribute='status') | first) == 'False'
+          retries: "{{ (evpn_node_roll_timeout / 20) | round(0, 'ceil') | int }}"
+          delay: 20
+          when: evpn_apply | bool
+
+        - name: Wait for the frr-k8s DaemonSet to be fully rolled out
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: DaemonSet
+            namespace: openshift-frr-k8s
+            name: frr-k8s
+          register: _frr_ds
+          until: >-
+            _frr_ds.resources | length > 0
+            and (_frr_ds.resources[0].status.numberReady | default(0) | int) > 0
+            and (_frr_ds.resources[0].status.numberReady | default(0) | int)
+                == (_frr_ds.resources[0].status.desiredNumberScheduled | default(-1) | int)
+          retries: 60
+          delay: 20
+          failed_when: false
+          when: evpn_apply | bool
+
+        - name: Assert the EVPN building blocks now exist
+          kubernetes.core.k8s_info:
+            kind: CustomResourceDefinition
+            name: "{{ item }}"
+          loop:
+            - vteps.k8s.ovn.org
+            - routeadvertisements.k8s.ovn.org
+          register: _evpn_crds
+          until: _evpn_crds.resources | length > 0
+          retries: 30
+          delay: 20
+          failed_when: false
+          when: evpn_apply | bool
+
+        - name: Confirm hub networking is ready for the fabric
+          ansible.builtin.assert:
+            that:
+              - _frr_ds.resources | default([]) | length > 0
+              - (_frr_ds.resources[0].status.numberReady | default(0) | int) > 0
+              - _evpn_crds.results | map(attribute='resources') | map('length') | min > 0
+            fail_msg: >-
+              Hub networking did not converge. frr-k8s ready=
+              {{ (_frr_ds.resources[0].status.numberReady | default('none')) }};
+              CRDs found=
+              {{ _evpn_crds.results | map(attribute='resources') | map('length') | list }}.
+              Until both are present the hub CloudGateway stays at PendingPrereq.
+            success_msg: >-
+              FRR and route advertisements are active; frr-k8s has
+              {{ _frr_ds.resources[0].status.numberReady }} ready pods.
+            quiet: true
+          when: evpn_apply | bool
+
+    # =========================================================================
+    # Part 2 — Vault entries that cannot be generated
+    #
+    # Only the two that describe an external system. The fabric's own
+    # WireGuard/SSH material is generated by hybridfabric_provision.
+    # =========================================================================
+    - name: "Site credentials in Vault"
+      tags: [vault]
+      when:
+        - oso_clouds_file | length > 0 or oso_mgmt_kubeconfig_file | length > 0
+      block:
+        - name: Resolve the Vault address and root token
+          kubernetes.core.k8s_info:
+            kind: Secret
+            namespace: "{{ vault_namespace }}"
+            name: "{{ vault_init_secret }}"
+          register: _vinit
+          no_log: true
+
+        - name: Resolve the Vault route
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            namespace: "{{ vault_namespace }}"
+            name: vault
+          register: _vroute
+
+        - name: Keep the Vault connection details
+          ansible.builtin.set_fact:
+            _vault_addr: "https://{{ _vroute.resources[0].spec.host }}"
+            _vault_token: "{{ _vinit.resources[0].data.root_token | b64decode }}"
+          no_log: true
+
+        - name: Decide what to seed
+          ansible.builtin.set_fact:
+            _seed: >-
+              {{ ([{'path': 'oso/' ~ oso_site_name ~ '/admin-clouds',
+                    'key': 'clouds.yaml',
+                    'file': oso_clouds_file}] if oso_clouds_file | length > 0 else [])
+                 + ([{'path': 'oso/' ~ oso_site_name ~ '/mgmt-kubeconfig',
+                      'key': 'kubeconfig',
+                      'file': oso_mgmt_kubeconfig_file}] if oso_mgmt_kubeconfig_file | length > 0 else []) }}
+
+        - name: Check what is already stored
+          ansible.builtin.uri:
+            url: "{{ _vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item.path }}"
+            method: GET
+            headers:
+              X-Vault-Token: "{{ _vault_token }}"
+            validate_certs: false
+            status_code: [200, 404]
+          loop: "{{ _seed }}"
+          loop_control:
+            label: "{{ item.path }}"
+          register: _existing
+          no_log: true
+
+        - name: Report what is present (key names only, never values)
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.item.path }}: HTTP {{ item.status }}
+              keys={{ (item.json.data.data | default({})).keys() | list if item.status == 200 else [] }}
+          loop: "{{ _existing.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+
+        - name: Seed the missing site credentials
+          ansible.builtin.uri:
+            url: "{{ _vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item.item.path }}"
+            method: POST
+            headers:
+              X-Vault-Token: "{{ _vault_token }}"
+            body_format: json
+            body:
+              data: "{{ {item.item.key: lookup('file', item.item.file)} }}"
+            validate_certs: false
+            status_code: [200, 204]
+          loop: "{{ _existing.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          when:
+            - evpn_apply | bool
+            - >-
+              (evpn_force_vault_overwrite | bool)
+              or item.status != 200
+              or (item.json.data.data | default({})).get(item.item.key, '') | length == 0
+          no_log: true
+
+        - name: Verify each entry now holds its key
+          ansible.builtin.uri:
+            url: "{{ _vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item.path }}"
+            method: GET
+            headers:
+              X-Vault-Token: "{{ _vault_token }}"
+            validate_certs: false
+          loop: "{{ _seed }}"
+          loop_control:
+            label: "{{ item.path }}"
+          register: _verify
+          when: evpn_apply | bool
+          no_log: true
+
+        - name: Confirm the key landed (reporting names and sizes, never values)
+          ansible.builtin.assert:
+            that: (item.json.data.data | default({})).get(item.item.key, '') | length > 0
+            fail_msg: >-
+              Vault {{ vault_kv_mount }}/{{ item.item.path }} still has no
+              '{{ item.item.key }}'. CloudInfrastructure/{{ oso_site_name }}
+              will stay at CredentialsUnavailable.
+            success_msg: >-
+              {{ item.item.path }} holds '{{ item.item.key }}'
+              ({{ (item.json.data.data | default({})).get(item.item.key, '') | length }} bytes).
+            quiet: true
+          loop: "{{ _verify.results | default([]) }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          when: evpn_apply | bool
+
+    - name: What happens next
+      ansible.builtin.debug:
+        msg:
+          - "Hub networking and site credentials are in place."
+          - "Reconcile in dependency order: CloudInfrastructure/{{ oso_site_name }}"
+          - "  -> CloudGateway (hub-virt-gw, <site>-gw) -> TransportLink -> NetworkPlacement."
+          - "The fabric's WireGuard and SSH keys are generated by hybridfabric_provision"
+          - "itself and are deliberately not seeded by this playbook."

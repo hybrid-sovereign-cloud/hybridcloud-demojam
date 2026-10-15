@@ -1,0 +1,657 @@
+---
+# =============================================================================
+# test-jigglypuff-aws.yaml — a tenant AWS account project
+#
+# AWS IS NOT A HYBRID NETWORK / EVPN FABRIC PARTICIPANT.
+#
+# This is the whole point of the suite, and it is a design rule, not a lab
+# limitation: design §15.0, and the operator says so itself — the aws branch
+# of cloudinfrastructure_provision hard-codes capabilities.evpn=false with
+# reason AwsUnsupported ("AWS has no EVPN fabric landing"). So this playbook
+# NEVER creates a HybridNetwork, a NetworkPlacement, a CloudGateway or a
+# TransportLink, and it never entitles jigglypuff on the HybridFabric. It
+# entitles the tenant on the AWS CloudInfrastructure and nothing else. The
+# test tag asserts the absence of all of the above rather than taking it on
+# trust — Squirtle is the equivalent control case for OCP.
+#
+# What the operator actually does in AWS is Route53, not IAM. Reading
+# eda/rulebooks/roles/cloudaws_provision/tasks/aws_environmentprep.yml, a
+# CloudAWS reconcile:
+#   1. validates the keys with STS GetCallerIdentity and refuses if the
+#      account does not match spec.account,
+#   2. derives a 5-character slug from sha256(<CR name>),
+#   3. requires the parent zone spec.baseDomain to ALREADY exist,
+#   4. creates the hosted zone <slug>.<baseDomain>,
+#   5. writes an NS delegation record for it into the parent zone.
+# There is no IAM account, role or user creation anywhere in that path, so
+# this suite verifies Route53 and does not invent IAM assertions.
+#
+#   --tags create   Entity -> Rbac -> admin Secret -> CloudInfrastructure(aws)
+#                   -> entitle on that infrastructure only -> CloudAWS
+#   --tags test     CloudAWS Ready and its status agrees with what is really
+#                   in Route53, plus the negative no-fabric assertions
+#   --tags destroy  reverse order, withdraw the entitlement, and prove the
+#                   Route53 zone and its NS delegation were reclaimed
+#
+# Unlike the other suites, this one creates its own CloudInfrastructure. The
+# lab hub has no aws-typed CloudInfrastructure (only hub-virt/openshift and
+# oso1/openstack), so there is nothing pre-existing to point spec.cloudRef at.
+# It is created in sovereign-cloud alongside the platform-owned ones and is
+# removed again by the destroy tag.
+#
+# Credentials come from the environment (tests/.env) as AWS_ACCESSKEY /
+# AWS_SECRET_KEY / AWS_ACCOUNT — the platform's own spelling, not the
+# standard AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY. They are mapped on the
+# way into both the admin Secret and the amazon.aws modules, and never
+# written to the working tree.
+# =============================================================================
+- name: "Jigglypuff — AWS tenant cloud (no hybrid network)"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: jigglypuff
+    ns: entity-jigglypuff
+    cloudaws_name: jigglypuff-aws
+    # The AWS CloudInfrastructure this suite owns, and the Secret holding its
+    # administrative keys. Both live in the platform namespace.
+    aws_infra_name: jigglypuff-aws-infra
+    aws_creds_secret: jigglypuff-aws-admin-creds
+    rbac_groups: [jigglypuff-aws-admins, jigglypuff-aws-viewers]
+
+    # -- credentials, mapped from the platform's variable names -------------
+    aws_access_key: "{{ lookup('env', 'AWS_ACCESSKEY') }}"
+    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_KEY') }}"
+    aws_account: "{{ lookup('env', 'AWS_ACCOUNT') }}"
+    aws_base_domain: "{{ lookup('env', 'AWS_BASE_DOMAIN') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-1', true) }}"
+
+    # The slug the operator will derive, recomputed here independently so the
+    # test asserts against a value it worked out itself rather than echoing
+    # back whatever the operator happened to write into status. The operator
+    # takes the first 5 alphanumerics of the sha256 hex digest of the CR name;
+    # a hex digest is already all-alphanumeric, so this is the same thing.
+    expected_slug: "{{ (cloudaws_name | hash('sha256'))[:5] }}"
+    expected_domain: "{{ expected_slug }}.{{ aws_base_domain }}"
+
+    # Environment block handed to every amazon.aws module below.
+    aws_env:
+      AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+      AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+      AWS_DEFAULT_REGION: "{{ aws_region }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    - name: Require the AWS credentials this suite cannot run without
+      ansible.builtin.assert:
+        that:
+          - aws_access_key | length > 0
+          - aws_secret_key | length > 0
+          - aws_account | length == 12
+          - aws_base_domain | length > 0
+        fail_msg: >-
+          AWS_ACCESSKEY / AWS_SECRET_KEY / AWS_ACCOUNT (12 digits) /
+          AWS_BASE_DOMAIN must be set in tests/.env to run this suite.
+          See tests/.env.example section 2b.
+        quiet: true
+      tags: [always]
+
+    - name: Create the AWS tenant cloud
+      tags: [create]
+      block:
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Jigglypuff — QA tenant, AWS account project, no hybrid networking"
+                  billingID: "JIGGLYPUFF-TEST-001"
+                  namespaceRbac:
+                    entityAdmin: [jigglypuff-aws-admins]
+                    cloudAWSAdmin: [jigglypuff-aws-admins]
+                    cloudAWSView: [jigglypuff-aws-viewers]
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Entity, cr_wait_name: "{{ e }}", cr_wait_namespace: "{{ hs_platform_ns }}" }
+
+        - name: Create the Rbac groups
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Rbac
+              metadata: { name: "{{ item }}", namespace: "{{ ns }}", labels: "{{ hs_test_labels }}" }
+              spec:
+                config: "{{ hs_rbac_config }}"
+                description: "QA group {{ item }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Rbac, cr_wait_name: "{{ item }}", cr_wait_namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        # Entity RoleBinding subjects are resolved once, on the first
+        # reconcile — which happens before the Rbac CRs above exist, so the
+        # bindings come out empty. Touching the spec forces a re-bind now
+        # that the groups are Ready. Without this the RoleBinding subject
+        # assertion in the test tag fails for a reason that has nothing to do
+        # with AWS.
+        - name: Bump the Entity so the RoleBindings re-bind against the Rbac CRs
+          kubernetes.core.k8s:
+            state: patched
+            api_version: "{{ hs_api_version }}"
+            kind: Entity
+            name: "{{ e }}"
+            namespace: "{{ hs_platform_ns }}"
+            definition:
+              spec:
+                description: >-
+                  Jigglypuff — QA tenant, AWS account project, no hybrid
+                  networking (rebind {{ ansible_date_time.iso8601 | default('r2') }})
+
+        - name: Give the re-bind a moment to land
+          ansible.builtin.pause:
+            seconds: 20
+
+        # The administrative keys for the AWS account, as the
+        # CloudInfrastructure's credentialsRef.secretRef. Key names here are
+        # the ones the operator looks for, not the ones in tests/.env.
+        - name: Create the AWS admin credentials Secret
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ aws_creds_secret }}"
+                namespace: "{{ hs_platform_ns }}"
+                labels: "{{ hs_test_labels }}"
+              type: Opaque
+              stringData:
+                AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+                AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+                ACCOUNT_ID: "{{ aws_account }}"
+          no_log: true
+
+        - name: Create the AWS CloudInfrastructure
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudInfrastructure
+                metadata: { name: "{{ aws_infra_name }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  type: aws
+                  displayName: "Jigglypuff QA AWS account"
+                  credentialsRef:
+                    secretRef: { name: "{{ aws_creds_secret }}" }
+                  aws:
+                    accountId: "{{ aws_account }}"
+                    region: "{{ aws_region }}"
+                    baseDomain: "{{ aws_base_domain }}"
+
+        - name: Wait for the AWS CloudInfrastructure
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudInfrastructure
+            cr_wait_name: "{{ aws_infra_name }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        # ONLY the CloudInfrastructure. Deliberately NOT the HybridFabric:
+        # jigglypuff is not a fabric participant and entitling it there would
+        # defeat the negative assertions in the test tag.
+        - name: Entitle jigglypuff on the AWS infrastructure (and nowhere else)
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+
+        # The real spec surface is small. The CRD defines exactly account,
+        # baseDomain, cloudRef, credentialsSecretRef, landingzone, vaultPath —
+        # and nothing else. In particular there is no toolRbac and no region;
+        # region is taken from the CloudInfrastructure. See the note in the
+        # test tag.
+        - name: Request the AWS account project
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudAWS
+                metadata: { name: "{{ cloudaws_name }}", namespace: "{{ ns }}" }
+                spec:
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+                  account: "{{ aws_account }}"
+                  baseDomain: "{{ aws_base_domain }}"
+                  landingzone: default
+
+        - name: Wait for the AWS environment to be prepared
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudAWS
+            cr_wait_name: "{{ cloudaws_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+    - name: Verify the AWS tenant cloud
+      tags: [test]
+      block:
+        - name: Read the CloudAWS CR
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudAWS
+            name: "{{ cloudaws_name }}"
+            namespace: "{{ ns }}"
+          register: _ca
+
+        - name: Assert the CloudAWS CR is Ready and its status is self-consistent
+          ansible.builtin.assert:
+            that:
+              - _ca.resources | length > 0
+              - _ca.resources[0].status.ready | default(false) | bool
+              - _ca.resources[0].status.slug | default('') == expected_slug
+              - _ca.resources[0].status.domain | default('') == expected_domain
+              - _ca.resources[0].status.awsAccountId | default('') == aws_account
+              - _ca.resources[0].status.entity | default('') == e
+              - _ca.resources[0].status.route53ZoneId | default('') | length > 0
+            fail_msg: >-
+              CloudAWS/{{ cloudaws_name }} is not Ready, or its status does not
+              describe the environment we asked for. Expected slug
+              {{ expected_slug }} / domain {{ expected_domain }} / account
+              {{ aws_account }}. Got status=
+              {{ _ca.resources[0].status | default('<CR not found>') }}
+            success_msg: >-
+              CloudAWS/{{ cloudaws_name }} Ready: {{ expected_domain }}
+              (zone {{ _ca.resources[0].status.route53ZoneId | default('?') }}).
+            quiet: true
+
+        # ------------------------------------------------------------------
+        # toolRbac: check the CRD before asserting anything about it.
+        #
+        # samples/cloudaws/acme-dev-aws.yaml carries a toolRbac block with
+        # accountAdminRbac / accountPoweruserRbac / accountViewerRbac, which
+        # makes it look as though CloudAWS resolves Keycloak groups the way
+        # PlatformOpenshift does. It does not. The CloudAWS CRD has no
+        # toolRbac property, so the API server prunes the whole block on
+        # write and the sample is silently lying — exactly the CloudOSO
+        # situation. Asserting on toolRbac here would be asserting on a field
+        # that cannot exist, so the suite proves the pruning instead and
+        # checks the AWS RBAC where it actually lives: Entity.namespaceRbac
+        # cloudAWSAdmin / cloudAWSView.
+        # ------------------------------------------------------------------
+        - name: Read the CloudAWS CRD schema
+          kubernetes.core.k8s_info:
+            api_version: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+            name: cloudawss.hybridsovereign.redhat
+          register: _crd
+
+        - name: Record which spec fields CloudAWS really has
+          ansible.builtin.set_fact:
+            _ca_spec_props: >-
+              {{ _crd.resources[0].spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.keys() | list | sort }}
+
+        - name: Report the real CloudAWS spec surface
+          ansible.builtin.debug:
+            msg: "CloudAWS spec properties defined by the CRD: {{ _ca_spec_props }}"
+
+        - name: Assert toolRbac is absent from the CRD, so it is not asserted on
+          ansible.builtin.assert:
+            that:
+              - "'toolRbac' not in _ca_spec_props"
+              - _ca.resources[0].spec.toolRbac is not defined
+            fail_msg: >-
+              The CloudAWS CRD has grown a toolRbac property
+              ({{ _ca_spec_props }}). This test deliberately skips Keycloak
+              group-path assertions for CloudAWS because the field did not
+              exist; if it exists now, this suite is out of date and must
+              assert that toolRbac resolves to real group paths.
+            success_msg: >-
+              CloudAWS has no toolRbac in its CRD — tool RBAC is carried by
+              Entity.namespaceRbac cloudAWSAdmin/cloudAWSView instead.
+            quiet: true
+
+        - name: "Keycloak — the tenant's AWS groups really exist"
+          ansible.builtin.include_role:
+            name: verify_keycloak_group
+          vars:
+            kc_entity: "{{ e }}"
+            kc_groups: "{{ rbac_groups }}"
+
+        - name: "RBAC — the Entity's RoleBindings name the AWS groups"
+          kubernetes.core.k8s_info:
+            # Explicit api_version: OpenShift serves RoleBinding under both
+            # rbac.authorization.k8s.io/v1 and authorization.openshift.io/v1,
+            # and the ambiguous kind sends the client into "maximum recursion
+            # depth exceeded".
+            api_version: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rb
+
+        - name: Assert the AWS admin/viewer groups are bound in the tenant namespace
+          ansible.builtin.assert:
+            that:
+              - _rb.resources | length > 0
+              - >-
+                rbac_groups | difference(
+                  _rb.resources | map(attribute='subjects') | select('defined')
+                    | flatten | map(attribute='name') | list
+                    | map('regex_replace', '^.*/', '') | list
+                ) | length == 0
+            fail_msg: >-
+              The Entity RoleBindings in {{ ns }} do not name
+              {{ rbac_groups }}. Subjects seen:
+              {{ _rb.resources | map(attribute='subjects') | select('defined')
+                 | flatten | map(attribute='name') | list }}.
+              If these are empty, the Entity re-bind in the create tag did not
+              take effect — subjects are only resolved on a reconcile that
+              happens after the Rbac CRs are Ready.
+            success_msg: "AWS admin/viewer groups are bound in {{ ns }}."
+            quiet: true
+
+        # ------------------------------------------------------------------
+        # The point of the suite: prove it landed in AWS, not just in etcd.
+        # ------------------------------------------------------------------
+        - name: "AWS — the credentials really belong to the expected account"
+          amazon.aws.aws_caller_info:
+          environment: "{{ aws_env }}"
+          register: _sts
+
+        - name: Assert STS agrees with spec.account
+          ansible.builtin.assert:
+            that: _sts.account == aws_account
+            fail_msg: >-
+              The test's AWS credentials are for account {{ _sts.account }},
+              but the CloudAWS was created for {{ aws_account }} — this
+              verification would be reading the wrong account.
+            success_msg: "Verifying inside AWS account {{ aws_account }}."
+            quiet: true
+
+        - name: "AWS — list Route53 hosted zones"
+          amazon.aws.route53_info:
+            query: hosted_zone
+          environment: "{{ aws_env }}"
+          register: _zones
+
+        - name: Locate the tenant's delegated zone
+          ansible.builtin.set_fact:
+            _tenant_zone: >-
+              {{ _zones.hosted_zones
+                 | selectattr('name', 'equalto', expected_domain ~ '.')
+                 | list | first | default({}) }}
+
+        - name: Assert the tenant's hosted zone exists in AWS
+          ansible.builtin.assert:
+            that:
+              - _tenant_zone | length > 0
+              - (_tenant_zone.id | regex_replace('^/hostedzone/', '')) == _ca.resources[0].status.route53ZoneId
+            fail_msg: >-
+              Route53 has no hosted zone {{ expected_domain }}, or its ID does
+              not match the CloudAWS status
+              ({{ _ca.resources[0].status.route53ZoneId | default('?') }}).
+              The CR claims the environment is prepared but the change did not
+              land in AWS. Zones present:
+              {{ _zones.hosted_zones | map(attribute='name') | list }}
+            success_msg: >-
+              Route53 hosted zone {{ expected_domain }} exists
+              (id {{ _tenant_zone.id | default('?') | regex_replace('^/hostedzone/', '') }}).
+            quiet: true
+
+        - name: "AWS — read the NS delegation in the parent zone"
+          amazon.aws.route53_info:
+            query: record_sets
+            hosted_zone_id: >-
+              {{ _zones.hosted_zones
+                 | selectattr('name', 'equalto', aws_base_domain ~ '.')
+                 | map(attribute='id') | first | default('')
+                 | regex_replace('^/hostedzone/', '') }}
+          environment: "{{ aws_env }}"
+          register: _parent_records
+
+        - name: Assert the subdomain is delegated from the parent zone
+          vars:
+            _ns_rr: >-
+              {{ _parent_records.resource_record_sets
+                 | selectattr('type', 'equalto', 'NS')
+                 | selectattr('name', 'equalto', expected_domain ~ '.')
+                 | list }}
+          ansible.builtin.assert:
+            that: _ns_rr | length > 0
+            fail_msg: >-
+              The hosted zone {{ expected_domain }} exists but no NS record
+              delegates it from {{ aws_base_domain }} — the subdomain would
+              not resolve. NS records in the parent zone:
+              {{ _parent_records.resource_record_sets
+                 | selectattr('type', 'equalto', 'NS')
+                 | map(attribute='name') | list }}
+            success_msg: "{{ expected_domain }} is delegated from {{ aws_base_domain }}."
+            quiet: true
+
+        # ------------------------------------------------------------------
+        # NEGATIVE — AWS must not be on the EVPN fabric. Mirrors the Squirtle
+        # control case, but broader: Squirtle asserts one cluster is not
+        # attached, this asserts the whole cloud type is not a participant.
+        # ------------------------------------------------------------------
+        - name: "Negative — no NetworkPlacement for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: NetworkPlacement
+            namespace: "{{ ns }}"
+          register: _np
+
+        - name: "Negative — no HybridNetwork for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+            namespace: "{{ ns }}"
+          register: _hn
+
+        - name: Assert no hybrid networking object was created for the AWS tenant
+          ansible.builtin.assert:
+            that:
+              - _np.resources | length == 0
+              - _hn.resources | length == 0
+            fail_msg: >-
+              AWS is not a fabric participant, but {{ ns }} holds
+              {{ _np.resources | length }} NetworkPlacement(s) and
+              {{ _hn.resources | length }} HybridNetwork(s). Either the test
+              fixture leaked, or the platform is attaching AWS tenants to the
+              EVPN fabric — which contradicts design §15.0.
+            success_msg: "Confirmed: no NetworkPlacement / HybridNetwork for {{ e }}."
+            quiet: true
+
+        - name: "Negative — read the hub fabric"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fabric
+
+        - name: "Negative — read the AWS CloudInfrastructure"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudInfrastructure
+            name: "{{ aws_infra_name }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _ci
+
+        - name: Assert the AWS infrastructure is not a fabric member
+          ansible.builtin.assert:
+            that:
+              # The tenant was never entitled on the fabric ...
+              - e not in (_fabric.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list)
+              # ... and the operator itself declares AWS incapable of EVPN.
+              - _ci.resources[0].status.capabilities.evpn | default(true) | bool == false
+            fail_msg: >-
+              AWS must not be on the EVPN fabric. HybridFabric/{{ hs_fabric }}
+              entityRefs =
+              {{ _fabric.resources[0].spec.entityRefs | default([]) | map(attribute='name') | list }};
+              CloudInfrastructure/{{ aws_infra_name }} capabilities =
+              {{ _ci.resources[0].status.capabilities | default('<unset>') }}.
+              Either the entitlement role touched the fabric, or the aws
+              branch of cloudinfrastructure_provision stopped reporting
+              evpn=false.
+            success_msg: >-
+              Confirmed: {{ e }} is not on {{ hs_fabric }}, and
+              {{ aws_infra_name }} reports evpn=false.
+            quiet: true
+
+        - name: "Negative — no CloudGateway or TransportLink anywhere for this tenant"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item }}"
+            namespace: "{{ ns }}"
+          register: _fabric_objs
+          failed_when: false
+          loop: [CloudGateway, TransportLink]
+
+        - name: Assert no fabric transport objects were created
+          ansible.builtin.assert:
+            that: >-
+              _fabric_objs.results | map(attribute='resources')
+                | select('defined') | map('length') | sum == 0
+            fail_msg: >-
+              CloudGateway / TransportLink objects exist in {{ ns }}:
+              {{ _fabric_objs.results | map(attribute='resources')
+                 | select('defined') | flatten
+                 | map(attribute='metadata.name') | list }}.
+              AWS tenants must have no fabric transport at all.
+            success_msg: "Confirmed: no CloudGateway / TransportLink for {{ e }}."
+            quiet: true
+
+    - name: Destroy the AWS tenant cloud
+      tags: [destroy]
+      block:
+        # Captured before the CR goes away: after deletion the status, and so
+        # the zone ID, is no longer readable, and the reclaim check needs it.
+        - name: Remember what the operator claimed to create in AWS
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudAWS
+            name: "{{ cloudaws_name }}"
+            namespace: "{{ ns }}"
+          register: _ca_before
+
+        - name: Record the zone under test
+          ansible.builtin.set_fact:
+            _doomed_zone_id: "{{ (_ca_before.resources[0].status.route53ZoneId | default('')) if _ca_before.resources | length > 0 else '' }}"
+            _doomed_domain: "{{ (_ca_before.resources[0].status.domain | default(expected_domain)) if _ca_before.resources | length > 0 else expected_domain }}"
+
+        - name: Delete the CloudAWS account project
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: CloudAWS, name: "{{ cloudaws_name }}", namespace: "{{ ns }}" }
+
+        # The teardown is asynchronous in AWS even after the CR disappears.
+        - name: "AWS — wait for the tenant hosted zone to be reclaimed"
+          amazon.aws.route53_info:
+            query: hosted_zone
+          environment: "{{ aws_env }}"
+          register: _zones_after
+          until: >-
+            _zones_after.hosted_zones | default([])
+              | selectattr('name', 'equalto', _doomed_domain ~ '.')
+              | list | length == 0
+          retries: 30
+          delay: 10
+          failed_when: false
+
+        - name: Assert the Route53 zone was reclaimed
+          ansible.builtin.assert:
+            that: >-
+              _zones_after.hosted_zones | default([])
+                | selectattr('name', 'equalto', _doomed_domain ~ '.')
+                | list | length == 0
+            fail_msg: >-
+              Route53 hosted zone {{ _doomed_domain }}
+              (id {{ _doomed_zone_id }}) still exists after
+              CloudAWS/{{ cloudaws_name }} was deleted — the teardown left a
+              billable zone behind in account {{ aws_account }}.
+              Note cloudaws_teardown reads its AWS keys from Vault via
+              spec.cloudRef's credentialsRef.vaultPath ONLY; when the
+              CloudInfrastructure supplies credentials as a secretRef, as this
+              suite does, it falls back to the hard-coded default Vault path,
+              fails to resolve keys, and skips every Route53 deletion task
+              because they are all guarded on "aws_access_key_id is defined".
+            success_msg: "Route53 zone {{ _doomed_domain }} was reclaimed."
+            quiet: true
+
+        - name: "AWS — confirm the NS delegation was withdrawn from the parent zone"
+          amazon.aws.route53_info:
+            query: record_sets
+            hosted_zone_id: >-
+              {{ _zones_after.hosted_zones | default([])
+                 | selectattr('name', 'equalto', aws_base_domain ~ '.')
+                 | map(attribute='id') | first | default('')
+                 | regex_replace('^/hostedzone/', '') }}
+          environment: "{{ aws_env }}"
+          register: _parent_after
+          failed_when: false
+
+        - name: Assert the parent zone has no dangling NS delegation
+          ansible.builtin.assert:
+            that: >-
+              _parent_after.resource_record_sets | default([])
+                | selectattr('type', 'equalto', 'NS')
+                | selectattr('name', 'equalto', _doomed_domain ~ '.')
+                | list | length == 0
+            fail_msg: >-
+              {{ aws_base_domain }} still delegates {{ _doomed_domain }} to a
+              hosted zone that no longer exists — a dangling NS record, which
+              is a lame delegation.
+            success_msg: "NS delegation for {{ _doomed_domain }} was withdrawn."
+            quiet: true
+
+        - name: Withdraw jigglypuff's entitlement on the AWS infrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ aws_infra_name }}" }
+
+        - name: Delete the groups, the infrastructure and the entity
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs: >-
+              {{ (rbac_groups | map('community.general.dict_kv', 'name')
+                  | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)
+                 + [{'kind': 'CloudInfrastructure', 'name': aws_infra_name, 'namespace': hs_platform_ns},
+                    {'kind': 'Entity', 'name': e, 'namespace': hs_platform_ns}] }}
+
+        - name: Remove the AWS admin credentials Secret
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: Secret
+            name: "{{ aws_creds_secret }}"
+            namespace: "{{ hs_platform_ns }}"
