@@ -1,0 +1,81 @@
+=========================================================
+Mewtwo — HybridSovereign platform health
+=========================================================
+Namespaces checked : sovereign-cloud, sovereign-cloud-helpers, sovereign-cloud-jobs, sovereign-cloud-plugins, sovereign-secrets, sovereign-ui
+Restart threshold  : 10
+argocd_strict      : false
+assert_all_crs_ready: False
+
+WORKLOADS
+---------
+Deployments+StatefulSets : 29
+DaemonSets               : 0
+Short of replicas        : 0
+
+PODS
+----
+Total pods               : 31
+Bad container state      : 0
+Over 10 restarts        : 0
+
+CRDS
+----
+hybridsovereign.redhat CRDs : 26 (expected 26)
+Not Established             : 0
+
+OPERATORS
+---------
+Controller pods          : 24
+Not Running              : 0
+
+ARGOCD APPLICATIONS
+-------------------
+Total                    : 19
+OutOfSync / not Healthy  : 3
+  - openshift-gitops/field-content sync=Synced health=Healthy
+  - openshift-gitops/hs-aap-config sync=Synced health=Healthy
+  - openshift-gitops/hs-acm sync=Synced health=Progressing
+  - openshift-gitops/hs-argocd-capacity sync=Synced health=Healthy
+  - openshift-gitops/hs-crds sync=Synced health=Healthy
+  - openshift-gitops/hs-eso sync=Synced health=Healthy
+  - openshift-gitops/hs-gitea sync=Synced health=Healthy
+  - openshift-gitops/hs-iaac sync=OutOfSync health=Healthy
+  - openshift-gitops/hs-ingress sync=Synced health=Healthy
+  - openshift-gitops/hs-mce sync=Synced health=Healthy
+  - openshift-gitops/hs-operators sync=Synced health=Healthy
+  - openshift-gitops/hs-platform-configs sync=Synced health=Healthy
+  - openshift-gitops/hs-platform-fabric sync=OutOfSync health=Healthy
+  - openshift-gitops/hs-platform-smoke sync=Synced health=Healthy
+  - openshift-gitops/hs-quay sync=Synced health=Healthy
+  - openshift-gitops/hs-samples sync=Synced health=Healthy
+  - openshift-gitops/hs-security sync=Synced health=Healthy
+  - openshift-gitops/hs-ui sync=Synced health=Healthy
+  - openshift-gitops/hs-vault sync=Synced health=Healthy
+
+HYBRIDSOVEREIGN CRS
+-------------------
+CRs with a Ready condition : 50
+Not Ready                  : 9
+  - Assignment entity-acme-corp/acme-platform-eng-hub ready=False
+  - CloudGateway sovereign-cloud/acme-oso1-gw ready=False
+  - CloudGateway sovereign-cloud/hub-virt-gw ready=False
+  - CloudInfrastructure sovereign-cloud/oso1 ready=False
+  - HybridNetwork entity-acme-corp/acme-core ready=False
+  - HybridNetwork entity-chad/chad-app ready=False
+  - NetworkPlacement entity-acme-corp/acme-core-hub ready=False
+  - NetworkPlacement entity-chad/chad-app-hub ready=False
+  - TransportLink sovereign-cloud/acme-oso1-link ready=False
+
+ROUTES
+------
+  - sovereign-ui/sovereign-cloud-dashboard http=302
+  - sovereign-ui/tenancy-dashboard http=302
+  - sovereign-cloud/fabric-bgw http=400
+
+UIHEALTHCHECKER
+---------------
+Total                    : 3
+Not Ready                : 0
+
+This report contains no credentials by construction.
+=========================================================

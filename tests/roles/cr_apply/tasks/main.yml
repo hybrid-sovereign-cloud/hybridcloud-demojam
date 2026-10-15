@@ -1,0 +1,23 @@
+---
+# Apply a list of HybridSovereign CR definitions.
+#
+# Required:
+#   cr_apply_defs : list of full CR dicts (apiVersion/kind/metadata/spec)
+# Optional:
+#   cr_apply_label: stamp every object with the suite label (default true)
+
+- name: Stamp the test-suite label onto every object
+  ansible.builtin.set_fact:
+    _defs: >-
+      {{ cr_apply_defs | map('combine',
+           {'metadata': {'labels': hs_test_labels}}, recursive=True) | list }}
+  when: cr_apply_label | default(true) | bool
+
+- name: Apply CRs
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+    apply: true
+  loop: "{{ _defs | default(cr_apply_defs) }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"

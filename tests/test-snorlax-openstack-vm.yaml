@@ -1,0 +1,550 @@
+---
+# =============================================================================
+# test-snorlax-openstack-vm.yaml — one small VM on a hybrid network
+#
+#   --tags create   Entity -> Rbac -> CloudOSO -> HybridNetwork ->
+#                   NetworkPlacement, then a keypair, a security group and
+#                   exactly ONE tiny VM on the placed network
+#   --tags test     the server is ACTIVE, its address is inside the placement
+#                   prefix, and its port is on the expected Neutron network
+#   --tags destroy  server, keypair, security group, then the CRs in reverse;
+#                   prove the VM is gone from Nova and the VNI was released
+#
+# NETWORKING ONLY. The OpenStack lab has no capacity for a full OpenShift
+# deployment, so this suite never creates a PlatformOpenshift CR. The VM is
+# deliberately tiny — one instance, the smallest flavor the lab offers, no
+# volume, no floating IP — because its only job is to prove that a port on
+# the hybrid network comes up with an address from the tenant prefix.
+#
+# When OSO_CLOUDS is unset, or CloudInfrastructure/oso1 or its CloudGateway
+# is not Ready, the play ends cleanly with a loud SKIPPED banner rather than
+# failing: an OpenStack site that is down is an environment fact.
+# =============================================================================
+- name: "Snorlax — a small OpenStack VM proving the hybrid network carries traffic"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+    group/openstack.cloud.openstack:
+      cloud: "{{ oso_cloud }}"
+
+  vars:
+    e: "{{ poke.openstack_vm.entity }}"
+    ns: "{{ poke.openstack_vm.ns }}"
+    cloudoso_name: snorlax-oso
+    oso_project: snorlax-qa
+    hn_name: snorlax-core
+    np_name: snorlax-core-oso
+    prefix: "{{ poke_cidr.snorlax_oso }}"
+    rbac_groups:
+      - snorlax-project-admins
+      - snorlax-project-members
+      - snorlax-project-viewers
+    keypair_name: snorlax-qa-key
+    secgroup_name: snorlax-qa-sg
+    server_name: snorlax-probe-1
+
+  environment:
+    # clouds.yaml location comes from OSO_CLOUDS; never hardcoded in-tree.
+    OS_CLIENT_CONFIG_FILE: "{{ oso_clouds_file }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the tenant network and the probe VM
+      tags: [create]
+      block:
+        # ---- Preflight: is the OpenStack site usable at all? ----------------
+        - name: "Preflight — announce the suite is skipped without clouds.yaml"
+          ansible.builtin.debug:
+            msg: >-
+              ========== SNORLAX SKIPPED ==========
+              OSO_CLOUDS is unset, so there is no OpenStack credential to boot
+              a VM with. Export OSO_CLOUDS=/path/to/clouds.yaml and OS_CLOUD
+              to run this suite.
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: "Preflight — read the OpenStack CloudInfrastructure"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudInfrastructure
+            name: "{{ hs_oso_cloudinfra }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _oso_ci
+
+        - name: "Preflight — find the CloudGateway for that site"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudGateway
+            namespace: "{{ hs_platform_ns }}"
+          register: _gw_all
+
+        - name: Keep the gateways that point at this site
+          ansible.builtin.set_fact:
+            _site_gw: >-
+              {{ _gw_all.resources | default([])
+                 | selectattr('spec.cloudRef.name', 'defined')
+                 | selectattr('spec.cloudRef.name', 'equalto', hs_oso_cloudinfra)
+                 | list }}
+
+        - name: Decide whether the site is usable
+          ansible.builtin.set_fact:
+            _site_ready: >-
+              {{ (_oso_ci.resources | default([]) | length > 0)
+                 and (_oso_ci.resources[0].status.conditions | default([])
+                      | selectattr('type', 'equalto', 'Ready')
+                      | selectattr('status', 'equalto', 'True') | list | length > 0)
+                 and (_site_gw | length > 0)
+                 and (_site_gw[0].status.conditions | default([])
+                      | selectattr('type', 'equalto', 'Ready')
+                      | selectattr('status', 'equalto', 'True') | list | length > 0) }}
+
+        - name: "Preflight — announce the suite is skipped on an unready site"
+          ansible.builtin.debug:
+            msg: >-
+              ========== SNORLAX SKIPPED ==========
+              The OpenStack site is not Ready on this hub, so there is nowhere
+              to boot the probe VM.
+              CloudInfrastructure/{{ hs_oso_cloudinfra }}:
+              {{ (_oso_ci.resources | default([]) | length > 0)
+                 | ternary('present', 'MISSING') }}
+              conditions={{ _oso_ci.resources[0].status.conditions | default([]) }}
+              CloudGateway: {{ _site_gw | map(attribute='metadata.name') | list }}
+              conditions={{ _site_gw[0].status.conditions | default([]) if _site_gw | length > 0 else [] }}
+              Bring the site and its gateway up, then re-run.
+          when: not (_site_ready | bool)
+
+        - name: End the play when the OpenStack site is not Ready
+          ansible.builtin.meta: end_play
+          when: not (_site_ready | bool)
+
+        - name: "Preflight — the shared fabric must already be healthy"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fab
+
+        - name: Assert the fabric is enabled and Ready
+          ansible.builtin.assert:
+            that:
+              - _fab.resources | length > 0
+              - _fab.resources[0].spec.enabled | bool
+              - >-
+                _fab.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              HybridFabric/{{ hs_fabric }} is not Ready; a VM placed on it
+              would prove nothing.
+            quiet: true
+
+        # ---- The CR stack ---------------------------------------------------
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Snorlax — QA tenant for the OpenStack VM probe"
+                  billingID: "SNORLAX-TEST-001"
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        - name: Create the Rbac groups the CloudOSO project will bind
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Rbac
+                metadata: { name: "{{ item }}", namespace: "{{ ns }}" }
+                spec:
+                  config: "{{ hs_rbac_config }}"
+                  description: "QA group {{ item }} for tenant {{ e }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for every Rbac CR to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Rbac
+            cr_wait_name: "{{ item }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Create the CloudOSO project on the OpenStack site
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudOSO
+                metadata: { name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+                spec:
+                  project: "{{ oso_project }}"
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ hs_oso_cloudinfra }}" }
+                  baseDomain: oso.local
+                  externalNetwork: "{{ oso_external_network }}"
+                  # NOTE: spec.toolRbac is deliberately NOT set here.
+                  # The CloudOSO CRD does not define it and does not set
+                  # x-kubernetes-preserve-unknown-fields, so the API server
+                  # prunes it silently — asserting on it would test nothing.
+                  # (samples/cloudoso/*.yaml still carries it; that sample is
+                  # equally a no-op today. Tracked as a platform gap.)
+
+        - name: Wait for the CloudOSO
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudOSO
+            cr_wait_name: "{{ cloudoso_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Create the HybridNetwork (allocates a VNI from the fabric pool)
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: HybridNetwork
+                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                spec:
+                  fabricRef: "{{ hs_fabric }}"
+                  description: "Snorlax core VRF — QA hybrid network for the VM probe"
+
+        - name: Wait for the HybridNetwork
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: HybridNetwork
+            cr_wait_name: "{{ hn_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Place the network onto the OpenStack backend
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: NetworkPlacement
+                metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
+                spec:
+                  network: "{{ hn_name }}"
+                  backend: { kind: CloudOSO, name: "{{ cloudoso_name }}" }
+                  prefixes: ["{{ prefix }}"]
+
+        - name: Wait for the NetworkPlacement
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: NetworkPlacement
+            cr_wait_name: "{{ np_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        # ---- Find the Neutron network the placement actually programmed -----
+        - name: "Neutron — find the subnet carrying the placement prefix"
+          openstack.cloud.subnets_info:
+          register: _subnets
+
+        - name: Resolve the placement's subnet and network id
+          ansible.builtin.set_fact:
+            _np_subnet: >-
+              {{ (_subnets.subnets | default([])
+                  | selectattr('cidr', 'defined')
+                  | selectattr('cidr', 'equalto', prefix) | list | first) }}
+          when: >-
+            _subnets.subnets | default([])
+              | selectattr('cidr', 'defined')
+              | selectattr('cidr', 'equalto', prefix) | list | length > 0
+
+        - name: Assert the placement produced a usable subnet to boot onto
+          ansible.builtin.assert:
+            that: _np_subnet is defined
+            fail_msg: >-
+              No Neutron subnet with CIDR {{ prefix }} exists, so there is no
+              tenant network to attach the probe VM to. NetworkPlacement/{{ np_name }}
+              did not programme the site.
+            quiet: true
+
+        - name: "Neutron — resolve the network the subnet belongs to"
+          openstack.cloud.networks_info:
+            filters:
+              id: "{{ _np_subnet.network_id }}"
+          register: _np_net
+
+        - name: Keep the network name for the server attachment
+          ansible.builtin.set_fact:
+            _np_network_name: "{{ _np_net.networks[0].name }}"
+            _np_network_id: "{{ _np_net.networks[0].id }}"
+
+        # ---- The deliberately tiny probe ------------------------------------
+        - name: "Nova — a throwaway keypair for the probe VM"
+          openstack.cloud.keypair:
+            state: present
+            name: "{{ keypair_name }}"
+          register: _kp
+
+        - name: "Neutron — security group allowing ICMP and SSH inside the prefix"
+          openstack.cloud.security_group:
+            state: present
+            name: "{{ secgroup_name }}"
+            description: >-
+              QA probe group for {{ e }} — ICMP and SSH from {{ prefix }} only.
+          register: _sg
+
+        - name: "Neutron — ICMP from inside the tenant prefix"
+          openstack.cloud.security_group_rule:
+            state: present
+            security_group: "{{ secgroup_name }}"
+            direction: ingress
+            ether_type: IPv4
+            protocol: icmp
+            remote_ip_prefix: "{{ prefix }}"
+
+        - name: "Neutron — SSH from inside the tenant prefix"
+          openstack.cloud.security_group_rule:
+            state: present
+            security_group: "{{ secgroup_name }}"
+            direction: ingress
+            ether_type: IPv4
+            protocol: tcp
+            port_range_min: 22
+            port_range_max: 22
+            remote_ip_prefix: "{{ prefix }}"
+
+        # One instance, smallest flavor, no volume, no floating IP. This is a
+        # network probe, not a workload: anything bigger would not fit the lab.
+        - name: "Nova — boot exactly one small probe VM on the hybrid network"
+          openstack.cloud.server:
+            state: present
+            name: "{{ server_name }}"
+            image: "{{ oso_test_image }}"
+            flavor: "{{ oso_test_flavor }}"
+            key_name: "{{ keypair_name }}"
+            security_groups: ["{{ secgroup_name }}"]
+            network: "{{ _np_network_name }}"
+            auto_ip: false
+            wait: true
+            timeout: "{{ hs_ready_timeout | int }}"
+          register: _vm
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the probe VM is genuinely on the tenant network
+      tags: [test]
+      block:
+        - name: Skip the checks when OpenStack is not configured
+          ansible.builtin.debug:
+            msg: "========== SNORLAX SKIPPED ========== OSO_CLOUDS is unset."
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: "Network — VNI, uniqueness and placement readiness"
+          ansible.builtin.include_role:
+            name: verify_hybrid_network
+          vars:
+            hn_name: "{{ hn_name }}"
+            hn_namespace: "{{ ns }}"
+            hn_placements:
+              - { name: "{{ np_name }}", namespace: "{{ ns }}" }
+
+        - name: "Nova — read the probe VM back from the API"
+          openstack.cloud.server_info:
+            name: "{{ server_name }}"
+          register: _srv
+
+        - name: Assert the VM exists and reached ACTIVE
+          ansible.builtin.assert:
+            that:
+              - _srv.servers | default([]) | length == 1
+              - _srv.servers[0].status == 'ACTIVE'
+            fail_msg: >-
+              Probe VM '{{ server_name }}' is
+              '{{ _srv.servers[0].status | default('MISSING') }}', not ACTIVE.
+              fault={{ _srv.servers[0].fault | default('none') }}
+            success_msg: "Probe VM '{{ server_name }}' is ACTIVE."
+            quiet: true
+
+        - name: "Neutron — read the ports belonging to the probe VM"
+          openstack.cloud.port_info:
+            filters:
+              device_id: "{{ _srv.servers[0].id }}"
+          register: _ports
+
+        - name: Collect the VM's fixed addresses
+          ansible.builtin.set_fact:
+            _vm_addrs: >-
+              {{ _ports.ports | default([])
+                 | map(attribute='fixed_ips') | flatten
+                 | map(attribute='ip_address') | list }}
+
+        - name: Assert the VM got an address inside the tenant prefix
+          ansible.builtin.assert:
+            that:
+              - _vm_addrs | length > 0
+              - _vm_addrs | ansible.utils.ipaddr(prefix) | length > 0
+            fail_msg: >-
+              Probe VM '{{ server_name }}' has addresses {{ _vm_addrs }}, none
+              of which are inside {{ prefix }}. The VM is not on the tenant
+              hybrid network.
+            success_msg: >-
+              Probe VM addresses {{ _vm_addrs }} are inside {{ prefix }}.
+            quiet: true
+
+        - name: Assert the port is on the network the placement created
+          ansible.builtin.assert:
+            that:
+              - >-
+                _ports.ports | default([])
+                  | selectattr('network_id', 'equalto', _np_network_id)
+                  | list | length > 0
+            fail_msg: >-
+              No port of '{{ server_name }}' is on network
+              {{ _np_network_id }} ({{ _np_network_name }}); the VM landed on
+              {{ _ports.ports | default([]) | map(attribute='network_id') | list }}.
+            success_msg: "The probe VM's port is on '{{ _np_network_name }}'."
+            quiet: true
+
+        # L3 data-plane reachability is deliberately NOT asserted here. With a
+        # single VM, no floating IP and no jump host on the tenant prefix,
+        # there is nowhere to ping *from* — a ping run from the controller
+        # would only prove the controller's own routing, not the fabric's.
+        # Proving the data plane needs either a second VM on the same hybrid
+        # network (ideally on the hub side, to cross the TransportLink) or a
+        # jump host inside the prefix. Until then we assert on Nova and
+        # Neutron facts only, and we do not pretend otherwise.
+        - name: Note what this suite does and does not prove
+          ansible.builtin.debug:
+            msg: >-
+              Control plane verified: the VM is ACTIVE with an address in
+              {{ prefix }} on network '{{ _np_network_name }}'. L3 data-plane
+              reachability across the fabric is NOT asserted — that requires a
+              second VM or a jump host inside the prefix.
+
+    # =========================================================================
+    # DESTROY
+    # =========================================================================
+    - name: Tear the probe VM and the tenant network down
+      tags: [destroy]
+      block:
+        - name: Skip the teardown when OpenStack is not configured
+          ansible.builtin.debug:
+            msg: "========== SNORLAX SKIPPED ========== OSO_CLOUDS is unset."
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: Record the VNI before deleting, so we can prove it is released
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+            name: "{{ hn_name }}"
+            namespace: "{{ ns }}"
+          register: _pre
+
+        - name: Keep the VNI
+          ansible.builtin.set_fact:
+            _old_vni: "{{ _pre.resources[0].status.vni | default(0) }}"
+          when: _pre.resources | length > 0
+
+        - name: "Nova — delete the probe VM"
+          openstack.cloud.server:
+            state: absent
+            name: "{{ server_name }}"
+            wait: true
+            timeout: "{{ hs_destroy_timeout | int }}"
+
+        - name: "Nova — delete the throwaway keypair"
+          openstack.cloud.keypair:
+            state: absent
+            name: "{{ keypair_name }}"
+
+        - name: "Neutron — delete the probe security group"
+          openstack.cloud.security_group:
+            state: absent
+            name: "{{ secgroup_name }}"
+
+        - name: "Nova — the probe VM is gone"
+          openstack.cloud.server_info:
+            name: "{{ server_name }}"
+          register: _srv_post
+
+        - name: Assert Nova no longer knows the probe VM
+          ansible.builtin.assert:
+            that: _srv_post.servers | default([]) | length == 0
+            fail_msg: >-
+              Probe VM '{{ server_name }}' still exists in Nova after deletion
+              — the teardown leaks instances in the lab project.
+            success_msg: "Probe VM '{{ server_name }}' was deleted."
+            quiet: true
+
+        - name: Delete placement, network and the CloudOSO project in order
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: NetworkPlacement, name: "{{ np_name }}", namespace: "{{ ns }}" }
+              - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudOSO, name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+
+        - name: Delete the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Rbac, name: "{{ item }}", namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        - name: Delete the Entity last
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        - name: Read every remaining HybridNetwork
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+          register: _post
+
+        - name: VNI released back to the pool
+          ansible.builtin.assert:
+            that: >-
+              _post.resources | map(attribute='status.vni', default=0)
+                | select('equalto', _old_vni | int) | list | length == 0
+            fail_msg: >-
+              VNI {{ _old_vni }} is still claimed after Snorlax was deleted —
+              the pool leaks VNIs, and the fabric will eventually exhaust it.
+            success_msg: "VNI {{ _old_vni }} was returned to the pool."
+            quiet: true
+          when: _old_vni is defined and (_old_vni | int) > 0

@@ -1,0 +1,304 @@
+---
+# =============================================================================
+# test-ditto-iaac.yaml — IaaC git-export, verified in place
+#
+#   --tags create   NO-OP. Ditto never creates an Iaac CR.
+#   --tags test     verify the LIVE Iaac CR, its git-sync workload and its
+#                   export target, read only
+#   --tags destroy  NO-OP. Ditto never deletes an Iaac CR.
+#
+# *** HARD CONSTRAINT: THE IAAC RESOURCE IS ONLY EVER TESTED. ***
+# *** THIS SUITE MUST NEVER CREATE, MODIFY OR DELETE AN Iaac CR. ***
+#
+# The Iaac CR owns the platform's git export — the running cluster's own
+# declarative state. Creating a test copy would push test content at a real
+# repository, and deleting the live one would take the export offline. So the
+# live CR in {{ hs_plugins_ns }} is inspected where it stands: every task
+# below is a read. If the CR is missing the suite FAILS; it does not create it.
+#
+# Nothing here prints a token. The CR's status is reported with any
+# credential-bearing repo URL redacted before it reaches the log.
+# =============================================================================
+- name: "Ditto — IaaC git-export, verified in place"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    iaac_name: iaac
+    iaac_ns: "{{ hs_plugins_ns }}"
+
+    # The git-sync workload can be reconciled into either namespace depending
+    # on whether it runs as a Deployment or as a scheduled job.
+    iaac_workload_ns:
+      - "{{ hs_plugins_ns }}"
+      - sovereign-cloud-jobs
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE — forbidden by design
+    # =========================================================================
+    - name: Create nothing
+      tags: [create]
+      block:
+        - name: "Ditto creates no Iaac CR"
+          ansible.builtin.debug:
+            msg: "Ditto never creates an Iaac CR — the live one is tested in place."
+
+    # =========================================================================
+    # TEST — the live CR, where it stands
+    # =========================================================================
+    - name: Verify the live IaaC export
+      tags: [test]
+      block:
+        - name: "Iaac — read the live CR (read only, never applied)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: Iaac
+            name: "{{ iaac_name }}"
+            namespace: "{{ iaac_ns }}"
+          register: _iaac
+
+        - name: Assert the live Iaac CR exists
+          ansible.builtin.assert:
+            that: _iaac.resources | length > 0
+            fail_msg: >-
+              No Iaac CR named '{{ iaac_name }}' in namespace {{ iaac_ns }}.
+              Ditto will NOT create it: this suite is bound by a hard
+              constraint that the IaaC resource is only ever tested, never
+              created, modified or deleted. Provision the Iaac CR through the
+              platform's own GitOps path and re-run this suite.
+            success_msg: "Iaac/{{ iaac_name }} found in {{ iaac_ns }}."
+            quiet: true
+
+        - name: Keep the CR for the rest of the suite
+          ansible.builtin.set_fact:
+            _cr: "{{ _iaac.resources[0] }}"
+
+        - name: Assert the Iaac CR is Ready
+          ansible.builtin.assert:
+            that: >-
+              _cr.status.conditions | default([])
+                | selectattr('type', 'equalto', 'Ready')
+                | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              Iaac/{{ iaac_name }} is not Ready. Conditions:
+              {{ _cr.status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+            success_msg: "Iaac/{{ iaac_name }} is Ready."
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # The workload that actually performs the export.
+        # ---------------------------------------------------------------------
+        - name: "git-sync — look for a backing Deployment"
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            namespace: "{{ item }}"
+          loop: "{{ iaac_workload_ns }}"
+          register: _iaac_deploys
+
+        # The live export runs as a StatefulSet (iaac-git-sync); earlier
+        # revisions used a Deployment or CronJob, so all four are searched.
+        - name: "git-sync — look for a backing StatefulSet"
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: StatefulSet
+            namespace: "{{ item }}"
+          loop: "{{ iaac_workload_ns }}"
+          register: _iaac_sts
+          failed_when: false
+
+        - name: "git-sync — look for a backing CronJob"
+          kubernetes.core.k8s_info:
+            api_version: batch/v1
+            kind: CronJob
+            namespace: "{{ item }}"
+          loop: "{{ iaac_workload_ns }}"
+          register: _iaac_cronjobs
+          failed_when: false
+
+        - name: "git-sync — look for Jobs"
+          kubernetes.core.k8s_info:
+            api_version: batch/v1
+            kind: Job
+            namespace: "{{ item }}"
+          loop: "{{ iaac_workload_ns }}"
+          register: _iaac_jobs
+          failed_when: false
+
+        # Match on the CR name so a renamed Iaac still finds its own workload.
+        - name: Narrow each collection down to the IaaC workloads
+          ansible.builtin.set_fact:
+            _iaac_dep: >-
+              {{ _iaac_deploys.results | map(attribute='resources') | flatten
+                 | selectattr('metadata.name', 'search', iaac_name ~ '|iaac|git-sync|gitexport')
+                 | list }}
+            _iaac_sts_m: >-
+              {{ (_iaac_sts.results | map(attribute='resources', default=[]) | flatten)
+                 | selectattr('metadata.name', 'search', iaac_name ~ '|iaac|git-sync|gitexport')
+                 | list }}
+            _iaac_cj: >-
+              {{ (_iaac_cronjobs.results | map(attribute='resources', default=[]) | flatten)
+                 | selectattr('metadata.name', 'search', iaac_name ~ '|iaac|git-sync|gitexport')
+                 | list }}
+            _iaac_jb: >-
+              {{ (_iaac_jobs.results | map(attribute='resources', default=[]) | flatten)
+                 | selectattr('metadata.name', 'search', iaac_name ~ '|iaac|git-sync|gitexport')
+                 | list }}
+
+        - name: Report what backs the export
+          ansible.builtin.debug:
+            msg:
+              deployments: "{{ _iaac_dep | json_query('[].{ns: metadata.namespace, name: metadata.name, ready: status.readyReplicas, want: spec.replicas}') }}"
+              statefulsets: "{{ _iaac_sts_m | json_query('[].{ns: metadata.namespace, name: metadata.name, ready: status.readyReplicas, want: spec.replicas}') }}"
+              cronjobs: "{{ _iaac_cj | json_query('[].{ns: metadata.namespace, name: metadata.name, suspend: spec.suspend, last: status.lastScheduleTime}') }}"
+              jobs: "{{ _iaac_jb | json_query('[].{ns: metadata.namespace, name: metadata.name, succeeded: status.succeeded, failed: status.failed, completed: status.completionTime}') }}"
+
+        - name: Assert a git-sync workload exists at all
+          ansible.builtin.assert:
+            that: (_iaac_dep + _iaac_sts_m + _iaac_cj + _iaac_jb) | length > 0
+            fail_msg: >-
+              Iaac/{{ iaac_name }} reports Ready but no Deployment,
+              StatefulSet, CronJob or Job backing the git export exists in
+              {{ iaac_workload_ns | join(' or ') }}. Nothing is exporting.
+            quiet: true
+
+        # Pick the most recent Job by completion/start time: a CronJob-driven
+        # export is healthy iff its latest run succeeded.
+        - name: Find the most recent IaaC Job
+          ansible.builtin.set_fact:
+            _last_job: >-
+              {{ (_iaac_jb
+                  | sort(attribute='status.startTime', reverse=true)
+                  | list | first) | default({}, true) }}
+          when: _iaac_jb | length > 0
+
+        - name: Assert the export workload is available, or its last run succeeded
+          ansible.builtin.assert:
+            that:
+              - >-
+                (_iaac_dep | json_query('[?status.readyReplicas > `0`]') | length > 0)
+                or (_iaac_sts_m | json_query('[?status.readyReplicas > `0`]') | length > 0)
+                or ((_last_job | default({})).get('status', {}).get('succeeded', 0) | int > 0)
+            fail_msg: >-
+              The IaaC git-sync workload is not healthy. Deployments:
+              {{ _iaac_dep | json_query('[].{name: metadata.name, ready: status.readyReplicas}') }};
+              StatefulSets:
+              {{ _iaac_sts_m | json_query('[].{name: metadata.name, ready: status.readyReplicas}') }};
+              most recent Job:
+              {{ (_last_job | default({})) | json_query('{name: metadata.name, succeeded: status.succeeded, failed: status.failed}') }}.
+              Neither an available Deployment nor a successful recent Job was
+              found, so the export is not running.
+            success_msg: "The IaaC git-sync workload is healthy."
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # Status reporting — redacted.
+        # ---------------------------------------------------------------------
+        - name: Work out the export target and last sync, with credentials stripped
+          ansible.builtin.set_fact:
+            _repo_raw: >-
+              {{ _cr.status.repository
+                 | default(_cr.status.targetRepo
+                 | default(_cr.spec.repository
+                 | default(_cr.spec.gitRepo
+                 | default(_cr.spec.repo | default('', true), true), true), true), true) }}
+            _last_sync: >-
+              {{ _cr.status.lastSyncTime
+                 | default(_cr.status.lastSync
+                 | default(_cr.status.lastExportTime | default('unknown', true), true), true) }}
+
+        # Any https://user:token@host form is collapsed before it is printed.
+        - name: Redact anything that looks like an embedded credential
+          ansible.builtin.set_fact:
+            _repo: "{{ _repo_raw | regex_replace('://[^/@ ]+@', '://<redacted>@') }}"
+
+        - name: Report the IaaC export status
+          ansible.builtin.debug:
+            msg:
+              name: "{{ iaac_ns }}/{{ iaac_name }}"
+              ready: >-
+                {{ _cr.status.conditions | default([])
+                   | selectattr('type', 'equalto', 'Ready')
+                   | map(attribute='status') | list | first | default('unknown') }}
+              target_repo: "{{ _repo | default('not published in status', true) }}"
+              last_sync: "{{ _last_sync }}"
+
+        # ---------------------------------------------------------------------
+        # Reachability — only if it needs no credentials.
+        # ---------------------------------------------------------------------
+        - name: Decide whether the target repo can be probed unauthenticated
+          ansible.builtin.set_fact:
+            # A URL carrying an embedded credential, or a non-HTTP transport
+            # like git@host:org/repo or ssh://, cannot be probed without one.
+            _repo_probeable: >-
+              {{ _repo | length > 0
+                 and _repo is match('^https?://')
+                 and '<redacted>@' not in _repo }}
+
+        - name: Skip the reachability probe — it would need credentials
+          ansible.builtin.debug:
+            msg: >-
+              Skipping the export-target reachability check: the repo URL is
+              either absent from status, not HTTP(S), or carries an embedded
+              credential, so it cannot be reached anonymously. Ditto does not
+              invent credentials, so this check is skipped rather than guessed.
+          when: not (_repo_probeable | bool)
+
+        - name: Probe the export target anonymously
+          ansible.builtin.uri:
+            url: "{{ _repo }}"
+            validate_certs: false
+            follow_redirects: safe
+            status_code: [200, 301, 302, 401, 403]
+            timeout: 30
+          register: _repo_probe
+          failed_when: false
+          no_log: true
+          when: _repo_probeable | bool
+
+        # The probe is no_log, so only the status code is surfaced — never a
+        # response body, which could echo back a token in an error payload.
+        - name: Report the export target reachability
+          ansible.builtin.debug:
+            msg: >-
+              Export target responded with HTTP
+              {{ _repo_probe.status | default('no response') }}.
+          when: _repo_probeable | bool
+
+        - name: Assert the export target is reachable
+          ansible.builtin.assert:
+            that:
+              - _repo_probe.status is defined
+              - (_repo_probe.status | int) < 500
+            fail_msg: >-
+              The IaaC export target is unreachable (HTTP
+              {{ _repo_probe.status | default('no response') }}). The CR is
+              Ready but it has nowhere to push.
+            success_msg: "The IaaC export target is reachable."
+            quiet: true
+          when: _repo_probeable | bool
+
+    # =========================================================================
+    # DESTROY — forbidden by design
+    # =========================================================================
+    - name: Destroy nothing
+      tags: [destroy]
+      block:
+        - name: "Ditto deletes no Iaac CR"
+          ansible.builtin.debug:
+            msg: >-
+              Ditto never creates an Iaac CR — the live one is tested in place,
+              so there is nothing of Ditto's to delete. Deleting the live Iaac
+              CR would take the platform's git export offline, and this suite
+              is forbidden from touching it.

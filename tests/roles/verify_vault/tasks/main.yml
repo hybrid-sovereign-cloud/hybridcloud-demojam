@@ -1,0 +1,131 @@
+---
+# Prove the Vault CR produced a real, reachable, unsealed Vault, and that the
+# VaultKV CR produced a real KV mount.
+#
+# The operator publishes the tenant Vault's route as .status.vaultUrl and its
+# root token in the Secret named by .status.adminSecretName, so this role
+# resolves both from the cluster. The user does not have to supply VAULT_TOKEN
+# unless they are pointing at an external Vault.
+#
+# Required:
+#   vault_cr_name, vault_cr_namespace
+# Optional:
+#   vault_kv_mounts : list of KV mount names that must exist
+
+- name: Read the Vault CR
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: Vault
+    name: "{{ vault_cr_name }}"
+    namespace: "{{ vault_cr_namespace }}"
+  register: _vcr
+
+- name: Assert the operator published a Vault endpoint
+  ansible.builtin.assert:
+    that:
+      - _vcr.resources | length > 0
+      - (_vcr.resources[0].status.vaultUrl | default('')) | length > 0
+    fail_msg: >-
+      Vault/{{ vault_cr_name }} has no .status.vaultUrl — the operator never
+      exposed a route for the tenant Vault.
+    success_msg: "Vault/{{ vault_cr_name }} published a route."
+    quiet: true
+
+- name: Resolve the Vault address
+  ansible.builtin.set_fact:
+    _vault_addr: "{{ (vault_addr_override if vault_addr_override | length > 0
+                      else _vcr.resources[0].status.vaultUrl) | regex_replace('/$', '') }}"
+
+- name: Check Vault health
+  ansible.builtin.uri:
+    url: "{{ _vault_addr }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    # 200 active, 429 standby, 472/473 DR/perf standby — all "alive".
+    # 501 uninitialised and 503 sealed are reachable-but-broken; the assert
+    # below turns those into a precise failure instead of a retry timeout.
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: _vhealth
+  retries: 12
+  delay: 10
+  until: _vhealth.status in [200, 429, 472, 473]
+  failed_when: false
+
+- name: Assert Vault is initialised and unsealed
+  ansible.builtin.assert:
+    that:
+      - _vhealth.json.initialized | default(false) | bool
+      - not (_vhealth.json.sealed | default(true) | bool)
+    fail_msg: >-
+      Vault at {{ _vault_addr }} returned HTTP {{ _vhealth.status }} with
+      initialized={{ _vhealth.json.initialized | default('?') }}
+      sealed={{ _vhealth.json.sealed | default('?') }}. A sealed or
+      uninitialised tenant Vault means the tenant cannot read its own secrets.
+    success_msg: "Vault at {{ _vault_addr }} is initialised and unsealed."
+    quiet: true
+
+# ---------------------------------------------------------------------------
+# KV mounts. The operator stores the root token in the Secret it names in
+# .status.adminSecretName, so we can authenticate without the user supplying
+# anything. An explicit VAULT_TOKEN override still wins.
+# ---------------------------------------------------------------------------
+- name: Read the Vault init Secret published by the operator
+  kubernetes.core.k8s_info:
+    kind: Secret
+    name: "{{ _vcr.resources[0].status.adminSecretName }}"
+    namespace: "{{ _vcr.resources[0].status.adminSecretNamespace | default(vault_cr_namespace) }}"
+  register: _vinit
+  when:
+    - vault_kv_mounts | default([]) | length > 0
+    - vault_token_override | length == 0
+    - (_vcr.resources[0].status.adminSecretName | default('')) | length > 0
+  no_log: true
+
+- name: Resolve a Vault token for the mount check
+  ansible.builtin.set_fact:
+    _vault_token: >-
+      {{ vault_token_override if vault_token_override | length > 0
+         else ((_vinit.resources[0].data.root_token | b64decode)
+               if (_vinit is not skipped and _vinit.resources | default([]) | length > 0)
+               else '') }}
+  when: vault_kv_mounts | default([]) | length > 0
+  no_log: true
+
+- name: List Vault mounts
+  ansible.builtin.uri:
+    url: "{{ _vault_addr }}/v1/sys/mounts"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_token }}"
+    validate_certs: false
+    status_code: [200, 403]
+  register: _vmounts
+  when:
+    - vault_kv_mounts | default([]) | length > 0
+    - _vault_token | default('') | length > 0
+  no_log: true
+
+- name: "Assert each expected KV mount exists"
+  ansible.builtin.assert:
+    # /v1/sys/mounts returns the mount table at .data on a token-authed call.
+    that: (item ~ '/') in (_vmounts.json.data | default(_vmounts.json))
+    fail_msg: >-
+      VaultKV CR reported Ready but mount '{{ item }}' is not present at
+      {{ _vault_addr }}. Mounts present:
+      {{ (_vmounts.json.data | default(_vmounts.json)).keys() | list }}
+    success_msg: "Vault KV mount '{{ item }}' exists."
+    quiet: true
+  loop: "{{ vault_kv_mounts | default([]) }}"
+  when:
+    - _vmounts is not skipped
+    - _vmounts.status | default(0) == 200
+
+- name: Note when the KV mount check could not be authenticated
+  ansible.builtin.debug:
+    msg: >-
+      SKIPPED the Vault KV mount check for {{ vault_kv_mounts | default([]) }} —
+      no token could be resolved (no VAULT_TOKEN and no readable init Secret).
+      The Vault CR, its route and its seal state were still verified.
+  when:
+    - vault_kv_mounts | default([]) | length > 0
+    - _vault_token | default('') | length == 0

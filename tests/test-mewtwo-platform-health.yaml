@@ -1,0 +1,597 @@
+---
+# =============================================================================
+# test-mewtwo-platform-health.yaml — whole-platform health, read only
+#
+#   --tags create   NO-OP. This suite creates nothing, ever.
+#   --tags test     every workload, pod, CRD, operator, ArgoCD Application,
+#                   HybridSovereign CR, UI route and UIHealthChecker on the hub
+#   --tags destroy  NO-OP. There is nothing to tear down.
+#
+# Mewtwo is deliberately read-only. It carries the same three tags as every
+# other suite purely so the interface is consistent and the runner can invoke
+# it the same way; create and destroy simply print why they do nothing.
+#
+# Nothing here mutates the cluster: only k8s_info reads and unauthenticated
+# HTTP HEAD-equivalents against public routes. No credential is ever printed,
+# and the report written at the end contains names, namespaces, statuses and
+# counts only.
+# =============================================================================
+- name: "Mewtwo — platform health"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    # The six platform namespaces that make up the hub control plane.
+    hs_namespaces:
+      - sovereign-cloud
+      - sovereign-cloud-helpers
+      - sovereign-cloud-jobs
+      - sovereign-cloud-plugins
+      - sovereign-secrets
+      - sovereign-ui
+
+    # A pod that has restarted more than this many times is reported even if
+    # it is currently Running — a quiet crash loop is still a crash loop.
+    max_restarts: 10
+
+    # The platform ships 26 CRDs in the hybridsovereign.redhat group.
+    expected_crd_count: 26
+
+    # ArgoCD drives the whole platform, so Synced+Healthy is asserted hard by
+    # default. Set false to downgrade it to a report when GitOps is mid-roll.
+    argocd_strict: true
+
+    # The lab legitimately carries some pre-existing not-Ready CRs — the oso1
+    # CloudInfrastructure, the CloudGateways and a TransportLink are all known
+    # to sit not-Ready without the platform being broken. So the CR readiness
+    # sweep tabulates and reports by default, and only fails the run when this
+    # is explicitly turned on for a known-clean cluster.
+    assert_all_crs_ready: false
+
+    # Routes that must answer. Anything below 500 means the service is up:
+    # a redirect to SSO or a 401/403 is a healthy, authenticating frontend.
+    health_routes:
+      - { namespace: sovereign-ui, name: sovereign-cloud-dashboard }
+      - { namespace: sovereign-ui, name: tenancy-dashboard }
+      - { namespace: sovereign-cloud, name: fabric-bgw }
+    route_ok_status: [200, 301, 302, 401, 403]
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE — intentionally empty
+    # =========================================================================
+    - name: Create nothing
+      tags: [create]
+      block:
+        - name: "Mewtwo creates no resources"
+          ansible.builtin.debug:
+            msg: >-
+              Mewtwo is a read-only platform health suite. It creates nothing.
+              The --tags create run is a no-op and exists only so this suite
+              shares the create/test/destroy interface with every other suite.
+              Run it with --tags test.
+
+    # =========================================================================
+    # TEST — the whole platform, top to bottom
+    # =========================================================================
+    - name: Check platform health
+      tags: [test]
+      block:
+        # ---------------------------------------------------------------------
+        # Workloads: desired replicas must actually be available.
+        # ---------------------------------------------------------------------
+        - name: "Workloads — collect every Deployment in the platform namespaces"
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            namespace: "{{ item }}"
+          loop: "{{ hs_namespaces }}"
+          register: _deploys
+
+        - name: "Workloads — collect every StatefulSet"
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: StatefulSet
+            namespace: "{{ item }}"
+          loop: "{{ hs_namespaces }}"
+          register: _sts
+
+        - name: "Workloads — collect every DaemonSet"
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: DaemonSet
+            namespace: "{{ item }}"
+          loop: "{{ hs_namespaces }}"
+          register: _ds
+
+        # Deployments and StatefulSets both expose spec.replicas /
+        # status.readyReplicas; a DaemonSet counts scheduled vs ready instead.
+        - name: Flatten the workloads into one comparable list
+          ansible.builtin.set_fact:
+            _workloads: >-
+              {{
+                (_deploys.results | map(attribute='resources') | flatten
+                   | map('combine', {'_hskind': 'Deployment'}) | list)
+                + (_sts.results | map(attribute='resources') | flatten
+                   | map('combine', {'_hskind': 'StatefulSet'}) | list)
+              }}
+            _daemonsets: >-
+              {{ _ds.results | map(attribute='resources') | flatten | list }}
+
+        # A workload scaled deliberately to zero is not an outage, so those are
+        # excluded; everything else must have readyReplicas == spec.replicas.
+        - name: Build the workload offender table
+          ansible.builtin.set_fact:
+            _workload_offenders: >-
+              {{
+                _workloads
+                | rejectattr('spec.replicas', 'eq', 0)
+                | selectattr('metadata.name', 'defined')
+                | map('to_json') | map('from_json') | list
+                | json_query('[?status.readyReplicas == null || status.readyReplicas < spec.replicas].{ns: metadata.namespace, name: metadata.name, kind: _hskind, want: spec.replicas, have: status.readyReplicas}')
+              }}
+            _daemonset_offenders: >-
+              {{
+                _daemonsets
+                | map('to_json') | map('from_json') | list
+                | json_query('[?status.numberReady < status.desiredNumberScheduled].{ns: metadata.namespace, name: metadata.name, kind: `DaemonSet`, want: status.desiredNumberScheduled, have: status.numberReady}')
+              }}
+
+        - name: Report workloads that are short of their desired replicas
+          ansible.builtin.debug:
+            msg: >-
+              {{ (_workload_offenders + _daemonset_offenders)
+                 | map('to_nice_json') | list }}
+          when: (_workload_offenders + _daemonset_offenders) | length > 0
+
+        - name: Assert every platform workload has its desired replicas available
+          ansible.builtin.assert:
+            that: (_workload_offenders + _daemonset_offenders) | length == 0
+            fail_msg: >-
+              {{ (_workload_offenders + _daemonset_offenders) | length }}
+              platform workload(s) are short of replicas:
+              {{ (_workload_offenders + _daemonset_offenders)
+                 | map('to_json') | list | join(', ') }}
+            success_msg: >-
+              All {{ _workloads | length + _daemonsets | length }} platform
+              workloads report their desired replicas available.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # Pods: no crash loops, no image pull failures, no silent restarts.
+        # ---------------------------------------------------------------------
+        - name: "Pods — collect every pod in the platform namespaces"
+          kubernetes.core.k8s_info:
+            kind: Pod
+            namespace: "{{ item }}"
+          loop: "{{ hs_namespaces }}"
+          register: _pods_raw
+
+        - name: Flatten the pod list
+          ansible.builtin.set_fact:
+            _pods: "{{ _pods_raw.results | map(attribute='resources') | flatten | list }}"
+
+        - name: Find pods stuck in a bad container state
+          ansible.builtin.set_fact:
+            _bad_pods: >-
+              {{
+                _pods
+                | map('to_json') | map('from_json') | list
+                | json_query('[?status.containerStatuses[?state.waiting.reason == `CrashLoopBackOff` || state.waiting.reason == `ImagePullBackOff` || state.waiting.reason == `ErrImagePull` || state.waiting.reason == `CreateContainerError`] || status.phase == `Failed`].{ns: metadata.namespace, name: metadata.name, phase: status.phase}')
+              }}
+            _restart_pods: >-
+              {{
+                _pods
+                | map('to_json') | map('from_json') | list
+                | json_query('[?status.containerStatuses[?restartCount > `' ~ max_restarts ~ '`]].{ns: metadata.namespace, name: metadata.name, phase: status.phase}')
+              }}
+
+        - name: Report unhealthy pods
+          ansible.builtin.debug:
+            msg:
+              bad_state: "{{ _bad_pods }}"
+              over_restart_limit: "{{ _restart_pods }}"
+          when: (_bad_pods + _restart_pods) | length > 0
+
+        - name: Assert no pod is crash-looping, failing to pull, or restart-churning
+          ansible.builtin.assert:
+            that:
+              - _bad_pods | length == 0
+              - _restart_pods | length == 0
+            fail_msg: >-
+              Unhealthy pods found. Bad container state:
+              {{ _bad_pods | map('to_json') | list | join(', ') }} —
+              over {{ max_restarts }} restarts:
+              {{ _restart_pods | map('to_json') | list | join(', ') }}
+            success_msg: >-
+              All {{ _pods | length }} platform pods are healthy and under
+              {{ max_restarts }} restarts.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # CRDs: the API surface the whole platform is built on.
+        # ---------------------------------------------------------------------
+        - name: "CRDs — collect the hybridsovereign.redhat API group"
+          kubernetes.core.k8s_info:
+            api_version: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+          register: _crds_raw
+
+        - name: Keep only the platform's own CRDs
+          ansible.builtin.set_fact:
+            _hs_crds: >-
+              {{ _crds_raw.resources
+                 | selectattr('spec.group', 'equalto', 'hybridsovereign.redhat')
+                 | list }}
+
+        - name: Find CRDs that are not Established
+          ansible.builtin.set_fact:
+            _crds_not_established: >-
+              {{ _hs_crds
+                 | rejectattr('status.conditions', 'defined')
+                 | map(attribute='metadata.name') | list
+                 + (_hs_crds
+                    | selectattr('status.conditions', 'defined')
+                    | map('to_json') | map('from_json') | list
+                    | json_query('[?!(status.conditions[?type == `Established` && status == `True`])].metadata.name')) }}
+
+        - name: Assert all 26 platform CRDs exist and are Established
+          ansible.builtin.assert:
+            that:
+              - _hs_crds | length >= expected_crd_count
+              - _crds_not_established | length == 0
+            fail_msg: >-
+              Expected {{ expected_crd_count }} Established CRDs in
+              hybridsovereign.redhat, found {{ _hs_crds | length }}.
+              Not Established: {{ _crds_not_established | join(', ') }}
+            success_msg: >-
+              {{ _hs_crds | length }} hybridsovereign.redhat CRDs are Established.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # Operators: the ansible-operator controllers that reconcile all of it.
+        # ---------------------------------------------------------------------
+        - name: "Operators — find the controller pods"
+          ansible.builtin.set_fact:
+            _controller_pods: >-
+              {{ _pods
+                 | selectattr('metadata.name', 'search', 'controller-manager|ansible-operator|-operator-')
+                 | list }}
+
+        - name: Report any controller pod that is not Running
+          ansible.builtin.set_fact:
+            _controllers_down: >-
+              {{ _controller_pods
+                 | rejectattr('status.phase', 'equalto', 'Running')
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[].{ns: metadata.namespace, name: metadata.name, phase: status.phase}') }}
+
+        - name: Assert every operator controller pod is Running
+          ansible.builtin.assert:
+            that:
+              - _controller_pods | length > 0
+              - _controllers_down | length == 0
+            fail_msg: >-
+              Operator controller pods are not Running:
+              {{ _controllers_down | map('to_json') | list | join(', ') }}.
+              With a controller down, every CR on the cluster is unreconciled
+              and a green Ready condition means nothing.
+            success_msg: >-
+              {{ _controller_pods | length }} operator controller pods Running.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # ArgoCD: the platform is GitOps-managed, so drift is a real failure.
+        # ---------------------------------------------------------------------
+        - name: "ArgoCD — collect every Application on the cluster"
+          kubernetes.core.k8s_info:
+            api_version: argoproj.io/v1alpha1
+            kind: Application
+          register: _apps_raw
+          failed_when: false
+
+        - name: Tabulate the Applications
+          ansible.builtin.set_fact:
+            _apps: >-
+              {{ (_apps_raw.resources | default([]))
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[].{ns: metadata.namespace, name: metadata.name, sync: status.sync.status, health: status.health.status}') }}
+
+        - name: Report the ArgoCD Application inventory
+          ansible.builtin.debug:
+            msg: "{{ _apps }}"
+
+        - name: Find Applications that are OutOfSync or not Healthy
+          ansible.builtin.set_fact:
+            _apps_bad: >-
+              {{ _apps | json_query('[?sync != `Synced` || health != `Healthy`]') }}
+
+        - name: Assert every ArgoCD Application is Synced and Healthy
+          ansible.builtin.assert:
+            that: _apps_bad | length == 0
+            fail_msg: >-
+              {{ _apps_bad | length }} of {{ _apps | length }} ArgoCD
+              Applications are OutOfSync or Degraded:
+              {{ _apps_bad | map('to_json') | list | join(', ') }}
+            success_msg: >-
+              All {{ _apps | length }} ArgoCD Applications are Synced + Healthy.
+            quiet: true
+          when: argocd_strict | bool
+
+        - name: Report-only ArgoCD drift (argocd_strict is off)
+          ansible.builtin.debug:
+            msg: >-
+              argocd_strict is false — {{ _apps_bad | length }} Application(s)
+              are OutOfSync or Degraded and are being reported, not failed:
+              {{ _apps_bad | map('to_json') | list | join(', ') }}
+          when:
+            - not (argocd_strict | bool)
+            - _apps_bad | length > 0
+
+        # ---------------------------------------------------------------------
+        # Every HybridSovereign CR that exposes a Ready condition.
+        # ---------------------------------------------------------------------
+        - name: "CRs — sweep every namespaced kind in the API group"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item.spec.names.kind }}"
+          loop: "{{ _hs_crds }}"
+          loop_control:
+            label: "{{ item.spec.names.kind }}"
+          register: _cr_sweep
+          failed_when: false
+
+        - name: Tabulate kind / namespace / name / Ready for every CR
+          ansible.builtin.set_fact:
+            _cr_table: >-
+              {{ _cr_sweep.results | map(attribute='resources', default=[]) | flatten
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[?status.conditions[?type == `Ready`]].{kind: kind, ns: metadata.namespace, name: metadata.name, ready: status.conditions[?type == `Ready`] | [0].status}') }}
+
+        - name: Report the CR readiness table
+          ansible.builtin.debug:
+            msg: "{{ _cr_table }}"
+
+        - name: Isolate the not-Ready CRs
+          ansible.builtin.set_fact:
+            _crs_not_ready: "{{ _cr_table | json_query('[?ready != `True`]') }}"
+
+        - name: Report the not-Ready CRs
+          ansible.builtin.debug:
+            msg: >-
+              {{ _crs_not_ready | length }} of {{ _cr_table | length }}
+              HybridSovereign CRs are not Ready:
+              {{ _crs_not_ready | map('to_json') | list | join(', ') }}
+          when: _crs_not_ready | length > 0
+
+        # Opt-in: this lab is known to carry not-Ready CRs on purpose.
+        - name: Assert every HybridSovereign CR is Ready
+          ansible.builtin.assert:
+            that: _crs_not_ready | length == 0
+            fail_msg: >-
+              assert_all_crs_ready is on and {{ _crs_not_ready | length }}
+              CR(s) are not Ready:
+              {{ _crs_not_ready | map('to_json') | list | join(', ') }}
+            success_msg: "Every HybridSovereign CR with a Ready condition is Ready."
+            quiet: true
+          when: assert_all_crs_ready | bool
+
+        # ---------------------------------------------------------------------
+        # Frontends: the UI and the fabric border gateway must answer.
+        # ---------------------------------------------------------------------
+        - name: "Routes — resolve the UI and fabric-bgw hostnames"
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            namespace: "{{ item.namespace }}"
+            name: "{{ item.name }}"
+          loop: "{{ health_routes }}"
+          loop_control:
+            label: "{{ item.namespace }}/{{ item.name }}"
+          register: _routes
+
+        - name: Build the list of URLs to probe
+          ansible.builtin.set_fact:
+            _route_urls: >-
+              {{ _routes.results | map(attribute='resources') | flatten
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[].{ns: metadata.namespace, name: metadata.name, host: spec.host}') }}
+
+        - name: Assert every expected route exists
+          ansible.builtin.assert:
+            that: _route_urls | length == health_routes | length
+            fail_msg: >-
+              Expected {{ health_routes | length }} routes, resolved
+              {{ _route_urls | length }}:
+              {{ _route_urls | map(attribute='name') | list }}
+            quiet: true
+
+        - name: Probe each route
+          ansible.builtin.uri:
+            url: "https://{{ item.host }}"
+            validate_certs: false
+            follow_redirects: none
+            status_code: "{{ route_ok_status }}"
+            timeout: 30
+          loop: "{{ _route_urls }}"
+          loop_control:
+            label: "{{ item.ns }}/{{ item.name }}"
+          register: _probes
+          failed_when: false
+
+        - name: Report the route probe results
+          ansible.builtin.set_fact:
+            _route_results: >-
+              {{ _probes.results
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[].{ns: item.ns, name: item.name, status: status}') }}
+
+        - name: Assert every probed route answered below 500
+          ansible.builtin.assert:
+            that: >-
+              _route_results | json_query('[?status == null || status >= `500`]')
+                | length == 0
+            fail_msg: >-
+              One or more platform routes failed or returned a 5xx:
+              {{ _route_results | map('to_json') | list | join(', ') }}
+            success_msg: >-
+              All {{ _route_results | length }} platform routes answered:
+              {{ _route_results | map('to_json') | list | join(', ') }}
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # UIHealthChecker: the platform's own opinion of its UI.
+        # ---------------------------------------------------------------------
+        - name: "UIHealthChecker — collect any checkers on the cluster"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: UIHealthChecker
+          register: _uihc
+          failed_when: false
+
+        - name: Tabulate the UIHealthChecker readiness
+          ansible.builtin.set_fact:
+            _uihc_not_ready: >-
+              {{ (_uihc.resources | default([]))
+                 | map('to_json') | map('from_json') | list
+                 | json_query('[?!(status.conditions[?type == `Ready` && status == `True`])].{ns: metadata.namespace, name: metadata.name}') }}
+
+        - name: No UIHealthChecker CRs on this cluster
+          ansible.builtin.debug:
+            msg: "No UIHealthChecker CRs exist — nothing to assert."
+          when: (_uihc.resources | default([])) | length == 0
+
+        - name: Assert every UIHealthChecker is Ready
+          ansible.builtin.assert:
+            that: _uihc_not_ready | length == 0
+            fail_msg: >-
+              UIHealthChecker CRs are not Ready:
+              {{ _uihc_not_ready | map('to_json') | list | join(', ') }}
+            success_msg: >-
+              {{ (_uihc.resources | default([])) | length }} UIHealthChecker
+              CR(s) Ready.
+            quiet: true
+          when: (_uihc.resources | default([])) | length > 0
+
+        # ---------------------------------------------------------------------
+        # Report. Names, namespaces, statuses and counts only — no credentials.
+        # ---------------------------------------------------------------------
+        - name: Make sure the report directory exists
+          ansible.builtin.file:
+            path: "{{ hs_report_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: Write the platform health report
+          ansible.builtin.copy:
+            dest: "{{ hs_report_dir }}/mewtwo-platform-health.txt"
+            mode: "0644"
+            content: |
+              =========================================================
+              Mewtwo — HybridSovereign platform health
+              =========================================================
+              Namespaces checked : {{ hs_namespaces | join(', ') }}
+              Restart threshold  : {{ max_restarts }}
+              argocd_strict      : {{ argocd_strict }}
+              assert_all_crs_ready: {{ assert_all_crs_ready }}
+
+              WORKLOADS
+              ---------
+              Deployments+StatefulSets : {{ _workloads | length }}
+              DaemonSets               : {{ _daemonsets | length }}
+              Short of replicas        : {{ (_workload_offenders + _daemonset_offenders) | length }}
+              {% for w in (_workload_offenders + _daemonset_offenders) %}
+                - {{ w.kind }} {{ w.ns }}/{{ w.name }} ready={{ w.have | default(0) }}/{{ w.want | default('?') }}
+              {% endfor %}
+
+              PODS
+              ----
+              Total pods               : {{ _pods | length }}
+              Bad container state      : {{ _bad_pods | length }}
+              {% for p in _bad_pods %}
+                - {{ p.ns }}/{{ p.name }} phase={{ p.phase | default('unknown') }}
+              {% endfor %}
+              Over {{ max_restarts }} restarts        : {{ _restart_pods | length }}
+              {% for p in _restart_pods %}
+                - {{ p.ns }}/{{ p.name }} phase={{ p.phase | default('unknown') }}
+              {% endfor %}
+
+              CRDS
+              ----
+              hybridsovereign.redhat CRDs : {{ _hs_crds | length }} (expected {{ expected_crd_count }})
+              Not Established             : {{ _crds_not_established | length }}
+              {% for c in _crds_not_established %}
+                - {{ c }}
+              {% endfor %}
+
+              OPERATORS
+              ---------
+              Controller pods          : {{ _controller_pods | length }}
+              Not Running              : {{ _controllers_down | length }}
+              {% for c in _controllers_down %}
+                - {{ c.ns }}/{{ c.name }} phase={{ c.phase | default('unknown') }}
+              {% endfor %}
+
+              ARGOCD APPLICATIONS
+              -------------------
+              Total                    : {{ _apps | length }}
+              OutOfSync / not Healthy  : {{ _apps_bad | length }}
+              {% for a in _apps_bad %}
+                ! {{ a.ns }}/{{ a.name }} sync={{ a.sync | default('unknown') }} health={{ a.health | default('unknown') }}
+              {% endfor %}
+
+              Full inventory:
+              {% for a in _apps %}
+                - {{ a.ns }}/{{ a.name }} sync={{ a.sync | default('unknown') }} health={{ a.health | default('unknown') }}
+              {% endfor %}
+
+              HYBRIDSOVEREIGN CRS
+              -------------------
+              CRs with a Ready condition : {{ _cr_table | length }}
+              Not Ready                  : {{ _crs_not_ready | length }}
+              {% for c in _crs_not_ready %}
+                - {{ c.kind }} {{ c.ns }}/{{ c.name }} ready={{ c.ready | default('unknown') }}
+              {% endfor %}
+
+              ROUTES
+              ------
+              {% for r in _route_results %}
+                - {{ r.ns }}/{{ r.name }} http={{ r.status | default('no-response') }}
+              {% endfor %}
+
+              UIHEALTHCHECKER
+              ---------------
+              Total                    : {{ (_uihc.resources | default([])) | length }}
+              Not Ready                : {{ _uihc_not_ready | length }}
+              {% for u in _uihc_not_ready %}
+                - {{ u.ns }}/{{ u.name }}
+              {% endfor %}
+
+              This report contains no credentials by construction.
+              =========================================================
+
+        - name: Where the report landed
+          ansible.builtin.debug:
+            msg: "Report written to {{ hs_report_dir }}/mewtwo-platform-health.txt"
+
+    # =========================================================================
+    # DESTROY — intentionally empty
+    # =========================================================================
+    - name: Destroy nothing
+      tags: [destroy]
+      block:
+        - name: "Mewtwo destroys no resources"
+          ansible.builtin.debug:
+            msg: >-
+              Mewtwo created nothing, so there is nothing to tear down. The
+              --tags destroy run is a no-op and exists only for interface
+              consistency with the other suites.

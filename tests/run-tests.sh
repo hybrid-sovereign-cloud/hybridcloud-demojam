@@ -1,218 +1,285 @@
 #!/usr/bin/env bash
-# Hybrid Sovereign — Local Test Runner
-# Runs helm lint, YAML validation, and documents manual cluster gates.
+# =============================================================================
+# run-tests.sh — driver for the HybridSovereign test suite.
+#
+# Sources tests/.env, validates that the required variables are present
+# (never printing any value), and runs the selected suites, collecting
+# pass/fail for all of them before reporting.
+#
+# See README.md for the full documentation.
+# =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BOOTSTRAP="${REPO_ROOT}/bootstrap"
-PASS=0
-FAIL=0
-SKIP=0
+# Always operate from the directory this script lives in, so it can be invoked
+# from anywhere and still find .env, ansible.cfg, inventory/ and the playbooks.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-log_pass() { echo "  PASS: $*"; PASS=$((PASS + 1)); }
-log_fail() { echo "  FAIL: $*"; FAIL=$((FAIL + 1)); }
-log_skip() { echo "  SKIP: $*"; SKIP=$((SKIP + 1)); }
-log_info() { echo "==> $*"; }
+# -----------------------------------------------------------------------------
+# Suite registry: short pokemon name -> playbook filename.
+# Order here is the default run order (health first, then the stack).
+# -----------------------------------------------------------------------------
+SUITE_NAMES=(
+  mewtwo
+  ditto
+  pikachu
+  bulbasaur
+  squirtle
+  charmander
+  eevee
+  snorlax
+)
 
-require_cmd() {
-  if ! command -v "$1" &>/dev/null; then
-    log_fail "required command not found: $1"
-    return 1
-  fi
+suite_playbook() {
+  case "$1" in
+    mewtwo)    echo "test-mewtwo-platform-health.yaml" ;;
+    ditto)     echo "test-ditto-iaac.yaml" ;;
+    pikachu)   echo "test-pikachu-tenancy.yaml" ;;
+    bulbasaur) echo "test-bulbasaur-hybridnetwork.yaml" ;;
+    squirtle)  echo "test-squirtle-ocp-plain.yaml" ;;
+    charmander) echo "test-charmander-ocp-hybrid.yaml" ;;
+    eevee)     echo "test-eevee-openstack-network.yaml" ;;
+    snorlax)   echo "test-snorlax-openstack-vm.yaml" ;;
+    *)         return 1 ;;
+  esac
 }
 
-# ─── Phase 1: Helm Lint ───────────────────────────────────────────────────────
-run_helm_lint() {
-  log_info "Helm lint — all charts under hybridcloud/"
-  if ! require_cmd helm; then
-    return
-  fi
-
-  local charts=()
-  while IFS= read -r chart; do
-    charts+=("$chart")
-  done < <(find "${REPO_ROOT}" -name Chart.yaml -not -path '*/.git/*' | sort)
-
-  if [[ ${#charts[@]} -eq 0 ]]; then
-    log_fail "no Chart.yaml files found"
-    return
-  fi
-
-  for chart_yaml in "${charts[@]}"; do
-    local chart_dir
-    chart_dir="$(dirname "$chart_yaml")"
-    local chart_name
-    chart_name="$(basename "$chart_dir")"
-    if helm lint "$chart_dir" &>/dev/null; then
-      log_pass "helm lint ${chart_name} (${chart_dir#"${REPO_ROOT}/"})"
-    else
-      log_fail "helm lint ${chart_name} (${chart_dir#"${REPO_ROOT}/"})"
-      helm lint "$chart_dir" 2>&1 | tail -5 || true
-    fi
-  done
+suite_summary() {
+  case "$1" in
+    mewtwo)    echo "read-only platform / pod / ArgoCD health" ;;
+    ditto)     echo "IaaC resource, tested in place (never created or deleted)" ;;
+    pikachu)   echo "full tenancy stack: Entity, Rbac, Team, Project, Persona, AAPOrg, QuayOrg, Vault, VaultKV" ;;
+    bulbasaur) echo "hybrid fabric + hybrid network on the hub (CloudVirt backend)" ;;
+    squirtle)  echo "OCP cluster with NO hybrid network (control case)" ;;
+    charmander) echo "OCP cluster joined to a hybrid network" ;;
+    eevee)     echo "OpenStack tenant network only, no OCP" ;;
+    snorlax)   echo "small OpenStack VM proving the hybrid network carries traffic" ;;
+    *)         echo "" ;;
+  esac
 }
 
-# ─── Phase 2: YAML Validation ─────────────────────────────────────────────────
-run_yaml_validation() {
-  log_info "YAML validation — templates and samples"
-  if ! require_cmd python3; then
-    return
-  fi
-
-  python3 - <<'PYEOF' "${REPO_ROOT}"
-import sys, pathlib
-
-try:
-    import yaml
-except ImportError:
-    print("  FAIL: PyYAML not installed (pip install pyyaml)")
-    sys.exit(1)
-
-root = pathlib.Path(sys.argv[1])
-dirs = [
-    root / "bootstrap" / "helm",
-    root / "samples",
-    root / "operator",
-    root / "iaac" / "helm",
-]
-errors = []
-checked = 0
-
-skip_parts = {"templates", ".git", "config"}
-
-for base in dirs:
-    if not base.exists():
-        continue
-    for path in sorted(base.rglob("*.yaml")) + sorted(base.rglob("*.yml")):
-        if skip_parts & set(path.parts):
-            continue
-        try:
-            text = path.read_text()
-        except OSError:
-            continue
-        if "{{" in text or "{%" in text:
-            continue
-        checked += 1
-        try:
-            with open(path) as f:
-                list(yaml.safe_load_all(f))
-        except yaml.YAMLError as e:
-            errors.append(f"{path.relative_to(root)}: {e}")
-
-if errors:
-    for e in errors:
-        print(f"  FAIL: {e}")
-    print(f"  FAIL: {len(errors)} YAML errors in {checked} files")
-    sys.exit(1)
-else:
-    print(f"  PASS: {checked} YAML files parsed successfully")
-PYEOF
-
-  if [[ $? -eq 0 ]]; then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-# ─── Phase 3: Secret Pattern Scan (static) ────────────────────────────────────
-run_secret_scan() {
-  log_info "Static secret pattern scan (hybridcloud/)"
-  if ! require_cmd git; then
-    log_skip "git not available"
-    return
-  fi
-
-  local matches
-  matches="$(git -C "${REPO_ROOT}" grep -iE '(password|apikey|private_key)\s*[:=]\s*["\x27][^"\x27]{8,}' -- \
-    'hybridcloud/' 2>/dev/null | grep -v 'REDACTED\|example\|changeme\|placeholder\|<.*>' || true)"
-
-  if [[ -z "$matches" ]]; then
-    log_pass "no suspicious credential literals in hybridcloud/"
-  else
-    log_fail "potential credential literals found:"
-    echo "$matches" | head -10
-  fi
-}
-
-# ─── Phase 4: Executable Script Permissions ───────────────────────────────────
-run_script_permissions() {
-  log_info "Test script permissions"
-  local scripts=(
-    "${SCRIPT_DIR}/run-tests.sh"
-    "${SCRIPT_DIR}/argocd-deploy/verify-sync.sh"
-  )
-  for s in "${scripts[@]}"; do
-    if [[ -x "$s" ]]; then
-      log_pass "executable: ${s#"${REPO_ROOT}/"}"
-    else
-      log_fail "not executable: ${s#"${REPO_ROOT}/"}"
-    fi
-  done
-}
-
-# ─── Phase 5: Manual Cluster Gates (documentation only) ───────────────────────
-print_manual_gates() {
-  log_info "Manual cluster gates (require live cluster — not executed)"
+# -----------------------------------------------------------------------------
+# Usage
+# -----------------------------------------------------------------------------
+usage() {
   cat <<'EOF'
+Usage: run-tests.sh [-t TAGS] [-s SUITE ...] [-l] [-k] [-h]
 
-  The following gates MUST be run against live clusters before release.
-  See tests/argocd-deploy/DEPLOYMENT_GATES.md for per-phase details.
+  -t TAGS   Comma-separated Ansible tags. Default: "test"
+  -s SUITE  Suite to run, by pokemon short name (e.g. pikachu). Repeatable.
+            May be given once per suite; default is every suite.
+  -l        List the available suites and exit.
+  -k        Keep resources on failure (exports HS_KEEP_ON_FAILURE=true).
+  -h        Show this help and exit.
 
-  GATE-M01  ArgoCD sync health
-            ./tests/argocd-deploy/verify-sync.sh --context central-admin
+TAGS — what each tag does:
 
-  GATE-M02  Entity lifecycle
-            Follow tests/functional/README.md (TC-F001–F010)
+  test      READ-ONLY. Logs in to the real tools (Keycloak, AAP, Quay, Vault,
+            OpenStack, ACM) and asserts the expected state is present. It
+            creates and deletes nothing. This is the safe default.
 
-  GATE-M03  RBAC matrix
-            Follow tests/rbac-access/README.md (TC-RBAC-001–008)
+  create    MUTATES THE LIVE PLATFORM. Creates the test custom resources and
+            waits for them to become Ready.
 
-  GATE-M04  Cluster connectivity
-            Follow tests/connectivity/README.md (TC-CONN-001–015)
+  destroy   MUTATES THE LIVE PLATFORM. Deletes the test custom resources and
+            asserts the remote objects were reclaimed.
 
-  GATE-M05  Pod restart resilience
-            Follow tests/restart/README.md (TC-RS-001–012)
+Because 'create' and 'destroy' change the live platform, this script asks for
+a typed confirmation when either appears in TAGS and stdin is a terminal. Set
+HS_ASSUME_YES=true to skip the prompt (use this in CI only).
 
-  GATE-M06  E2E migration (VDDK deferred)
-            Follow tests/e2e/README.md (Phase 1–2 required; Phase 3 deferred)
-
-  GATE-M07  Security review sign-off
-            Complete tests/security/SECURITY_REVIEW.md checklist
-
+Examples:
+  ./run-tests.sh                              # read-only sweep of every suite
+  ./run-tests.sh -s pikachu                   # read-only, one suite
+  ./run-tests.sh -t create,test,destroy -s pikachu
+  ./run-tests.sh -t destroy -s pikachu -s bulbasaur
+  HS_ASSUME_YES=true ./run-tests.sh -t create -s bulbasaur
 EOF
-  log_skip "manual gates documented (7 gates)"
 }
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
-main() {
-  echo "Hybrid Sovereign Test Runner"
-  echo "Repository: ${REPO_ROOT}"
-  echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo ""
+list_suites() {
+  printf '%-12s %-38s %s\n' "SUITE" "PLAYBOOK" "COVERS"
+  printf '%-12s %-38s %s\n' "-----" "--------" "------"
+  local s
+  for s in "${SUITE_NAMES[@]}"; do
+    printf '%-12s %-38s %s\n' "$s" "$(suite_playbook "$s")" "$(suite_summary "$s")"
+  done
+}
 
-  run_helm_lint
-  echo ""
-  run_yaml_validation
-  echo ""
-  run_secret_scan
-  echo ""
-  run_script_permissions
-  echo ""
-  print_manual_gates
-  echo ""
+# -----------------------------------------------------------------------------
+# Arguments
+# -----------------------------------------------------------------------------
+TAGS="test"
+SELECTED=()
+KEEP_ON_FAILURE="false"
 
-  echo "────────────────────────────────────────"
-  echo "Summary: PASS=${PASS}  FAIL=${FAIL}  SKIP=${SKIP}"
-  echo "────────────────────────────────────────"
+while getopts ":t:s:lkh" opt; do
+  case "$opt" in
+    t) TAGS="$OPTARG" ;;
+    s)
+      if ! suite_playbook "$OPTARG" >/dev/null 2>&1; then
+        echo "ERROR: unknown suite '$OPTARG'." >&2
+        echo "Run 'run-tests.sh -l' to list the available suites." >&2
+        exit 1
+      fi
+      SELECTED+=("$OPTARG")
+      ;;
+    l) list_suites; exit 0 ;;
+    k) KEEP_ON_FAILURE="true" ;;
+    h) usage; exit 0 ;;
+    :) echo "ERROR: option -$OPTARG requires an argument." >&2; usage >&2; exit 1 ;;
+    \?) echo "ERROR: unknown option -$OPTARG." >&2; usage >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
 
-  if [[ ${FAIL} -gt 0 ]]; then
-    echo "Result: FAIL — fix failures before merge"
+if [[ $# -gt 0 ]]; then
+  echo "ERROR: unexpected argument '$1'. Suites are selected with -s." >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ ${#SELECTED[@]} -eq 0 ]]; then
+  SELECTED=("${SUITE_NAMES[@]}")
+fi
+
+# -----------------------------------------------------------------------------
+# Environment
+# -----------------------------------------------------------------------------
+if [[ ! -f .env ]]; then
+  cat >&2 <<EOF
+ERROR: $SCRIPT_DIR/.env not found.
+
+The test suite reads every credential from tests/.env. Create it from the
+documented template and fill it in:
+
+    cp .env.example .env
+    \${EDITOR:-vi} .env
+
+tests/.env is gitignored and must never be committed.
+EOF
+  exit 1
+fi
+
+# Export everything defined in .env for Ansible's env lookups.
+set -a
+# shellcheck disable=SC1091  # .env is user-supplied and not in the repo.
+source ./.env
+set +a
+
+# Presence-only validation. Never print a value.
+missing=()
+[[ -n "${OCP_CENTRAL_SERVER:-}" ]]   || missing+=("OCP_CENTRAL_SERVER")
+[[ -n "${OCP_CENTRAL_USERNAME:-}" ]] || missing+=("OCP_CENTRAL_USERNAME")
+[[ -n "${OCP_CENTRAL_PASSWORD:-}" ]] || missing+=("OCP_CENTRAL_PASSWORD")
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  {
+    echo "ERROR: required variable(s) not set in $SCRIPT_DIR/.env:"
+    printf '  - %s\n' "${missing[@]}"
+    echo
+    echo "These identify the hub ('central') OpenShift cluster that runs the"
+    echo "HybridSovereign operators. See SECTION 1 of .env.example."
+  } >&2
+  exit 1
+fi
+
+# The openstack.cloud collection locates clouds.yaml via OS_CLIENT_CONFIG_FILE.
+if [[ -n "${OSO_CLOUDS:-}" ]]; then
+  export OS_CLIENT_CONFIG_FILE="$OSO_CLOUDS"
+fi
+
+if [[ "$KEEP_ON_FAILURE" == "true" ]]; then
+  export HS_KEEP_ON_FAILURE=true
+fi
+
+# -----------------------------------------------------------------------------
+# Destructive-tag guard
+# -----------------------------------------------------------------------------
+destructive=()
+IFS=',' read -r -a _tag_list <<< "$TAGS"
+for t in "${_tag_list[@]}"; do
+  t="${t// /}"
+  case "$t" in
+    create|destroy) destructive+=("$t") ;;
+  esac
+done
+
+if [[ ${#destructive[@]} -gt 0 ]]; then
+  if [[ "${HS_ASSUME_YES:-false}" == "true" ]]; then
+    echo "NOTE: HS_ASSUME_YES=true — skipping the confirmation prompt for: ${destructive[*]}"
+  elif [[ -t 0 ]]; then
+    echo
+    echo "=============================================================="
+    echo " WARNING: these tags MUTATE THE LIVE PLATFORM: ${destructive[*]}"
+    echo "=============================================================="
+    echo " Hub cluster : ${OCP_CENTRAL_SERVER}"
+    echo " Tags        : ${TAGS}"
+    echo " Suites      : ${SELECTED[*]}"
+    echo
+    printf 'Type exactly "yes, mutate the platform" to continue: '
+    read -r confirmation
+    if [[ "$confirmation" != "yes, mutate the platform" ]]; then
+      echo "Aborted — no changes made." >&2
+      exit 1
+    fi
+  else
+    echo "ERROR: tags '${destructive[*]}' mutate the live platform, but stdin is" >&2
+    echo "not a terminal so you cannot be prompted. Set HS_ASSUME_YES=true to" >&2
+    echo "run non-interactively." >&2
     exit 1
   fi
-  echo "Result: PASS — automated checks OK; run manual gates before deploy"
-  exit 0
-}
+fi
 
-main "$@"
+# -----------------------------------------------------------------------------
+# Run
+# -----------------------------------------------------------------------------
+mkdir -p reports
+
+results=()
+overall_rc=0
+
+for suite in "${SELECTED[@]}"; do
+  playbook="$(suite_playbook "$suite")"
+
+  echo
+  echo "=============================================================="
+  echo " SUITE: $suite  ($playbook)   tags: $TAGS"
+  echo "=============================================================="
+
+  if [[ ! -f "$playbook" ]]; then
+    echo "SKIP: $playbook does not exist."
+    results+=("$suite|SKIP|$playbook (not found)")
+    continue
+  fi
+
+  started=$SECONDS
+  if ansible-playbook "$playbook" --tags "$TAGS"; then
+    results+=("$suite|PASS|$((SECONDS - started))s")
+  else
+    results+=("$suite|FAIL|$((SECONDS - started))s")
+    overall_rc=1
+  fi
+done
+
+echo
+echo "=============================================================="
+echo " SUMMARY   (tags: $TAGS)"
+echo "=============================================================="
+printf '%-12s %-6s %s\n' "SUITE" "RESULT" "DETAIL"
+printf '%-12s %-6s %s\n' "-----" "------" "------"
+for row in "${results[@]}"; do
+  IFS='|' read -r name status detail <<< "$row"
+  printf '%-12s %-6s %s\n' "$name" "$status" "$detail"
+done
+echo
+
+if [[ $overall_rc -ne 0 ]]; then
+  echo "One or more suites FAILED."
+  echo "Leftover objects can be found with:"
+  echo "  oc get <kind> -A -l hybridsovereign.redhat/test-suite=true"
+else
+  echo "All selected suites passed."
+fi
+
+exit $overall_rc

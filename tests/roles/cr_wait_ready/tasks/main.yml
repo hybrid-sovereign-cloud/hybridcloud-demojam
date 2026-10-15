@@ -1,0 +1,42 @@
+---
+# Wait for a CR to report Ready=True, then fail loudly with the operator's own
+# condition message if it does not.
+#
+# Required:
+#   cr_wait_kind, cr_wait_name, cr_wait_namespace
+# Optional:
+#   cr_wait_timeout (default hs_ready_timeout)
+
+- name: "Wait for {{ cr_wait_kind }}/{{ cr_wait_name }} to become Ready"
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ cr_wait_kind }}"
+    name: "{{ cr_wait_name }}"
+    namespace: "{{ cr_wait_namespace }}"
+  register: _cr
+  until: >-
+    _cr.resources | length > 0 and
+    (_cr.resources[0].status.conditions | default([])
+      | selectattr('type', 'equalto', 'Ready')
+      | selectattr('status', 'equalto', 'True') | list | length > 0)
+  retries: "{{ ((cr_wait_timeout | default(hs_ready_timeout) | int) / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  # Let the assert below produce the useful message instead of a bare timeout.
+  failed_when: false
+
+- name: "Assert {{ cr_wait_kind }}/{{ cr_wait_name }} is Ready"
+  ansible.builtin.assert:
+    that:
+      - _cr.resources | length > 0
+      - >-
+        _cr.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Ready')
+          | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      {{ cr_wait_kind }}/{{ cr_wait_name }} in {{ cr_wait_namespace }} never
+      became Ready within {{ cr_wait_timeout | default(hs_ready_timeout) }}s.
+      Conditions:
+      {{ (_cr.resources[0].status.conditions | default('<no status>'))
+         if _cr.resources | length > 0 else '<CR not found>' }}
+    success_msg: "{{ cr_wait_kind }}/{{ cr_wait_name }} is Ready."
+    quiet: true

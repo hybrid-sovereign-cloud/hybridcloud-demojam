@@ -1,0 +1,97 @@
+---
+# Log in to Keycloak and prove the Rbac CR really created the group.
+#
+# The platform models a tenant group as the subgroup <entity>/<rbac-name>
+# inside the realm, so we assert on the full path, not just the leaf name.
+#
+# Required:
+#   kc_entity : parent group (the Entity name)
+#   kc_groups : list of expected subgroup names
+
+- name: Obtain a Keycloak admin token (master realm)
+  ansible.builtin.uri:
+    url: "{{ rhbk.url | regex_replace('/$', '') }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      client_id: admin-cli
+      username: "{{ rhbk.username }}"
+      password: "{{ rhbk.password }}"
+    validate_certs: false
+    status_code: [200, 401]
+  register: _kc_master
+  no_log: true
+
+- name: Fall back to a token in the target realm
+  ansible.builtin.uri:
+    url: "{{ rhbk.url | regex_replace('/$', '') }}/realms/{{ rhbk.realm }}/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      client_id: admin-cli
+      username: "{{ rhbk.username }}"
+      password: "{{ rhbk.password }}"
+    validate_certs: false
+  register: _kc_realm
+  when: _kc_master.status != 200
+  no_log: true
+
+- name: Keep the working token
+  ansible.builtin.set_fact:
+    _kc_token: "{{ (_kc_master.json.access_token
+                    if _kc_master.status == 200
+                    else _kc_realm.json.access_token) }}"
+  no_log: true
+
+- name: "Look up the parent group '{{ kc_entity }}' in realm {{ rhbk.realm }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ rhbk.url | regex_replace('/$', '') }}/admin/realms/{{ rhbk.realm }}/groups?search={{ kc_entity | urlencode }}&briefRepresentation=false
+    method: GET
+    headers:
+      Authorization: "Bearer {{ _kc_token }}"
+    validate_certs: false
+    return_content: true
+  register: _kc_parent
+
+- name: Assert the entity's parent group exists
+  ansible.builtin.assert:
+    that: >-
+      _kc_parent.json | selectattr('name', 'equalto', kc_entity) | list | length > 0
+    fail_msg: >-
+      Keycloak realm '{{ rhbk.realm }}' has no top-level group '{{ kc_entity }}'.
+      The Entity CR reported Ready but the identity side was not created.
+      Groups seen: {{ _kc_parent.json | map(attribute='name') | list }}
+    success_msg: "Keycloak group '{{ kc_entity }}' exists."
+    quiet: true
+
+- name: Fetch the parent group's subgroups
+  ansible.builtin.uri:
+    url: >-
+      {{ rhbk.url | regex_replace('/$', '') }}/admin/realms/{{ rhbk.realm }}/groups/{{ (_kc_parent.json | selectattr('name', 'equalto', kc_entity) | first).id }}/children
+    method: GET
+    headers:
+      Authorization: "Bearer {{ _kc_token }}"
+    validate_certs: false
+    status_code: [200, 404]
+  register: _kc_children
+
+- name: Resolve the subgroup list (older RHBK inlines subGroups instead)
+  ansible.builtin.set_fact:
+    _kc_subgroups: >-
+      {{ (_kc_children.json if _kc_children.status == 200
+          else (_kc_parent.json | selectattr('name', 'equalto', kc_entity) | first).subGroups | default([]))
+         | map(attribute='name') | list }}
+
+- name: "Assert every expected Rbac group exists under {{ kc_entity }}/"
+  ansible.builtin.assert:
+    that: item in _kc_subgroups
+    fail_msg: >-
+      Expected Keycloak group '{{ kc_entity }}/{{ item }}' is missing. The Rbac
+      CR claimed Ready but the group is not in realm '{{ rhbk.realm }}'.
+      Subgroups present: {{ _kc_subgroups }}
+    success_msg: "Keycloak group '{{ kc_entity }}/{{ item }}' exists."
+    quiet: true
+  loop: "{{ kc_groups }}"

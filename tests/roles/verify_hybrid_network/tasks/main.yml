@@ -1,0 +1,135 @@
+---
+# Prove a HybridNetwork is really wired into the EVPN fabric, rather than just
+# reporting Ready.
+#
+# Checks, in order of how much they actually prove:
+#   1. the CR allocated a VNI, and that VNI is inside the fabric's pool
+#   2. the VNI is unique across every HybridNetwork on the hub
+#   3. each NetworkPlacement bound to it is Ready and carries its prefixes
+#   4. for CloudVirt placements, the NetworkAttachmentDefinition really exists
+#      in each target VM namespace
+#
+# Required:
+#   hn_name, hn_namespace
+# Optional:
+#   hn_placements : list of {name, namespace}
+
+- name: Read the HybridNetwork
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: HybridNetwork
+    name: "{{ hn_name }}"
+    namespace: "{{ hn_namespace }}"
+  register: _hn
+
+- name: Read the parent HybridFabric
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: HybridFabric
+    name: "{{ hs_fabric }}"
+    namespace: "{{ hs_platform_ns }}"
+  register: _fab
+
+- name: Assert the network allocated a VNI inside the fabric pool
+  ansible.builtin.assert:
+    that:
+      - _hn.resources | length > 0
+      - (_hn.resources[0].status.vni | default(0)) | int > 0
+      - (_hn.resources[0].status.vni | int) >= (_fab.resources[0].spec.vniPool.start | int)
+      - (_hn.resources[0].status.vni | int) <= (_fab.resources[0].spec.vniPool.end | int)
+    fail_msg: >-
+      HybridNetwork/{{ hn_name }} has VNI
+      '{{ _hn.resources[0].status.vni | default('<none>') }}', which is not
+      inside fabric '{{ hs_fabric }}' pool
+      {{ _fab.resources[0].spec.vniPool.start }}-{{ _fab.resources[0].spec.vniPool.end }}.
+      A network without a pool VNI is not actually on the fabric.
+    success_msg: >-
+      HybridNetwork/{{ hn_name }} holds VNI {{ _hn.resources[0].status.vni }}
+      from the {{ hs_fabric }} pool.
+    quiet: true
+
+- name: List every HybridNetwork on the hub
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: HybridNetwork
+  register: _all_hn
+
+- name: Assert the VNI is not shared with another tenant (isolation invariant)
+  ansible.builtin.assert:
+    that: >-
+      _all_hn.resources
+        | map(attribute='status.vni', default=0)
+        | select('equalto', _hn.resources[0].status.vni | int)
+        | list | length == 1
+    fail_msg: >-
+      VNI {{ _hn.resources[0].status.vni }} is claimed by more than one
+      HybridNetwork. Tenant isolation on this fabric is a route target per VNI,
+      so a duplicate is a cross-tenant leak, not a cosmetic bug. Holders:
+      {{ _all_hn.resources
+         | selectattr('status.vni', 'defined')
+         | selectattr('status.vni', 'equalto', _hn.resources[0].status.vni | int)
+         | map(attribute='metadata.name') | list }}
+    success_msg: "VNI {{ _hn.resources[0].status.vni }} is uniquely held."
+    quiet: true
+
+- name: Inspect each NetworkPlacement
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: NetworkPlacement
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
+  loop: "{{ hn_placements | default([]) }}"
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"
+  register: _nps
+
+- name: Assert each placement is Ready and bound to this network
+  ansible.builtin.assert:
+    that:
+      - item.resources | length > 0
+      - item.resources[0].spec.network == hn_name
+      - >-
+        item.resources[0].status.conditions | default([])
+          | selectattr('type', 'equalto', 'Ready')
+          | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      NetworkPlacement/{{ item.item.name }} is not Ready or is bound to the
+      wrong network. Conditions:
+      {{ item.resources[0].status.conditions | default('<none>')
+         if item.resources | length > 0 else '<not found>' }}
+    success_msg: "NetworkPlacement/{{ item.item.name }} is Ready on {{ hn_name }}."
+    quiet: true
+  loop: "{{ _nps.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Flatten the CloudVirt VM namespaces this network lands in
+  ansible.builtin.set_fact:
+    _vm_namespaces: >-
+      {{ _nps.results
+         | map(attribute='resources') | select() | map('first')
+         | selectattr('spec.backend.kind', 'equalto', 'CloudVirt')
+         | map(attribute='spec.vmNamespaces') | select() | flatten | unique }}
+
+- name: Assert the NetworkAttachmentDefinition was really created for each VM namespace
+  kubernetes.core.k8s_info:
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    namespace: "{{ item }}"
+  loop: "{{ _vm_namespaces }}"
+  register: _nads
+
+- name: Report the NADs backing this network
+  ansible.builtin.assert:
+    that: item.resources | length > 0
+    fail_msg: >-
+      No NetworkAttachmentDefinition exists in namespace '{{ item.item }}'.
+      The NetworkPlacement claimed Ready but nothing was rendered for VMs to
+      attach to, so the hybrid network is not usable there.
+    success_msg: >-
+      {{ item.item }}: NAD(s) present
+      ({{ item.resources | map(attribute='metadata.name') | list | join(', ') }}).
+    quiet: true
+  loop: "{{ _nads.results }}"
+  loop_control:
+    label: "{{ item.item }}"

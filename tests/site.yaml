@@ -1,0 +1,40 @@
+---
+# =============================================================================
+# site.yaml — the whole HybridSovereign test suite, in dependency order.
+#
+#   ansible-playbook site.yaml --tags test
+#       The read-only full sweep. Logs in to Keycloak, AAP, Quay, Vault,
+#       OpenStack and ACM and asserts the expected state is present. Creates
+#       and deletes nothing.
+#
+#   ansible-playbook site.yaml --tags create
+#   ansible-playbook site.yaml --tags destroy
+#       These MUTATE THE LIVE PLATFORM.
+#
+# For anything selective — one suite, one tag, keep-on-failure, or the
+# confirmation guard around the destructive tags — prefer tests/run-tests.sh,
+# which also sources tests/.env for you. Running site.yaml directly assumes
+# you have already exported the variables documented in .env.example.
+#
+# Order matters:
+#   mewtwo     platform health first, so a sick platform fails fast
+#   ditto      IaaC, tested in place — never created, never deleted
+#   pikachu    tenancy stack; everything below assumes tenancy works
+#   bulbasaur  hybrid fabric + hybrid network on the hub
+#   squirtle   OCP cluster with no hybrid network (the control case)
+#   charmander OCP cluster joined to the hybrid network
+#   eevee      OpenStack tenant network
+#   snorlax    OpenStack VM proving that network carries traffic
+#
+# The OpenStack suites (eevee, snorlax) self-skip when OSO_CLOUDS is unset or
+# when the OpenStack site's fabric objects are not Ready. See README.md.
+# =============================================================================
+
+- import_playbook: test-mewtwo-platform-health.yaml
+- import_playbook: test-ditto-iaac.yaml
+- import_playbook: test-pikachu-tenancy.yaml
+- import_playbook: test-bulbasaur-hybridnetwork.yaml
+- import_playbook: test-squirtle-ocp-plain.yaml
+- import_playbook: test-charmander-ocp-hybrid.yaml
+- import_playbook: test-eevee-openstack-network.yaml
+- import_playbook: test-snorlax-openstack-vm.yaml

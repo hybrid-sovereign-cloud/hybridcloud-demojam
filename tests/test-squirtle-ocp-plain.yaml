@@ -1,0 +1,220 @@
+---
+# =============================================================================
+# test-squirtle-ocp-plain.yaml — an OCP cluster WITHOUT a hybrid network
+#
+# The control case for test-charmander-ocp-hybrid.yaml. A tenant cluster that
+# is deliberately not a fabric member must still come up, get its RBAC and
+# register with ACM — proving fabric membership is optional, not load-bearing.
+#
+#   --tags create   Entity -> CloudVirt -> PlatformOpenshift (hosted)
+#   --tags test     ManagedCluster joined + available, cluster RBAC bound, and
+#                   the negative assertion: no fabric/VNI attachment exists
+#   --tags destroy  deprovision and prove the ManagedCluster is deregistered
+#
+# A hosted (HyperShift-on-hub) cluster is used because it is the only cluster
+# type the lab has capacity for. Set squirtle_type=aws to exercise the same
+# flow against a real AWS install.
+# =============================================================================
+- name: "Squirtle — OCP cluster with no hybrid network"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: "{{ poke.ocp_plain.entity }}"
+    ns: "{{ poke.ocp_plain.ns }}"
+    cloudvirt_name: squirtle-virt
+    cluster_name: squirtle-ocp
+    squirtle_type: hosted
+    rbac_groups: [squirtle-cluster-admins, squirtle-cluster-viewers]
+    # Cluster builds are slow; override with HS_READY_TIMEOUT if needed.
+    build_timeout: 3600
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    - name: Create the cluster
+      tags: [create]
+      block:
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Squirtle — QA tenant, OCP without hybrid networking"
+                  billingID: "SQUIRTLE-TEST-001"
+                  namespaceRbac:
+                    entityAdmin: [squirtle-cluster-admins]
+                    platformOpenshiftAdmin: [squirtle-cluster-admins]
+                    platformOpenshiftView: [squirtle-cluster-viewers]
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Entity, cr_wait_name: "{{ e }}", cr_wait_namespace: "{{ hs_platform_ns }}" }
+
+        - name: Create the Rbac groups
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Rbac
+              metadata: { name: "{{ item }}", namespace: "{{ ns }}", labels: "{{ hs_test_labels }}" }
+              spec:
+                config: "{{ hs_rbac_config }}"
+                description: "QA group {{ item }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: Rbac, cr_wait_name: "{{ item }}", cr_wait_namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        - name: Create the CloudVirt environment that hosts the cluster
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudVirt
+                metadata: { name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
+                spec:
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ hs_hub_cloudinfra }}" }
+                  baseDomain: cnv.local
+                  storageClass: ocs-external-storagecluster-ceph-rbd
+
+        - name: Wait for CloudVirt
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars: { cr_wait_kind: CloudVirt, cr_wait_name: "{{ cloudvirt_name }}", cr_wait_namespace: "{{ ns }}" }
+
+        - name: Request the OpenShift cluster — no hybrid network attached
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: PlatformOpenshift
+                metadata: { name: "{{ cluster_name }}", namespace: "{{ ns }}" }
+                spec:
+                  type: "{{ squirtle_type }}"
+                  hosted:
+                    environment: "{{ cloudvirt_name }}"
+                    nodePoolReplicas: 2
+                    workerCores: 4
+                    workerMemory: 8Gi
+                  toolRbac:
+                    clusterAdminRbac: [squirtle-cluster-admins]
+                    clusterViewerRbac: [squirtle-cluster-viewers]
+
+        - name: Wait for the cluster build (this is slow)
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: PlatformOpenshift
+            cr_wait_name: "{{ cluster_name }}"
+            cr_wait_namespace: "{{ ns }}"
+            cr_wait_timeout: "{{ build_timeout }}"
+
+    - name: Verify the cluster
+      tags: [test]
+      block:
+        - name: "ACM — the ManagedCluster was registered"
+          kubernetes.core.k8s_info:
+            api_version: cluster.open-cluster-management.io/v1
+            kind: ManagedCluster
+            name: "{{ cluster_name }}"
+          register: _mc
+
+        - name: Assert the ManagedCluster joined and is available
+          ansible.builtin.assert:
+            that:
+              - _mc.resources | length > 0
+              - >-
+                _mc.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'ManagedClusterConditionAvailable')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              ManagedCluster/{{ cluster_name }} is not Available. Conditions:
+              {{ _mc.resources[0].status.conditions | default('<not found>') }}
+            success_msg: "ManagedCluster/{{ cluster_name }} is Available."
+            quiet: true
+
+        - name: "Negative — this cluster must NOT be a fabric member"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: NetworkPlacement
+            namespace: "{{ ns }}"
+          register: _np
+
+        - name: Assert no hybrid network was silently attached
+          ansible.builtin.assert:
+            that: _np.resources | length == 0
+            fail_msg: >-
+              Squirtle is the no-hybrid-network control case, but
+              {{ _np.resources | length }} NetworkPlacement(s) exist in
+              {{ ns }}. Either the test fixture leaked, or the platform
+              attaches tenant clusters to the fabric without being asked —
+              which would contradict the documented isolation model.
+            success_msg: "Confirmed: no fabric attachment for {{ cluster_name }}."
+            quiet: true
+
+        - name: "RBAC — the cluster's admin/viewer bindings were created"
+          kubernetes.core.k8s_info:
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rb
+
+        - name: Assert tenant RoleBindings exist
+          ansible.builtin.assert:
+            that: _rb.resources | length > 0
+            fail_msg: "No RoleBindings in {{ ns }} — cluster RBAC was not applied."
+            quiet: true
+
+    - name: Deprovision the cluster
+      tags: [destroy]
+      block:
+        - name: Delete the cluster, environment, groups and entity
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_timeout: "{{ build_timeout }}"
+            cr_destroy_defs: >-
+              {{ [{'kind': 'PlatformOpenshift', 'name': cluster_name, 'namespace': ns}]
+                 + (rbac_groups | map('community.general.dict_kv', 'name')
+                    | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)
+                 + [{'kind': 'CloudVirt', 'name': cloudvirt_name, 'namespace': ns},
+                    {'kind': 'Entity', 'name': e, 'namespace': hs_platform_ns}] }}
+
+        - name: Assert the ManagedCluster was deregistered from ACM
+          kubernetes.core.k8s_info:
+            api_version: cluster.open-cluster-management.io/v1
+            kind: ManagedCluster
+            name: "{{ cluster_name }}"
+          register: _mc_gone
+          until: _mc_gone.resources | length == 0
+          retries: 60
+          delay: 10
+          failed_when: false
+
+        - name: ManagedCluster is gone
+          ansible.builtin.assert:
+            that: _mc_gone.resources | length == 0
+            fail_msg: >-
+              ManagedCluster/{{ cluster_name }} still exists after the
+              PlatformOpenshift CR was deleted — ACM was left with a stale
+              cluster registration.
+            success_msg: "ManagedCluster/{{ cluster_name }} deregistered."
+            quiet: true

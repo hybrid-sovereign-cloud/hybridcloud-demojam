@@ -1,0 +1,110 @@
+---
+# =============================================================================
+# Shared configuration for the HybridSovereign test suite.
+#
+# Every secret is read from the environment. Nothing here holds a credential,
+# and nothing here may ever be given a literal default that is a credential.
+# =============================================================================
+
+# -- Hub cluster -------------------------------------------------------------
+ocp_host: "{{ lookup('env', 'OCP_CENTRAL_SERVER') }}"
+ocp_username: "{{ lookup('env', 'OCP_CENTRAL_USERNAME') }}"
+ocp_password: "{{ lookup('env', 'OCP_CENTRAL_PASSWORD') }}"
+ocp_validate_certs: "{{ (lookup('env', 'OCP_CENTRAL_VALIDATE_CERTS') | default('false', true)) | bool }}"
+
+# OpenShift does not accept HTTP basic auth on the API server, so the suite
+# logs in once (platform_auth role) and writes a short-lived, 0600 kubeconfig
+# here. Every kubernetes.core call then uses that file via module_defaults.
+# This path is under /tmp deliberately: it holds a bearer token and must never
+# land in the working tree.
+hs_kubeconfig: "{{ lookup('env', 'HS_KUBECONFIG') | default('/tmp/.hs-test-kubeconfig', true) }}"
+
+# -- Platform conventions ----------------------------------------------------
+hs_api_version: hybridsovereign.redhat/v1alpha1
+hs_platform_ns: sovereign-cloud
+hs_plugins_ns: sovereign-cloud-plugins
+
+# Pre-existing, platform-owned config CRs the tenant CRs point at. These are
+# *inputs* to the tests — the suite never creates or deletes them.
+hs_rbac_config: keycloak-sovereign-tenants-services
+hs_aap_config: aap-sovereign-services
+hs_quay_config: quay-sovereign-services
+hs_fabric: platform-fabric
+hs_hub_cloudinfra: hub-virt
+hs_oso_cloudinfra: oso1
+
+# -- Timeouts ----------------------------------------------------------------
+hs_ready_timeout: "{{ lookup('env', 'HS_READY_TIMEOUT') | default(900, true) | int }}"
+hs_destroy_timeout: "{{ lookup('env', 'HS_DESTROY_TIMEOUT') | default(600, true) | int }}"
+hs_keep_on_failure: "{{ (lookup('env', 'HS_KEEP_ON_FAILURE') | default('false', true)) | bool }}"
+
+# -- Tool endpoint / credential overrides (empty => resolve from cluster) -----
+rhbk_url_override: "{{ lookup('env', 'RHBK_URL') }}"
+rhbk_username_override: "{{ lookup('env', 'RHBK_USERNAME') }}"
+rhbk_password_override: "{{ lookup('env', 'RHBK_PASSWORD') }}"
+rhbk_realm: "{{ lookup('env', 'RHBK_REALM') | default('sso', true) }}"
+
+aap_url_override: "{{ lookup('env', 'AAP_URL') }}"
+aap_username_override: "{{ lookup('env', 'AAP_USERNAME') }}"
+aap_password_override: "{{ lookup('env', 'AAP_PASSWORD') }}"
+
+quay_url_override: "{{ lookup('env', 'QUAY_URL') }}"
+quay_username_override: "{{ lookup('env', 'QUAY_USERNAME') }}"
+quay_password_override: "{{ lookup('env', 'QUAY_PASSWORD') }}"
+quay_token_override: "{{ lookup('env', 'QUAY_TOKEN') }}"
+
+vault_addr_override: "{{ lookup('env', 'VAULT_ADDR') }}"
+vault_token_override: "{{ lookup('env', 'VAULT_TOKEN') }}"
+
+# -- OpenStack ---------------------------------------------------------------
+oso_clouds_file: "{{ lookup('env', 'OSO_CLOUDS') }}"
+oso_cloud: "{{ lookup('env', 'OS_CLOUD') | default('openstack', true) }}"
+oso_test_image: "{{ lookup('env', 'OSO_TEST_IMAGE') | default('cirros', true) }}"
+oso_test_flavor: "{{ lookup('env', 'OSO_TEST_FLAVOR') | default('m1.tiny', true) }}"
+oso_external_network: "{{ lookup('env', 'OSO_EXTERNAL_NETWORK') | default('ext-net', true) }}"
+oso_enabled: "{{ oso_clouds_file | length > 0 }}"
+
+# =============================================================================
+# Pokémon-named test fixtures.
+#
+# Each suite owns one Entity so suites can run independently and in parallel,
+# and so a failed destroy never strands another suite's resources. These names
+# are deliberately unrelated to anything in samples/ — the test CRs are
+# self-contained and must never reference a sample.
+# =============================================================================
+poke:
+  tenancy:
+    entity: pikachu
+    ns: entity-pikachu
+  network:
+    entity: bulbasaur
+    ns: entity-bulbasaur
+  ocp_hybrid:
+    entity: charmander
+    ns: entity-charmander
+  ocp_plain:
+    entity: squirtle
+    ns: entity-squirtle
+  openstack:
+    entity: eevee
+    ns: entity-eevee
+  openstack_vm:
+    entity: snorlax
+    ns: entity-snorlax
+
+# Every object the suite creates carries this label, so a stuck run can always
+# be found and cleaned up with a single selector.
+hs_test_labels:
+  hybridsovereign.redhat/test-suite: "true"
+
+# Non-overlapping address space, one /24 per suite, kept clear of the fabric
+# underlay (192.168.64.0/18) and of the existing acme/chad networks.
+poke_cidr:
+  bulbasaur_hub: 10.130.10.0/24
+  bulbasaur_oso: 10.130.11.0/24
+  charmander_hub: 10.131.10.0/24
+  eevee_oso: 10.132.10.0/24
+  snorlax_oso: 10.133.10.0/24
+
+# Report sink.
+hs_report_dir: "{{ playbook_dir }}/reports"

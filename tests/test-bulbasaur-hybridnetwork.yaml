@@ -1,0 +1,260 @@
+---
+# =============================================================================
+# test-bulbasaur-hybridnetwork.yaml — hybrid fabric + hybrid network on the hub
+#
+#   --tags create   Entity -> CloudVirt -> HybridNetwork -> NetworkPlacement
+#   --tags test     fabric health, VNI allocation from the pool, VNI uniqueness
+#                   across tenants, placement readiness, and the real NADs in
+#                   the VM namespaces
+#   --tags destroy  tear down and prove the VNI was returned to the pool
+#
+# This is the suite that proves the sovereignty claim that matters: tenant
+# isolation is a route target per VNI, so a VNI collision is a cross-tenant
+# leak. The test asserts uniqueness explicitly rather than trusting Ready.
+# =============================================================================
+- name: "Bulbasaur — hybrid fabric and hybrid network"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: "{{ poke.network.entity }}"
+    ns: "{{ poke.network.ns }}"
+    cloudvirt_name: bulbasaur-virt
+    hn_name: bulbasaur-core
+    np_name: bulbasaur-core-hub
+    vm_ns: bulbasaur-core-vms
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the hybrid network stack
+      tags: [create]
+      block:
+        - name: Preflight — the shared fabric must already be healthy
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fab
+
+        - name: Assert the fabric is enabled and Ready
+          ansible.builtin.assert:
+            that:
+              - _fab.resources | length > 0
+              - _fab.resources[0].spec.enabled | bool
+              - >-
+                _fab.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              HybridFabric/{{ hs_fabric }} is not Ready. Every hybrid network
+              test depends on it; fix the fabric before running this suite.
+            quiet: true
+
+        - name: Create the Entity and its CloudVirt environment
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Bulbasaur — QA tenant for hybrid network testing"
+                  billingID: "BULBASAUR-TEST-001"
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        - name: Create the CloudVirt environment on the hub
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudVirt
+                metadata: { name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
+                spec:
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ hs_hub_cloudinfra }}" }
+                  baseDomain: cnv.local
+                  storageClass: ocs-external-storagecluster-ceph-rbd
+
+        - name: Wait for CloudVirt
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudVirt
+            cr_wait_name: "{{ cloudvirt_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Create the HybridNetwork (allocates a VNI from the fabric pool)
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: HybridNetwork
+                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                spec:
+                  fabricRef: "{{ hs_fabric }}"
+                  description: "Bulbasaur core VRF — QA hybrid network"
+
+        - name: Wait for the HybridNetwork
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: HybridNetwork
+            cr_wait_name: "{{ hn_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Place the network onto the hub CloudVirt backend
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: NetworkPlacement
+                metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
+                spec:
+                  network: "{{ hn_name }}"
+                  backend: { kind: CloudVirt, name: "{{ cloudvirt_name }}" }
+                  prefixes: ["{{ poke_cidr.bulbasaur_hub }}"]
+                  vmNamespaces: ["{{ vm_ns }}"]
+
+        - name: Wait for the NetworkPlacement
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: NetworkPlacement
+            cr_wait_name: "{{ np_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the hybrid network is genuinely on the fabric
+      tags: [test]
+      block:
+        - name: "Fabric — border gateway and VNI pool are sane"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fab
+
+        - name: Assert the fabric declares a border gateway and a VNI pool
+          ansible.builtin.assert:
+            that:
+              - _fab.resources[0].spec.borderGateway.name | length > 0
+              - (_fab.resources[0].spec.vniPool.end | int) > (_fab.resources[0].spec.vniPool.start | int)
+            fail_msg: "HybridFabric/{{ hs_fabric }} has no usable border gateway or VNI pool."
+            quiet: true
+
+        - name: "Fabric — the border gateway pod is actually running"
+          kubernetes.core.k8s_info:
+            kind: Pod
+            namespace: "{{ hs_platform_ns }}"
+            label_selectors:
+              - "app={{ _fab.resources[0].spec.borderGateway.name }}"
+          register: _bgw
+
+        - name: Assert the border gateway is Running
+          ansible.builtin.assert:
+            that:
+              - _bgw.resources | length > 0
+              - _bgw.resources | selectattr('status.phase', 'equalto', 'Running') | list | length > 0
+            fail_msg: >-
+              Border gateway '{{ _fab.resources[0].spec.borderGateway.name }}'
+              has no Running pod in {{ hs_platform_ns }}. Tenant traffic is
+              policed by this gateway, so the fabric is not enforcing anything.
+              Pods: {{ _bgw.resources | map(attribute='metadata.name') | list }}
+            success_msg: "Border gateway is Running."
+            quiet: true
+
+        - name: "Network — VNI, uniqueness, placements and NADs"
+          ansible.builtin.include_role:
+            name: verify_hybrid_network
+          vars:
+            hn_name: "{{ hn_name }}"
+            hn_namespace: "{{ ns }}"
+            hn_placements:
+              - { name: "{{ np_name }}", namespace: "{{ ns }}" }
+
+        - name: "Isolation — Bulbasaur's VNI differs from every other tenant's"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+          register: _all
+
+        - name: Report the fabric-wide VNI map
+          ansible.builtin.debug:
+            msg: >-
+              {{ _all.resources
+                 | selectattr('status.vni', 'defined')
+                 | map(attribute='metadata')
+                 | zip(_all.resources | selectattr('status.vni', 'defined') | map(attribute='status.vni'))
+                 | map('join', ' vni=') | list }}
+
+    # =========================================================================
+    # DESTROY
+    # =========================================================================
+    - name: Tear the hybrid network down
+      tags: [destroy]
+      block:
+        - name: Record the VNI before deleting, so we can prove it is released
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+            name: "{{ hn_name }}"
+            namespace: "{{ ns }}"
+          register: _pre
+
+        - name: Keep the VNI
+          ansible.builtin.set_fact:
+            _old_vni: "{{ _pre.resources[0].status.vni | default(0) }}"
+          when: _pre.resources | length > 0
+
+        - name: Delete placement, network, environment and entity in order
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: NetworkPlacement, name: "{{ np_name }}", namespace: "{{ ns }}" }
+              - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudVirt, name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        - name: Assert the VNI is no longer claimed by anything
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+          register: _post
+
+        - name: VNI released back to the pool
+          ansible.builtin.assert:
+            that: >-
+              _post.resources | map(attribute='status.vni', default=0)
+                | select('equalto', _old_vni | int) | list | length == 0
+            fail_msg: >-
+              VNI {{ _old_vni }} is still claimed after Bulbasaur was deleted —
+              the pool leaks VNIs, and the fabric will eventually exhaust it.
+            success_msg: "VNI {{ _old_vni }} was returned to the pool."
+            quiet: true
+          when: _old_vni is defined and (_old_vni | int) > 0

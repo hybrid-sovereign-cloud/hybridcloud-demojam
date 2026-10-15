@@ -1,0 +1,468 @@
+---
+# =============================================================================
+# test-eevee-openstack-network.yaml — OpenStack tenant network on the fabric
+#
+#   --tags create   Entity -> Rbac -> CloudOSO -> HybridNetwork ->
+#                   NetworkPlacement onto the OpenStack site
+#   --tags test     hybrid network health, the Keystone project really exists,
+#                   the Neutron network/subnet for the placement prefix exists,
+#                   and the site CloudGateway / TransportLink are present
+#   --tags destroy  tear down in reverse and prove the VNI was released
+#
+# NETWORKING ONLY. The OpenStack lab has no capacity for a full OpenShift
+# deployment, so this suite never creates a PlatformOpenshift CR — it proves
+# the tenant network reaches the OpenStack site, nothing more.
+#
+# The suite is also allowed to be unavailable: when OSO_CLOUDS is unset, or
+# when CloudInfrastructure/oso1 or its CloudGateway is not Ready, the play
+# ends cleanly with a loud SKIPPED banner instead of failing. An OpenStack
+# site that is down is an environment fact, not a product defect.
+# =============================================================================
+- name: "Eevee — OpenStack tenant network on the hybrid fabric (no OCP)"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+    group/openstack.cloud.openstack:
+      cloud: "{{ oso_cloud }}"
+
+  vars:
+    e: "{{ poke.openstack.entity }}"
+    ns: "{{ poke.openstack.ns }}"
+    cloudoso_name: eevee-oso
+    oso_project: eevee-qa
+    hn_name: eevee-core
+    np_name: eevee-core-oso
+    prefix: "{{ poke_cidr.eevee_oso }}"
+    rbac_groups:
+      - eevee-project-admins
+      - eevee-project-members
+      - eevee-project-viewers
+
+  environment:
+    # The openstack.cloud collection reads clouds.yaml from this path; the
+    # location itself comes from OSO_CLOUDS, never from anything in-tree.
+    OS_CLIENT_CONFIG_FILE: "{{ oso_clouds_file }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the OpenStack tenant network stack
+      tags: [create]
+      block:
+        # ---- Preflight: is the OpenStack site usable at all? ----------------
+        - name: "Preflight — announce the suite is skipped without clouds.yaml"
+          ansible.builtin.debug:
+            msg: >-
+              ========== EEVEE SKIPPED ==========
+              OSO_CLOUDS is unset, so there is no OpenStack credential to test
+              against. Export OSO_CLOUDS=/path/to/clouds.yaml and OS_CLOUD to
+              run this suite.
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: "Preflight — read the OpenStack CloudInfrastructure"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudInfrastructure
+            name: "{{ hs_oso_cloudinfra }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _oso_ci
+
+        - name: "Preflight — find the CloudGateway for that site"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudGateway
+            namespace: "{{ hs_platform_ns }}"
+          register: _gw_all
+
+        - name: Keep the gateways that point at this site
+          ansible.builtin.set_fact:
+            _site_gw: >-
+              {{ _gw_all.resources | default([])
+                 | selectattr('spec.cloudRef.name', 'defined')
+                 | selectattr('spec.cloudRef.name', 'equalto', hs_oso_cloudinfra)
+                 | list }}
+
+        - name: Decide whether the site is usable
+          ansible.builtin.set_fact:
+            _site_ready: >-
+              {{ (_oso_ci.resources | default([]) | length > 0)
+                 and (_oso_ci.resources[0].status.conditions | default([])
+                      | selectattr('type', 'equalto', 'Ready')
+                      | selectattr('status', 'equalto', 'True') | list | length > 0)
+                 and (_site_gw | length > 0)
+                 and (_site_gw[0].status.conditions | default([])
+                      | selectattr('type', 'equalto', 'Ready')
+                      | selectattr('status', 'equalto', 'True') | list | length > 0) }}
+
+        - name: "Preflight — announce the suite is skipped on an unready site"
+          ansible.builtin.debug:
+            msg: >-
+              ========== EEVEE SKIPPED ==========
+              The OpenStack site is not Ready on this hub, so no tenant network
+              can be placed on it.
+              CloudInfrastructure/{{ hs_oso_cloudinfra }}:
+              {{ (_oso_ci.resources | default([]) | length > 0)
+                 | ternary('present', 'MISSING') }}
+              conditions={{ _oso_ci.resources[0].status.conditions | default([]) }}
+              CloudGateway: {{ _site_gw | map(attribute='metadata.name') | list }}
+              conditions={{ _site_gw[0].status.conditions | default([]) if _site_gw | length > 0 else [] }}
+              Bring the site and its gateway up, then re-run.
+          when: not (_site_ready | bool)
+
+        - name: End the play when the OpenStack site is not Ready
+          ansible.builtin.meta: end_play
+          when: not (_site_ready | bool)
+
+        - name: "Preflight — the shared fabric must already be healthy"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fab
+
+        - name: Assert the fabric is enabled and Ready
+          ansible.builtin.assert:
+            that:
+              - _fab.resources | length > 0
+              - _fab.resources[0].spec.enabled | bool
+              - >-
+                _fab.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              HybridFabric/{{ hs_fabric }} is not Ready. The OpenStack site
+              only carries tenant traffic through this fabric.
+            quiet: true
+
+        # ---- The CR stack ---------------------------------------------------
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Eevee — QA tenant for OpenStack network testing"
+                  billingID: "EEVEE-TEST-001"
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        - name: Create the Rbac groups the CloudOSO project will bind
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Rbac
+                metadata: { name: "{{ item }}", namespace: "{{ ns }}" }
+                spec:
+                  config: "{{ hs_rbac_config }}"
+                  description: "QA group {{ item }} for tenant {{ e }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for every Rbac CR to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Rbac
+            cr_wait_name: "{{ item }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Create the CloudOSO project on the OpenStack site
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudOSO
+                metadata: { name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+                spec:
+                  project: "{{ oso_project }}"
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ hs_oso_cloudinfra }}" }
+                  baseDomain: oso.local
+                  externalNetwork: "{{ oso_external_network }}"
+                  # NOTE: spec.toolRbac is deliberately NOT set here.
+                  # The CloudOSO CRD does not define it and does not set
+                  # x-kubernetes-preserve-unknown-fields, so the API server
+                  # prunes it silently — asserting on it would test nothing.
+                  # (samples/cloudoso/*.yaml still carries it; that sample is
+                  # equally a no-op today. Tracked as a platform gap.)
+
+        - name: Wait for the CloudOSO
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudOSO
+            cr_wait_name: "{{ cloudoso_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Create the HybridNetwork (allocates a VNI from the fabric pool)
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: HybridNetwork
+                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                spec:
+                  fabricRef: "{{ hs_fabric }}"
+                  description: "Eevee core VRF — QA hybrid network on OpenStack"
+
+        - name: Wait for the HybridNetwork
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: HybridNetwork
+            cr_wait_name: "{{ hn_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Place the network onto the OpenStack backend
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: NetworkPlacement
+                metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
+                spec:
+                  network: "{{ hn_name }}"
+                  backend: { kind: CloudOSO, name: "{{ cloudoso_name }}" }
+                  prefixes: ["{{ prefix }}"]
+
+        - name: Wait for the NetworkPlacement
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: NetworkPlacement
+            cr_wait_name: "{{ np_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the tenant network really exists on the OpenStack site
+      tags: [test]
+      block:
+        - name: Skip the checks when OpenStack is not configured
+          ansible.builtin.debug:
+            msg: "========== EEVEE SKIPPED ========== OSO_CLOUDS is unset."
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: "Network — VNI, uniqueness and placement readiness"
+          ansible.builtin.include_role:
+            name: verify_hybrid_network
+          vars:
+            hn_name: "{{ hn_name }}"
+            hn_namespace: "{{ ns }}"
+            hn_placements:
+              - { name: "{{ np_name }}", namespace: "{{ ns }}" }
+
+        # ---- Keystone: the project is not just a Ready condition ------------
+        - name: "Keystone — look the CloudOSO project up in OpenStack"
+          openstack.cloud.project_info:
+            name: "{{ oso_project }}"
+          register: _ks
+
+        - name: Assert the Keystone project exists and is enabled
+          ansible.builtin.assert:
+            that:
+              - _ks.projects | default([]) | length > 0
+              - _ks.projects[0].is_enabled | default(true) | bool
+            fail_msg: >-
+              CloudOSO/{{ cloudoso_name }} reports Ready but Keystone has no
+              enabled project '{{ oso_project }}' on cloud '{{ oso_cloud }}'.
+              The CR status is lying about the site.
+            success_msg: "Keystone project '{{ oso_project }}' exists and is enabled."
+            quiet: true
+
+        # ---- Neutron: the placement prefix is a real network + subnet -------
+        - name: "Neutron — list the networks visible to the tenant"
+          openstack.cloud.networks_info:
+          register: _nets
+
+        - name: "Neutron — list the subnets visible to the tenant"
+          openstack.cloud.subnets_info:
+          register: _subnets
+
+        - name: Keep the subnets whose CIDR is the placement prefix
+          ansible.builtin.set_fact:
+            _np_subnets: >-
+              {{ _subnets.subnets | default([])
+                 | selectattr('cidr', 'defined')
+                 | selectattr('cidr', 'equalto', prefix) | list }}
+
+        - name: Assert the placement prefix exists as a Neutron subnet
+          ansible.builtin.assert:
+            that:
+              - _np_subnets | length > 0
+            fail_msg: >-
+              No Neutron subnet with CIDR {{ prefix }} on cloud
+              '{{ oso_cloud }}'. NetworkPlacement/{{ np_name }} did not
+              actually programme the site.
+              Subnets seen: {{ _subnets.subnets | default([]) | map(attribute='cidr') | list }}
+            success_msg: "Neutron subnet {{ prefix }} exists."
+            quiet: true
+
+        - name: Assert the subnet hangs off a network that really exists
+          ansible.builtin.assert:
+            that:
+              - >-
+                _nets.networks | default([])
+                  | selectattr('id', 'equalto', _np_subnets[0].network_id)
+                  | list | length > 0
+            fail_msg: >-
+              Subnet {{ prefix }} references network
+              {{ _np_subnets[0].network_id }}, which is not visible on
+              cloud '{{ oso_cloud }}'.
+            success_msg: >-
+              Subnet {{ prefix }} is on network
+              {{ _nets.networks | selectattr('id', 'equalto', _np_subnets[0].network_id)
+                 | map(attribute='name') | first }}.
+            quiet: true
+
+        # ---- Fabric transport into the site ---------------------------------
+        - name: "Transport — the CloudGateway and TransportLink for the site"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _transport
+          loop: [CloudGateway, TransportLink]
+
+        - name: Report the transport state for this site
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.item }}:
+              {{ item.resources | default([])
+                 | map(attribute='metadata.name') | list }}
+              conditions=
+              {{ item.resources | default([])
+                 | map(attribute='status.conditions') | list }}
+          loop: "{{ _transport.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Assert a CloudGateway exists for the OpenStack site
+          ansible.builtin.assert:
+            that:
+              - >-
+                _transport.results[0].resources | default([])
+                  | selectattr('spec.cloudRef.name', 'defined')
+                  | selectattr('spec.cloudRef.name', 'equalto', hs_oso_cloudinfra)
+                  | list | length > 0
+            fail_msg: >-
+              No CloudGateway points at CloudInfrastructure/{{ hs_oso_cloudinfra }},
+              so the tenant VRF has no transport into the site.
+            success_msg: "A CloudGateway is attached to {{ hs_oso_cloudinfra }}."
+            quiet: true
+
+    # =========================================================================
+    # DESTROY
+    # =========================================================================
+    - name: Tear the OpenStack tenant network down
+      tags: [destroy]
+      block:
+        - name: Skip the teardown when OpenStack is not configured
+          ansible.builtin.debug:
+            msg: "========== EEVEE SKIPPED ========== OSO_CLOUDS is unset."
+          when: not (oso_enabled | bool)
+
+        - name: End the play when OpenStack is not configured
+          ansible.builtin.meta: end_play
+          when: not (oso_enabled | bool)
+
+        - name: Record the VNI before deleting, so we can prove it is released
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+            name: "{{ hn_name }}"
+            namespace: "{{ ns }}"
+          register: _pre
+
+        - name: Keep the VNI
+          ansible.builtin.set_fact:
+            _old_vni: "{{ _pre.resources[0].status.vni | default(0) }}"
+          when: _pre.resources | length > 0
+
+        - name: Delete placement, network and the CloudOSO project in order
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: NetworkPlacement, name: "{{ np_name }}", namespace: "{{ ns }}" }
+              - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudOSO, name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+
+        - name: Delete the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Rbac, name: "{{ item }}", namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        - name: Delete the Entity last
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        - name: "Keystone — the tenant project is gone from OpenStack"
+          openstack.cloud.project_info:
+            name: "{{ oso_project }}"
+          register: _ks_post
+
+        - name: Assert the Keystone project was reclaimed
+          ansible.builtin.assert:
+            that: _ks_post.projects | default([]) | length == 0
+            fail_msg: >-
+              Keystone project '{{ oso_project }}' still exists after the
+              CloudOSO was deleted — the destroy flow leaks tenant projects.
+            success_msg: "Keystone project '{{ oso_project }}' was reclaimed."
+            quiet: true
+
+        - name: Read every remaining HybridNetwork
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridNetwork
+          register: _post
+
+        - name: VNI released back to the pool
+          ansible.builtin.assert:
+            that: >-
+              _post.resources | map(attribute='status.vni', default=0)
+                | select('equalto', _old_vni | int) | list | length == 0
+            fail_msg: >-
+              VNI {{ _old_vni }} is still claimed after Eevee was deleted —
+              the pool leaks VNIs, and the fabric will eventually exhaust it.
+            success_msg: "VNI {{ _old_vni }} was returned to the pool."
+            quiet: true
+          when: _old_vni is defined and (_old_vni | int) > 0

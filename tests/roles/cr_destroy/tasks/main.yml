@@ -1,0 +1,50 @@
+---
+# Delete CRs and prove they are actually gone (finalizers really ran).
+#
+# Required:
+#   cr_destroy_defs: list of dicts {kind, name, namespace}
+# Optional:
+#   cr_destroy_timeout (default hs_destroy_timeout)
+#
+# Deletion order is the caller's responsibility — pass dependents first.
+
+- name: Request deletion
+  kubernetes.core.k8s:
+    state: absent
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
+    wait: false
+  loop: "{{ cr_destroy_defs }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.name }}"
+
+- name: Wait for each object to disappear
+  kubernetes.core.k8s_info:
+    api_version: "{{ hs_api_version }}"
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
+  register: _gone
+  until: _gone.resources | length == 0
+  retries: "{{ ((cr_destroy_timeout | default(hs_destroy_timeout) | int) / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  failed_when: false
+  loop: "{{ cr_destroy_defs }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.name }}"
+
+- name: Assert nothing was left behind (a stuck finalizer is a real failure)
+  ansible.builtin.assert:
+    that: item.resources | length == 0
+    fail_msg: >-
+      {{ item.item.kind }}/{{ item.item.name }} still exists after
+      {{ cr_destroy_timeout | default(hs_destroy_timeout) }}s — the destroy
+      flow did not complete. deletionTimestamp=
+      {{ item.resources[0].metadata.deletionTimestamp | default('unset') }}
+      finalizers={{ item.resources[0].metadata.finalizers | default([]) }}
+    quiet: true
+  loop: "{{ _gone.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}/{{ item.item.name }}"

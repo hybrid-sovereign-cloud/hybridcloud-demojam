@@ -1,0 +1,66 @@
+---
+# Log in to AAP and prove the AAPOrg CR really created the organization.
+#
+# Required:
+#   aap_org_name   : organization name expected in AAP
+# Optional:
+#   aap_org_absent : when true, assert the org is GONE (used by the destroy tag)
+
+- name: Query AAP for the organization (gateway API)
+  ansible.builtin.uri:
+    url: "{{ aap.url }}/api/gateway/v1/organizations/?name={{ aap_org_name | urlencode }}"
+    method: GET
+    url_username: "{{ aap.username }}"
+    url_password: "{{ aap.password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 401, 403, 404]
+  register: _aap_gw
+  no_log: true
+
+- name: Query AAP for the organization (controller API)
+  ansible.builtin.uri:
+    url: "{{ aap.url }}/api/controller/v2/organizations/?name={{ aap_org_name | urlencode }}"
+    method: GET
+    url_username: "{{ aap.username }}"
+    url_password: "{{ aap.password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 401, 403, 404]
+  register: _aap_ctl
+  when: _aap_gw.status != 200
+  no_log: true
+
+- name: Settle on whichever AAP API answered
+  ansible.builtin.set_fact:
+    _aap_resp: "{{ _aap_gw if _aap_gw.status == 200 else (_aap_ctl | default({'status': 0})) }}"
+
+- name: Fail clearly if neither AAP API was reachable
+  ansible.builtin.assert:
+    that: _aap_resp.status | default(0) == 200
+    fail_msg: >-
+      Could not query AAP at {{ aap.url }} — neither /api/gateway/v1 nor
+      /api/controller/v2 returned 200 (got {{ _aap_gw.status }} / {{ _aap_ctl.status | default('n/a') }}).
+      Check the AAP admin credentials in the aap-admin-credentials Secret, or
+      override AAP_URL/AAP_USERNAME/AAP_PASSWORD.
+    quiet: true
+
+- name: "Assert AAP organization '{{ aap_org_name }}' is present"
+  ansible.builtin.assert:
+    that: _aap_resp.json.count | int > 0
+    fail_msg: >-
+      AAPOrg CR reported Ready but AAP at {{ aap.url }} has no organization
+      named '{{ aap_org_name }}'.
+    success_msg: "AAP organization '{{ aap_org_name }}' exists."
+    quiet: true
+  when: not (aap_org_absent | default(false) | bool)
+
+- name: "Assert AAP organization '{{ aap_org_name }}' was removed"
+  ansible.builtin.assert:
+    that: _aap_resp.json.count | int == 0
+    fail_msg: >-
+      AAPOrg CR was deleted but organization '{{ aap_org_name }}' still exists
+      in AAP at {{ aap.url }} — the destroy flow leaked a remote object.
+    success_msg: "AAP organization '{{ aap_org_name }}' is gone."
+    quiet: true
+  when: aap_org_absent | default(false) | bool

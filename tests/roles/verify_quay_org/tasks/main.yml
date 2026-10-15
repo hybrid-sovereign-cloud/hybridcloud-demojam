@@ -1,0 +1,50 @@
+---
+# Log in to Quay and prove the QuayOrg CR really created the organization.
+#
+# Required:
+#   quay_org_name   : organization name expected in Quay
+# Optional:
+#   quay_org_absent : when true, assert the org is GONE (destroy tag)
+
+- name: "Query Quay for organization '{{ quay_org_name }}'"
+  ansible.builtin.uri:
+    url: "{{ quay.url }}/api/v1/organization/{{ quay_org_name | urlencode }}"
+    method: GET
+    headers: >-
+      {{ {'Authorization': 'Bearer ' ~ quay.token} if quay.token | length > 0 else {} }}
+    url_username: "{{ omit if quay.token | length > 0 else quay.username }}"
+    url_password: "{{ omit if quay.token | length > 0 else quay.password }}"
+    force_basic_auth: "{{ quay.token | length == 0 }}"
+    validate_certs: false
+    status_code: [200, 401, 403, 404]
+  register: _quay
+  no_log: true
+
+- name: Fail clearly if Quay rejected the credentials
+  ansible.builtin.assert:
+    that: _quay.status in [200, 404]
+    fail_msg: >-
+      Quay at {{ quay.url }} returned {{ _quay.status }} for
+      '{{ quay_org_name }}'. The admin credential could not read organizations
+      — set QUAY_TOKEN to an OAuth token with org:admin scope.
+    quiet: true
+
+- name: "Assert Quay organization '{{ quay_org_name }}' is present"
+  ansible.builtin.assert:
+    that: _quay.status == 200
+    fail_msg: >-
+      QuayOrg CR reported Ready but Quay at {{ quay.url }} has no organization
+      '{{ quay_org_name }}' (HTTP {{ _quay.status }}).
+    success_msg: "Quay organization '{{ quay_org_name }}' exists."
+    quiet: true
+  when: not (quay_org_absent | default(false) | bool)
+
+- name: "Assert Quay organization '{{ quay_org_name }}' was removed"
+  ansible.builtin.assert:
+    that: _quay.status == 404
+    fail_msg: >-
+      QuayOrg CR was deleted but organization '{{ quay_org_name }}' still
+      exists in Quay — the destroy flow leaked a remote object.
+    success_msg: "Quay organization '{{ quay_org_name }}' is gone."
+    quiet: true
+  when: quay_org_absent | default(false) | bool

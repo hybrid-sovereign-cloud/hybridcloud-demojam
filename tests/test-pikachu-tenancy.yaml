@@ -1,0 +1,303 @@
+---
+# =============================================================================
+# test-pikachu-tenancy.yaml — the full tenancy stack for one sovereign tenant
+#
+#   --tags create   Entity -> Rbac -> Team/Project/Persona -> AAPOrg, QuayOrg,
+#                   Vault, VaultKV, Assignment
+#   --tags test     log in to Keycloak, AAP, Quay and Vault and prove each
+#                   object was really created in the tool, not just in etcd
+#   --tags destroy  delete in reverse dependency order and prove the remote
+#                   objects were reclaimed too
+#
+# Self-contained: every CR below is defined inline. Nothing here reads from
+# samples/.
+# =============================================================================
+- name: "Pikachu — tenancy lifecycle"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: "{{ poke.tenancy.entity }}"
+    ns: "{{ poke.tenancy.ns }}"
+    rbac_groups:
+      - pikachu-platform-admins
+      - pikachu-developers
+      - pikachu-viewers
+      - pikachu-aap-admins
+      - pikachu-aap-executors
+      - pikachu-quay-admins
+      - pikachu-vault-admins
+    aap_org: pikachu-automation
+    quay_org: pikachu-registry
+    vault_name: pikachu-vault
+    vaultkv_name: pikachu-app-secrets
+    team_name: pikachu-platform-team
+    project_name: pikachu-api
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the tenancy stack
+      tags: [create]
+      block:
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata:
+                  name: "{{ e }}"
+                  namespace: "{{ hs_platform_ns }}"
+                spec:
+                  description: "Pikachu — QA tenant created by the HybridSovereign test suite"
+                  billingID: "PIKACHU-TEST-001"
+                  namespaceRbac:
+                    entityAdmin: [pikachu-platform-admins]
+                    auditor: [pikachu-viewers]
+                    teamAdmin: [pikachu-platform-admins]
+                    teamView: [pikachu-viewers]
+                    projectAdmin: [pikachu-platform-admins, pikachu-developers]
+                    projectView: [pikachu-viewers]
+                    assignmentAdmin: [pikachu-platform-admins]
+                    identityAdmin: [pikachu-platform-admins]
+
+        - name: Wait for the Entity to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        # The operator creates entity-<name>; the Rbac CRs live there.
+        - name: Create each Rbac CR
+          kubernetes.core.k8s:
+            state: present
+            apply: true
+            definition:
+              apiVersion: "{{ hs_api_version }}"
+              kind: Rbac
+              metadata:
+                name: "{{ item }}"
+                namespace: "{{ ns }}"
+                labels: "{{ hs_test_labels }}"
+              spec:
+                config: "{{ hs_rbac_config }}"
+                description: "QA group {{ item }} for tenant {{ e }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for every Rbac CR to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Rbac
+            cr_wait_name: "{{ item }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Create Team, Project, Persona, AAPOrg, QuayOrg and Vault
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Team
+                metadata: { name: "{{ team_name }}", namespace: "{{ ns }}" }
+                spec:
+                  rbacConfig: "{{ hs_rbac_config }}"
+                  features: { argo: true, istio: false }
+                  # All three role lists are supplied deliberately. The Team
+                  # operator's "Build team viewer group subjects" step fails
+                  # when teamAdmin is set but teamViewerRbac is absent, so a
+                  # partially-filled spec never reaches Ready.
+                  teamAdmin: [pikachu-platform-admins]
+                  teamMemberRbac: [pikachu-developers]
+                  teamViewerRbac: [pikachu-viewers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Project
+                metadata: { name: "{{ project_name }}", namespace: "{{ ns }}" }
+                spec: {}
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Persona
+                metadata: { name: pikachu-entity-admin, namespace: "{{ ns }}" }
+                spec:
+                  rbac: pikachu-platform-admins
+                  type: entityAdmin
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: AAPOrg
+                metadata: { name: "{{ aap_org }}", namespace: "{{ ns }}" }
+                spec:
+                  aapConfig: "{{ hs_aap_config }}"
+                  description: "QA automation organization for {{ e }}"
+                  aapAdminRbac: [pikachu-aap-admins]
+                  aapJobExecutorRbac: [pikachu-aap-executors]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: QuayOrg
+                metadata: { name: "{{ quay_org }}", namespace: "{{ ns }}" }
+                spec:
+                  quayConfig: "{{ hs_quay_config }}"
+                  quayAdminRbac: [pikachu-quay-admins]
+                  quayMemberRbac: [pikachu-developers]
+
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Vault
+                metadata: { name: "{{ vault_name }}", namespace: "{{ ns }}" }
+                spec:
+                  ha: false
+                  rbacConfig: "{{ hs_rbac_config }}"
+
+        - name: Wait for the tool-backed CRs to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: "{{ item.kind }}"
+            cr_wait_name: "{{ item.name }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop:
+            - { kind: Team, name: "{{ team_name }}" }
+            - { kind: Project, name: "{{ project_name }}" }
+            - { kind: Persona, name: pikachu-entity-admin }
+            - { kind: AAPOrg, name: "{{ aap_org }}" }
+            - { kind: QuayOrg, name: "{{ quay_org }}" }
+            - { kind: Vault, name: "{{ vault_name }}" }
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+
+        # VaultKV mounts onto the Vault, so it must come after Vault is Ready.
+        - name: Create the VaultKV mount
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: VaultKV
+                metadata: { name: "{{ vaultkv_name }}", namespace: "{{ ns }}" }
+                spec:
+                  vault: "{{ vault_name }}"
+                  vaultAdminRbac: [pikachu-vault-admins]
+                  vaultReaderRbac: [pikachu-developers]
+
+        - name: Wait for the VaultKV mount to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: VaultKV
+            cr_wait_name: "{{ vaultkv_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+    # =========================================================================
+    # TEST — log in to each tool and verify the change really landed
+    # =========================================================================
+    - name: Verify the tenancy stack in the real tools
+      tags: [test]
+      block:
+        - name: "Keycloak — the Entity and every Rbac group exist"
+          ansible.builtin.include_role:
+            name: verify_keycloak_group
+          vars:
+            kc_entity: "{{ e }}"
+            kc_groups: "{{ rbac_groups }}"
+
+        - name: "AAP — the organization exists"
+          ansible.builtin.include_role:
+            name: verify_aap_org
+          vars:
+            # AAP orgs are namespaced <entity>-<cr-name>, same as Quay.
+            aap_org_name: "{{ e }}-{{ aap_org }}"
+
+        - name: "Quay — the organization exists"
+          ansible.builtin.include_role:
+            name: verify_quay_org
+          vars:
+            # The operator namespaces Quay orgs as <entity>-<cr-name>.
+            quay_org_name: "{{ e }}-{{ quay_org }}"
+
+        - name: "Vault — the tenant Vault is up and the KV mount exists"
+          ansible.builtin.include_role:
+            name: verify_vault
+          vars:
+            vault_cr_name: "{{ vault_name }}"
+            vault_cr_namespace: "{{ ns }}"
+            vault_kv_mounts: ["{{ vaultkv_name }}"]
+
+        - name: "OpenShift — the tenant namespace and RoleBindings were created"
+          kubernetes.core.k8s_info:
+            kind: RoleBinding
+            namespace: "{{ ns }}"
+          register: _rb
+
+        - name: Assert the Entity's namespaceRbac produced RoleBindings
+          ansible.builtin.assert:
+            that: _rb.resources | length > 0
+            fail_msg: >-
+              Namespace {{ ns }} has no RoleBindings. The Entity declared
+              namespaceRbac but nothing was bound, so the tenant's roles are
+              not actually enforced.
+            success_msg: >-
+              {{ _rb.resources | length }} RoleBindings present in {{ ns }}.
+            quiet: true
+
+    # =========================================================================
+    # DESTROY — reverse dependency order, then prove the tools were cleaned up
+    # =========================================================================
+    - name: Tear the tenancy stack down
+      tags: [destroy]
+      block:
+        - name: Delete dependants first
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: VaultKV, name: "{{ vaultkv_name }}", namespace: "{{ ns }}" }
+              - { kind: Persona, name: pikachu-entity-admin, namespace: "{{ ns }}" }
+              - { kind: AAPOrg, name: "{{ aap_org }}", namespace: "{{ ns }}" }
+              - { kind: QuayOrg, name: "{{ quay_org }}", namespace: "{{ ns }}" }
+              - { kind: Vault, name: "{{ vault_name }}", namespace: "{{ ns }}" }
+              - { kind: Project, name: "{{ project_name }}", namespace: "{{ ns }}" }
+              - { kind: Team, name: "{{ team_name }}", namespace: "{{ ns }}" }
+
+        - name: Delete each Rbac CR
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Rbac, name: "{{ item }}", namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        - name: Delete the Entity last
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        - name: "AAP — the organization was reclaimed"
+          ansible.builtin.include_role:
+            name: verify_aap_org
+          vars:
+            # AAP orgs are namespaced <entity>-<cr-name>, same as Quay.
+            aap_org_name: "{{ e }}-{{ aap_org }}"
+            aap_org_absent: true
+
+        - name: "Quay — the organization was reclaimed"
+          ansible.builtin.include_role:
+            name: verify_quay_org
+          vars:
+            quay_org_name: "{{ e }}-{{ quay_org }}"
+            quay_org_absent: true

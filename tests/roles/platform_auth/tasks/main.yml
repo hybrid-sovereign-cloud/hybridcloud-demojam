@@ -1,0 +1,141 @@
+---
+# Preflight + credential resolution.
+#
+# Resolves the endpoint and admin credentials for Keycloak, AAP, Quay and
+# Vault. By default these come from the Secrets the platform already keeps on
+# the hub cluster, so the operator of this suite only has to supply OpenShift
+# credentials. Any tool can be overridden via environment variables.
+#
+# Everything that touches a credential value runs with no_log.
+
+- name: Preflight — hub cluster credentials must be present
+  ansible.builtin.assert:
+    that:
+      - ocp_host | length > 0
+      - ocp_username | length > 0
+      - ocp_password | length > 0
+    fail_msg: >-
+      OCP_CENTRAL_SERVER / OCP_CENTRAL_USERNAME / OCP_CENTRAL_PASSWORD are not
+      all set. Copy tests/.env.example to tests/.env, fill it in, and re-run
+      via tests/run-tests.sh (which sources it for you).
+    quiet: true
+
+- name: Preflight — reject half-configured tool overrides
+  ansible.builtin.assert:
+    that:
+      - not (item.url | length > 0) or (item.secret | length > 0)
+    fail_msg: >-
+      {{ item.name }} endpoint was overridden in the environment but its
+      credential was not. Set both, or neither (to resolve from the cluster).
+    quiet: true
+  loop:
+    - { name: RHBK, url: "{{ rhbk_url_override }}", secret: "{{ rhbk_password_override }}" }
+    - { name: AAP, url: "{{ aap_url_override }}", secret: "{{ aap_password_override }}" }
+    - { name: Quay, url: "{{ quay_url_override }}", secret: "{{ quay_password_override }}{{ quay_token_override }}" }
+    - { name: Vault, url: "{{ vault_addr_override }}", secret: "{{ vault_token_override }}" }
+  loop_control:
+    label: "{{ item.name }}"
+
+# OpenShift's API server does not accept HTTP basic auth, so we exchange the
+# username/password for an OAuth bearer token once, into a 0600 kubeconfig
+# that every later kubernetes.core call reuses via module_defaults.
+- name: Log in to the hub cluster and mint a short-lived kubeconfig
+  ansible.builtin.command:
+    argv:
+      - oc
+      - login
+      - "{{ ocp_host }}"
+      - "--username={{ ocp_username }}"
+      - "--password={{ ocp_password }}"
+      - "--insecure-skip-tls-verify={{ not ocp_validate_certs | bool }}"
+  environment:
+    KUBECONFIG: "{{ hs_kubeconfig }}"
+  register: _login
+  changed_when: true
+  no_log: true
+
+- name: Lock the kubeconfig down — it holds a bearer token
+  ansible.builtin.file:
+    path: "{{ hs_kubeconfig }}"
+    mode: "0600"
+
+- name: Verify the hub API answers and the CRDs are installed
+  kubernetes.core.k8s_info:
+    kind: CustomResourceDefinition
+    name: entities.hybridsovereign.redhat
+  register: _crd
+  failed_when: _crd.resources | length == 0
+
+- name: Read the platform tool-credential Secrets from the hub
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ hs_plugins_ns }}"
+    name: "{{ item }}"
+  loop:
+    - rhbk-services-admin
+    - aap-admin-credentials
+    - quay-admin-credentials
+  loop_control:
+    label: "{{ item }}"
+  register: _tool_secrets
+  no_log: true
+
+- name: Index the resolved Secrets by name
+  ansible.builtin.set_fact:
+    _sec: >-
+      {{ dict(_tool_secrets.results
+              | map(attribute='resources')
+              | map('first')
+              | map(attribute='metadata.name')
+              | zip(_tool_secrets.results
+                    | map(attribute='resources')
+                    | map('first')
+                    | map(attribute='data'))) }}
+  no_log: true
+
+# -- Keycloak ---------------------------------------------------------------
+- name: Resolve Keycloak endpoint and credentials
+  ansible.builtin.set_fact:
+    rhbk:
+      url: "{{ rhbk_url_override if rhbk_url_override | length > 0
+               else (_sec['rhbk-services-admin'].url | b64decode) }}"
+      username: "{{ rhbk_username_override if rhbk_username_override | length > 0
+                    else (_sec['rhbk-services-admin'].username | b64decode) }}"
+      password: "{{ rhbk_password_override if rhbk_password_override | length > 0
+                    else (_sec['rhbk-services-admin'].password | b64decode) }}"
+      realm: "{{ rhbk_realm }}"
+  no_log: true
+
+# -- AAP --------------------------------------------------------------------
+- name: Resolve AAP endpoint and credentials
+  ansible.builtin.set_fact:
+    aap:
+      url: "{{ (aap_url_override if aap_url_override | length > 0
+                else (_sec['aap-admin-credentials'].url | b64decode)) | regex_replace('/$', '') }}"
+      username: "{{ aap_username_override if aap_username_override | length > 0
+                    else (_sec['aap-admin-credentials'].username | b64decode) }}"
+      password: "{{ aap_password_override if aap_password_override | length > 0
+                    else (_sec['aap-admin-credentials'].password | b64decode) }}"
+  no_log: true
+
+# -- Quay -------------------------------------------------------------------
+- name: Resolve Quay endpoint and credentials
+  ansible.builtin.set_fact:
+    quay:
+      url: "{{ (quay_url_override if quay_url_override | length > 0
+                else (_sec['quay-admin-credentials'].url | b64decode)) | regex_replace('/$', '') }}"
+      username: "{{ quay_username_override if quay_username_override | length > 0
+                    else (_sec['quay-admin-credentials'].username | b64decode) }}"
+      password: "{{ quay_password_override if quay_password_override | length > 0
+                    else (_sec['quay-admin-credentials'].password | b64decode) }}"
+      token: "{{ quay_token_override if quay_token_override | length > 0
+                 else (_sec['quay-admin-credentials'].token | default('') | b64decode) }}"
+  no_log: true
+
+- name: Report resolved endpoints (hostnames only — never credentials)
+  ansible.builtin.debug:
+    msg:
+      - "Keycloak : {{ rhbk.url }} (realm {{ rhbk.realm }})"
+      - "AAP      : {{ aap.url }}"
+      - "Quay     : {{ quay.url }}"
+      - "OpenStack: {{ 'enabled (' ~ oso_cloud ~ ')' if oso_enabled else 'disabled — OSO_CLOUDS unset' }}"
