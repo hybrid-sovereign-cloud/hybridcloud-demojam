@@ -173,6 +173,11 @@
 
         - name: "RBAC — the cluster's admin/viewer bindings were created"
           kubernetes.core.k8s_info:
+            # api_version is explicit: OpenShift serves RoleBinding under both
+            # rbac.authorization.k8s.io/v1 and authorization.openshift.io/v1,
+            # and letting the client resolve the ambiguous kind sends it into
+            # "maximum recursion depth exceeded".
+            api_version: rbac.authorization.k8s.io/v1
             kind: RoleBinding
             namespace: "{{ ns }}"
           register: _rb
