@@ -84,6 +84,19 @@
             name: cr_wait_ready
           vars: { cr_wait_kind: Entity, cr_wait_name: "{{ e }}", cr_wait_namespace: "{{ hs_platform_ns }}" }
 
+        # HybridFabric/platform-fabric and CloudInfrastructure/hub-virt each
+        # carry an entityRefs allow-list; a tenant that is not on it is
+        # refused with "Require the entity to be allowed on this
+        # infrastructure". Charmander needs BOTH (unlike squirtle, which is
+        # entitled on the CloudInfrastructure only): it creates a CloudVirt on
+        # hub-virt *and* a HybridNetwork on the fabric.
+        - name: Entitle the tenant on the shared fabric and infrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+
         - name: Create the Rbac groups
           kubernetes.core.k8s:
             state: present
@@ -383,6 +396,15 @@
                  + (rbac_groups | map('community.general.dict_kv', 'name')
                     | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)
                  + [{'kind': 'Entity', 'name': e, 'namespace': hs_platform_ns}] }}
+
+        # Leave the shared allow-lists exactly as we found them, otherwise
+        # every test run leaves a stale entry behind on the platform objects.
+        - name: Withdraw the tenant's entitlement
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
 
         - name: Assert the ManagedCluster was deregistered from ACM
           kubernetes.core.k8s_info:

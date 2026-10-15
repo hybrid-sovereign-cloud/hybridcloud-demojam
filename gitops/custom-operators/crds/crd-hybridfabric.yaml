@@ -265,6 +265,16 @@ spec:
                   type: array
                   description: >-
                     Entities allowed to place their HybridNetworks on this fabric (admin multi-select).
+                  # Declared as a map-keyed list, exactly as CloudInfrastructure.spec.entityRefs is.
+                  # Without this the list is atomic, so Argo CD's server-side apply owns the whole
+                  # array and silently strips every entry it does not have in git on the next
+                  # self-heal — a tenant entitled out-of-band loses its entitlement within seconds
+                  # and its HybridNetworks are refused. With list-type=map each element is owned by
+                  # the manager that wrote it, so an entitlement added by the platform/test tooling
+                  # survives alongside the git-managed entries.
+                  maxItems: 256
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
                   items:
                     type: object
                     required: [name]
