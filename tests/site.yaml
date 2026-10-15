@@ -18,23 +18,41 @@
 #
 # Order matters:
 #   mewtwo     platform health first, so a sick platform fails fast
+#   lapras     RbacConfig/AAPConfig/QuayConfig, tested in place — the tenancy
+#              stack cannot work if these singletons are broken, so they are
+#              proven before anything tries to use them
+#   gengar     CloudInfrastructure/HybridFabric/CloudGateway/TransportLink,
+#              tested in place — likewise for everything network-shaped
 #   ditto      IaaC, tested in place — never created, never deleted
+#   porygon    UIHealthChecker; standalone, depends on no tenant
 #   pikachu    tenancy stack; everything below assumes tenancy works
 #   bulbasaur  hybrid fabric + hybrid network on the hub
 #   squirtle   OCP cluster with no hybrid network (the control case)
 #   charmander OCP cluster joined to the hybrid network
 #   eevee      OpenStack tenant network
 #   snorlax    OpenStack VM proving that network carries traffic
+#   machamp    OpenStack migration; last, as it needs the most prerequisites
 #
-# The OpenStack suites (eevee, snorlax) self-skip when OSO_CLOUDS is unset or
-# when the OpenStack site's fabric objects are not Ready. See README.md.
+# The OpenStack suites (eevee, snorlax, machamp) self-skip when OSO_CLOUDS is
+# unset or when the OpenStack site's fabric objects are not Ready. Machamp
+# additionally self-skips without MTV. Gengar skips its remote-transport
+# checks while the hub has no EVPN prerequisites. See README.md.
+#
+# Four suites are READ-ONLY whatever tag you give them, because the resources
+# they cover are singletons the whole lab depends on: lapras, gengar and ditto
+# treat create and destroy as explicit no-ops. Porygon and machamp do run a
+# full lifecycle, on fixtures they create themselves.
 # =============================================================================
 
 - import_playbook: test-mewtwo-platform-health.yaml
+- import_playbook: test-lapras-platform-config.yaml
+- import_playbook: test-gengar-fabric-infra.yaml
 - import_playbook: test-ditto-iaac.yaml
+- import_playbook: test-porygon-uihealth.yaml
 - import_playbook: test-pikachu-tenancy.yaml
 - import_playbook: test-bulbasaur-hybridnetwork.yaml
 - import_playbook: test-squirtle-ocp-plain.yaml
 - import_playbook: test-charmander-ocp-hybrid.yaml
 - import_playbook: test-eevee-openstack-network.yaml
 - import_playbook: test-snorlax-openstack-vm.yaml
+- import_playbook: test-machamp-openstack-migration.yaml

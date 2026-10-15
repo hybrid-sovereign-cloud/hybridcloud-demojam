@@ -31,7 +31,7 @@
     e: "{{ poke.ocp_hybrid.entity }}"
     ns: "{{ poke.ocp_hybrid.ns }}"
     cloudvirt_name: charmander-virt
-    hn_name: charmander-core
+    hybrid_net: charmander-core
     np_name: charmander-core-hub
     vm_ns: charmander-core-vms
     cluster_name: charmander-ocp
@@ -128,7 +128,7 @@
             cr_apply_defs:
               - apiVersion: "{{ hs_api_version }}"
                 kind: HybridNetwork
-                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                metadata: { name: "{{ hybrid_net }}", namespace: "{{ ns }}" }
                 spec:
                   fabricRef: "{{ hs_fabric }}"
                   description: "Charmander core VRF — carries the OCP machine network"
@@ -136,7 +136,7 @@
         - name: Wait for the HybridNetwork
           ansible.builtin.include_role:
             name: cr_wait_ready
-          vars: { cr_wait_kind: HybridNetwork, cr_wait_name: "{{ hn_name }}", cr_wait_namespace: "{{ ns }}" }
+          vars: { cr_wait_kind: HybridNetwork, cr_wait_name: "{{ hybrid_net }}", cr_wait_namespace: "{{ ns }}" }
 
         - name: Place the network onto the hub CloudVirt backend
           ansible.builtin.include_role:
@@ -147,7 +147,7 @@
                 kind: NetworkPlacement
                 metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
                 spec:
-                  network: "{{ hn_name }}"
+                  network: "{{ hybrid_net }}"
                   backend: { kind: CloudVirt, name: "{{ cloudvirt_name }}" }
                   prefixes: ["{{ hybrid_prefix }}"]
                   vmNamespaces: ["{{ vm_ns }}"]
@@ -203,7 +203,7 @@
           ansible.builtin.include_role:
             name: verify_hybrid_network
           vars:
-            hn_name: "{{ hn_name }}"
+            hn_name: "{{ hybrid_net }}"
             hn_namespace: "{{ ns }}"
             hn_placements:
               - { name: "{{ np_name }}", namespace: "{{ ns }}" }
@@ -240,7 +240,7 @@
           kubernetes.core.k8s_info:
             api_version: "{{ hs_api_version }}"
             kind: HybridNetwork
-            name: "{{ hn_name }}"
+            name: "{{ hybrid_net }}"
             namespace: "{{ ns }}"
           register: _hn
 
@@ -361,7 +361,7 @@
           kubernetes.core.k8s_info:
             api_version: "{{ hs_api_version }}"
             kind: HybridNetwork
-            name: "{{ hn_name }}"
+            name: "{{ hybrid_net }}"
             namespace: "{{ ns }}"
           register: _pre
 
@@ -378,7 +378,7 @@
             cr_destroy_defs: >-
               {{ [{'kind': 'PlatformOpenshift', 'name': cluster_name, 'namespace': ns},
                    {'kind': 'NetworkPlacement', 'name': np_name, 'namespace': ns},
-                   {'kind': 'HybridNetwork', 'name': hn_name, 'namespace': ns},
+                   {'kind': 'HybridNetwork', 'name': hybrid_net, 'namespace': ns},
                    {'kind': 'CloudVirt', 'name': cloudvirt_name, 'namespace': ns}]
                  + (rbac_groups | map('community.general.dict_kv', 'name')
                     | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)

@@ -33,7 +33,7 @@
     ns: "{{ poke.openstack.ns }}"
     cloudoso_name: eevee-oso
     oso_project: eevee-qa
-    hn_name: eevee-core
+    hybrid_net: eevee-core
     np_name: eevee-core-oso
     prefix: "{{ poke_cidr.eevee_oso }}"
     rbac_groups:
@@ -226,7 +226,7 @@
             cr_apply_defs:
               - apiVersion: "{{ hs_api_version }}"
                 kind: HybridNetwork
-                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                metadata: { name: "{{ hybrid_net }}", namespace: "{{ ns }}" }
                 spec:
                   fabricRef: "{{ hs_fabric }}"
                   description: "Eevee core VRF — QA hybrid network on OpenStack"
@@ -236,7 +236,7 @@
             name: cr_wait_ready
           vars:
             cr_wait_kind: HybridNetwork
-            cr_wait_name: "{{ hn_name }}"
+            cr_wait_name: "{{ hybrid_net }}"
             cr_wait_namespace: "{{ ns }}"
 
         - name: Place the network onto the OpenStack backend
@@ -248,7 +248,7 @@
                 kind: NetworkPlacement
                 metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
                 spec:
-                  network: "{{ hn_name }}"
+                  network: "{{ hybrid_net }}"
                   backend: { kind: CloudOSO, name: "{{ cloudoso_name }}" }
                   prefixes: ["{{ prefix }}"]
 
@@ -279,7 +279,7 @@
           ansible.builtin.include_role:
             name: verify_hybrid_network
           vars:
-            hn_name: "{{ hn_name }}"
+            hn_name: "{{ hybrid_net }}"
             hn_namespace: "{{ ns }}"
             hn_placements:
               - { name: "{{ np_name }}", namespace: "{{ ns }}" }
@@ -402,7 +402,7 @@
           kubernetes.core.k8s_info:
             api_version: "{{ hs_api_version }}"
             kind: HybridNetwork
-            name: "{{ hn_name }}"
+            name: "{{ hybrid_net }}"
             namespace: "{{ ns }}"
           register: _pre
 
@@ -417,7 +417,7 @@
           vars:
             cr_destroy_defs:
               - { kind: NetworkPlacement, name: "{{ np_name }}", namespace: "{{ ns }}" }
-              - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
+              - { kind: HybridNetwork, name: "{{ hybrid_net }}", namespace: "{{ ns }}" }
               - { kind: CloudOSO, name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
 
         - name: Delete the Rbac groups

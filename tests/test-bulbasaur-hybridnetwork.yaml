@@ -24,7 +24,7 @@
     e: "{{ poke.network.entity }}"
     ns: "{{ poke.network.ns }}"
     cloudvirt_name: bulbasaur-virt
-    hn_name: bulbasaur-core
+    hybrid_net: bulbasaur-core
     np_name: bulbasaur-core-hub
     vm_ns: bulbasaur-core-vms
 
@@ -122,7 +122,7 @@
             cr_apply_defs:
               - apiVersion: "{{ hs_api_version }}"
                 kind: HybridNetwork
-                metadata: { name: "{{ hn_name }}", namespace: "{{ ns }}" }
+                metadata: { name: "{{ hybrid_net }}", namespace: "{{ ns }}" }
                 spec:
                   fabricRef: "{{ hs_fabric }}"
                   description: "Bulbasaur core VRF — QA hybrid network"
@@ -132,7 +132,7 @@
             name: cr_wait_ready
           vars:
             cr_wait_kind: HybridNetwork
-            cr_wait_name: "{{ hn_name }}"
+            cr_wait_name: "{{ hybrid_net }}"
             cr_wait_namespace: "{{ ns }}"
 
         - name: Place the network onto the hub CloudVirt backend
@@ -144,7 +144,7 @@
                 kind: NetworkPlacement
                 metadata: { name: "{{ np_name }}", namespace: "{{ ns }}" }
                 spec:
-                  network: "{{ hn_name }}"
+                  network: "{{ hybrid_net }}"
                   backend: { kind: CloudVirt, name: "{{ cloudvirt_name }}" }
                   prefixes: ["{{ poke_cidr.bulbasaur_hub }}"]
                   vmNamespaces: ["{{ vm_ns }}"]
@@ -204,7 +204,7 @@
           ansible.builtin.include_role:
             name: verify_hybrid_network
           vars:
-            hn_name: "{{ hn_name }}"
+            hn_name: "{{ hybrid_net }}"
             hn_namespace: "{{ ns }}"
             hn_placements:
               - { name: "{{ np_name }}", namespace: "{{ ns }}" }
@@ -234,7 +234,7 @@
           kubernetes.core.k8s_info:
             api_version: "{{ hs_api_version }}"
             kind: HybridNetwork
-            name: "{{ hn_name }}"
+            name: "{{ hybrid_net }}"
             namespace: "{{ ns }}"
           register: _pre
 
@@ -249,7 +249,7 @@
           vars:
             cr_destroy_defs:
               - { kind: NetworkPlacement, name: "{{ np_name }}", namespace: "{{ ns }}" }
-              - { kind: HybridNetwork, name: "{{ hn_name }}", namespace: "{{ ns }}" }
+              - { kind: HybridNetwork, name: "{{ hybrid_net }}", namespace: "{{ ns }}" }
               - { kind: CloudVirt, name: "{{ cloudvirt_name }}", namespace: "{{ ns }}" }
               - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
 

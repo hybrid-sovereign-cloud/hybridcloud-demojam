@@ -1,0 +1,326 @@
+---
+# =============================================================================
+# test-porygon-uihealth.yaml — UIHealthChecker, full create/test/destroy
+#
+#   --tags create   a fresh UIHealthChecker pointing at a probe target
+#                   discovered from the cluster
+#   --tags test     the live checkers reconciled, the new one republished its
+#                   URL and group, and the target it names really answers
+#   --tags destroy  delete the test checker and prove it was reclaimed
+#
+# UIHealthChecker is the one admin-dashboard kind that is safe to exercise for
+# real: it is a probe *definition*, reconciled by EDA as a stub with no infra
+# changes ("Stub provision complete"), so creating one adds a tile to the
+# dashboard and deleting it takes the tile away again. Nothing else in the lab
+# references it, so unlike the AAPConfig/QuayConfig/RbacConfig singletons it
+# gets the full lifecycle instead of being tested in place.
+#
+# The platform's own checkers (the dashboard and services tiles) ARE tested in
+# place — this suite reads them and never touches them. Only the checker it
+# creates itself is ever deleted.
+#
+# NO HOSTNAME IS WRITTEN DOWN HERE. The probe target is resolved at run time
+# from the cluster's own console Route, or from HS_UIHEALTH_PROBE_URL when the
+# caller wants to override it. Nothing in this file names a lab domain.
+#
+# Self-contained: nothing here reads from samples/.
+# =============================================================================
+- name: "Porygon — UIHealthChecker lifecycle"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    checker_name: porygon-probe
+    checker_ns: "{{ hs_platform_ns }}"
+    checker_group: custom
+
+    # These two are written as literal integers in the spec below, not as
+    # templates: jinja2_native is off for this suite, so "{{ 200 }}" would
+    # reach the API server as the string "200" and be rejected against the
+    # CRD's integer type. They are repeated here only so the assertions and
+    # the probe can refer to them.
+    #
+    # timeoutSeconds is deliberately NOT the CRD default of 10 — a default
+    # would still be present if the operator dropped the field, so the
+    # round-trip assertion would pass without proving anything.
+    checker_timeout: 15
+    checker_expect: 200
+
+    # Override the probe target without editing this file. Empty means
+    # "discover the console Route from the cluster".
+    checker_url_override: "{{ lookup('env', 'HS_UIHEALTH_PROBE_URL') }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # The probe target is needed by create, test and destroy alike, so it is
+    # resolved once under [always] rather than three times.
+    - name: Resolve the probe target
+      tags: [always]
+      block:
+        - name: "Console — find the cluster's own console Route"
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            name: console
+            namespace: openshift-console
+          register: _console
+          failed_when: false
+
+        - name: Build the probe URL from the cluster, or from the override
+          ansible.builtin.set_fact:
+            checker_url: >-
+              {{ checker_url_override if checker_url_override | length > 0
+                 else ('https://' ~ _console.resources[0].spec.host ~ '/')
+                      if _console.resources | default([]) | length > 0
+                 else '' }}
+
+        - name: Report the resolved probe target
+          ansible.builtin.debug:
+            msg: >-
+              Probe target =
+              {{ checker_url | default('<unresolved>', true) }}
+              (source:
+              {{ 'HS_UIHEALTH_PROBE_URL' if checker_url_override | length > 0
+                 else 'openshift-console Route' }})
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the UIHealthChecker
+      tags: [create]
+      block:
+        - name: "Preflight — announce the suite is skipped without a probe target"
+          ansible.builtin.debug:
+            msg: >-
+              ========== PORYGON SKIPPED ==========
+              No probe target could be resolved: this cluster exposes no
+              console Route in openshift-console and HS_UIHEALTH_PROBE_URL is
+              unset. A UIHealthChecker with no URL would be meaningless, and
+              this suite does not invent a hostname. Export
+              HS_UIHEALTH_PROBE_URL to run it.
+          when: checker_url | length == 0
+
+        - name: End the play when no probe target is available
+          ansible.builtin.meta: end_play
+          when: checker_url | length == 0
+
+        - name: Create the checker
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: UIHealthChecker
+                metadata: { name: "{{ checker_name }}", namespace: "{{ checker_ns }}" }
+                spec:
+                  displayName: "Porygon QA probe"
+                  description: "QA probe created by the HybridSovereign test suite"
+                  group: "{{ checker_group }}"
+                  url: "{{ checker_url }}"
+                  # Literal integers on purpose — see the vars block.
+                  expectedStatus: 200
+                  timeoutSeconds: 15
+
+        - name: Wait for the checker to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: UIHealthChecker
+            cr_wait_name: "{{ checker_name }}"
+            cr_wait_namespace: "{{ checker_ns }}"
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the health checkers
+      tags: [test]
+      block:
+        - name: "UIHealthChecker — read every live checker"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: UIHealthChecker
+            namespace: "{{ checker_ns }}"
+          register: _checkers
+
+        - name: Report every checker the dashboard will render
+          ansible.builtin.debug:
+            msg: >-
+              {{ _checkers.resources | default([])
+                 | json_query('[].{name: metadata.name, group: status.group,
+                      url: status.url, ready: status.ready,
+                      status: status.status, message: status.message}') }}
+
+        # The platform's own tiles are tested in place: a dashboard whose
+        # checkers never reconciled renders a wall of unknowns.
+        - name: Assert the platform has at least one checker and all reconciled
+          ansible.builtin.assert:
+            that:
+              - _checkers.resources | default([]) | length > 0
+              - >-
+                _checkers.resources | default([])
+                  | rejectattr('status.ready', 'defined') | list | length == 0
+            fail_msg: >-
+              The admin dashboard has no usable UIHealthChecker in
+              {{ checker_ns }}. Found
+              {{ _checkers.resources | default([]) | length }} checker(s), of
+              which {{ _checkers.resources | default([])
+                | rejectattr('status.ready', 'defined') | list | length }}
+              never published a status at all. Every dashboard tile would
+              render unknown.
+            success_msg: >-
+              {{ _checkers.resources | default([]) | length }} UIHealthChecker(s)
+              present, all with a published status.
+            quiet: true
+
+        - name: Report any checker that reconciled but is not Ready
+          ansible.builtin.debug:
+            msg: >-
+              ========== PORYGON: CHECKER NOT READY ==========
+              {{ item.metadata.name }} is reconciled but not Ready
+              (status={{ item.status.status | default('unknown') }},
+              message={{ item.status.message | default('<none>') }}). The
+              dashboard will show this tile as failing.
+          loop: >-
+            {{ _checkers.resources | default([])
+               | rejectattr('status.ready', 'equalto', true) | list }}
+          loop_control:
+            label: "{{ item.metadata.name }}"
+
+        # ---- Porygon's own checker ------------------------------------------
+        - name: Find the checker this suite created
+          ansible.builtin.set_fact:
+            _mine: >-
+              {{ _checkers.resources | default([])
+                 | selectattr('metadata.name', 'equalto', checker_name) | list }}
+
+        - name: Skip the lifecycle assertions when Porygon's checker is absent
+          ansible.builtin.debug:
+            msg: >-
+              ========== PORYGON SKIPPED ==========
+              UIHealthChecker/{{ checker_name }} does not exist, so only the
+              platform's own checkers were verified. Run this suite with
+              --tags create first to exercise the full lifecycle.
+          when: _mine | length == 0
+
+        - name: End the play when Porygon's own checker was never created
+          ansible.builtin.meta: end_play
+          when: _mine | length == 0
+
+        - name: Assert the checker republished its spec into status
+          ansible.builtin.assert:
+            that:
+              - _mine[0].status.ready | default(false) | bool
+              - _mine[0].status.url | default('') == _mine[0].spec.url
+              - _mine[0].status.group | default('') == checker_group
+              - >-
+                _mine[0].status.observedGeneration | default(0) | int
+                >= _mine[0].metadata.generation | int
+            fail_msg: >-
+              UIHealthChecker/{{ checker_name }} did not reconcile its spec.
+              ready={{ _mine[0].status.ready | default('unset') }}
+              spec.url={{ _mine[0].spec.url }}
+              status.url={{ _mine[0].status.url | default('unset') }}
+              status.group={{ _mine[0].status.group | default('unset') }}
+              generation={{ _mine[0].metadata.generation }}
+              observedGeneration={{ _mine[0].status.observedGeneration | default('unset') }}.
+              The dashboard would probe a stale target.
+            success_msg: >-
+              UIHealthChecker/{{ checker_name }} republished its URL and group
+              '{{ checker_group }}'.
+            quiet: true
+
+        - name: Assert the operator preserved the probe tuning
+          ansible.builtin.assert:
+            that:
+              - _mine[0].spec.expectedStatus | int == checker_expect | int
+              - _mine[0].spec.timeoutSeconds | int == checker_timeout | int
+            fail_msg: >-
+              UIHealthChecker/{{ checker_name }} lost its probe tuning:
+              expectedStatus={{ _mine[0].spec.expectedStatus | default('unset') }}
+              (wanted {{ checker_expect }}),
+              timeoutSeconds={{ _mine[0].spec.timeoutSeconds | default('unset') }}
+              (wanted {{ checker_timeout }}). The CRD pruned or defaulted a
+              field the dashboard relies on.
+            success_msg: "The probe tuning survived the round trip."
+            quiet: true
+
+        # The point of a health checker is that the thing it names answers.
+        # The URL is read back from the CR's own status, so still no hostname
+        # is written down in this repo.
+        - name: "Probe — the target the checker names really answers"
+          ansible.builtin.uri:
+            url: "{{ _mine[0].status.url }}"
+            validate_certs: "{{ ocp_validate_certs }}"
+            follow_redirects: safe
+            status_code: [200, 301, 302, 401, 403]
+            timeout: "{{ checker_timeout }}"
+          register: _probe
+          failed_when: false
+
+        - name: Report the probe result
+          ansible.builtin.debug:
+            msg: >-
+              The checker's target answered with HTTP
+              {{ _probe.status | default('no response') }}
+              (the checker expects {{ checker_expect }}).
+
+        - name: Assert the checker's target is serving
+          ansible.builtin.assert:
+            that:
+              - _probe.status is defined
+              - (_probe.status | int) > 0
+              - (_probe.status | int) < 500
+            fail_msg: >-
+              UIHealthChecker/{{ checker_name }} is Ready but the target it
+              names is unreachable (HTTP
+              {{ _probe.status | default('no response') }}). The dashboard
+              would render a green tile for a dead endpoint.
+            success_msg: "The checker's target is serving."
+            quiet: true
+
+    # =========================================================================
+    # DESTROY — only ever Porygon's own checker
+    # =========================================================================
+    - name: Tear the UIHealthChecker down
+      tags: [destroy]
+      block:
+        - name: Delete the checker this suite created
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: UIHealthChecker, name: "{{ checker_name }}", namespace: "{{ checker_ns }}" }
+
+        - name: "UIHealthChecker — read what is left"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: UIHealthChecker
+            namespace: "{{ checker_ns }}"
+          register: _left
+
+        - name: Assert the platform's own checkers were not collateral damage
+          ansible.builtin.assert:
+            that:
+              - >-
+                _left.resources | default([])
+                  | selectattr('metadata.name', 'equalto', checker_name)
+                  | list | length == 0
+              - _left.resources | default([]) | length > 0
+            fail_msg: >-
+              The destroy flow left {{ checker_name }} behind, or took the
+              platform's own checkers with it. Remaining:
+              {{ _left.resources | default([]) | map(attribute='metadata.name') | list }}.
+              Porygon must only ever delete the checker it created.
+            success_msg: >-
+              {{ checker_name }} was reclaimed and
+              {{ _left.resources | default([]) | length }} platform checker(s)
+              are untouched.
+            quiet: true

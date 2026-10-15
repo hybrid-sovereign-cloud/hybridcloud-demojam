@@ -1,0 +1,410 @@
+---
+# =============================================================================
+# test-lapras-platform-config.yaml — the singleton platform config CRs
+#
+#   --tags create   NO-OP. Lapras never creates a platform config CR.
+#   --tags test     verify the LIVE RbacConfig, AAPConfig and QuayConfig, their
+#                   backing Secrets and the OIDC wiring they published, read only
+#   --tags destroy  NO-OP. Lapras never deletes a platform config CR.
+#
+# *** HARD CONSTRAINT: THESE THREE RESOURCES ARE ONLY EVER TESTED. ***
+# *** THIS SUITE MUST NEVER CREATE, MODIFY OR DELETE THEM. ***
+#
+# RbacConfig/{{ hs_rbac_config }}, AAPConfig/{{ hs_aap_config }} and
+# QuayConfig/{{ hs_quay_config }} are singletons: every Rbac, AAPOrg and
+# QuayOrg in the lab names one of them in its spec, and the whole tenancy
+# stack resolves its Keycloak client, AAP authenticator and Quay OIDC through
+# them. A second copy would race the live one for the same Keycloak client and
+# the same AAP authentication method, and deleting one would cut every tenant
+# off from its tools. So the live CRs in {{ hs_plugins_ns }} are inspected
+# where they stand: every task below is a read. If one is missing the suite
+# FAILS; it does not create it.
+#
+# These CRs point at Secrets holding Keycloak, AAP and Quay admin credentials.
+# This suite asserts those Secrets EXIST and carry the expected keys. It never
+# reads, decodes, logs or asserts on a single value inside them.
+#
+# Self-contained: nothing here reads from samples/.
+# =============================================================================
+- name: "Lapras — singleton platform config, verified in place"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    cfg_ns: "{{ hs_plugins_ns }}"
+
+    # kind -> the live singleton this suite is allowed to look at, and the
+    # keys its backing Secret must carry. The names come from group_vars, so
+    # renaming a platform config in one place renames it for every suite.
+    #
+    # NOTE on the key names: the CRD descriptions say the Secret holds a
+    # 'host', but the operator actually reads 'url'. The assertion below
+    # follows the operator, not the description — checking for 'host' would
+    # fail against a perfectly healthy platform. Only the keys the operator
+    # genuinely requires are listed; an extra key is not a failure.
+    cfg_objects:
+      - kind: RbacConfig
+        name: "{{ hs_rbac_config }}"
+        secret_keys: [url, username, password]
+      - kind: AAPConfig
+        name: "{{ hs_aap_config }}"
+        secret_keys: [url, username, password]
+      - kind: QuayConfig
+        name: "{{ hs_quay_config }}"
+        secret_keys: [url, token]
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE — forbidden by design
+    # =========================================================================
+    - name: Create nothing
+      tags: [create]
+      block:
+        - name: "Lapras creates no platform config CR"
+          ansible.builtin.debug:
+            msg: >-
+              Lapras never creates an RbacConfig, AAPConfig or QuayConfig —
+              the live singletons are tested in place.
+
+    # =========================================================================
+    # TEST — the live CRs, where they stand
+    # =========================================================================
+    - name: Verify the live platform config
+      tags: [test]
+      block:
+        - name: "Config — read each live CR (read only, never applied)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: "{{ item.kind }}"
+            name: "{{ item.name }}"
+            namespace: "{{ cfg_ns }}"
+          loop: "{{ cfg_objects }}"
+          loop_control:
+            label: "{{ item.kind }}/{{ item.name }}"
+          register: _cfg
+
+        - name: Assert every singleton platform config CR exists
+          ansible.builtin.assert:
+            that: item.resources | length > 0
+            fail_msg: >-
+              No {{ item.item.kind }} named '{{ item.item.name }}' in
+              namespace {{ cfg_ns }}. Lapras will NOT create it: this suite is
+              bound by a hard constraint that the platform config resources
+              are only ever tested, never created, modified or deleted. Every
+              tenant Rbac, AAPOrg and QuayOrg in the lab resolves through this
+              CR, so the platform is broken until it is restored through its
+              own GitOps path.
+            success_msg: "{{ item.item.kind }}/{{ item.item.name }} found in {{ cfg_ns }}."
+            quiet: true
+          loop: "{{ _cfg.results }}"
+          loop_control:
+            label: "{{ item.item.kind }}/{{ item.item.name }}"
+
+        - name: Keep the CRs for the rest of the suite
+          ansible.builtin.set_fact:
+            _rbac_cfg: "{{ _cfg.results[0].resources[0] }}"
+            _aap_cfg: "{{ _cfg.results[1].resources[0] }}"
+            _quay_cfg: "{{ _cfg.results[2].resources[0] }}"
+
+        - name: Assert every platform config CR is Ready
+          ansible.builtin.assert:
+            that: >-
+              item.resources[0].status.conditions | default([])
+                | selectattr('type', 'equalto', 'Ready')
+                | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              {{ item.item.kind }}/{{ item.item.name }} is not Ready, so the
+              tool it configures is not wired up to Keycloak. message=
+              {{ item.resources[0].status.message | default('<none>') }}
+              conditions=
+              {{ item.resources[0].status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+            success_msg: "{{ item.item.kind }}/{{ item.item.name }} is Ready."
+            quiet: true
+          loop: "{{ _cfg.results }}"
+          loop_control:
+            label: "{{ item.item.kind }}/{{ item.item.name }}"
+
+        # ---------------------------------------------------------------------
+        # The Secrets behind them. Existence and key names only — never values.
+        # ---------------------------------------------------------------------
+        - name: "Secrets — read the metadata of each backing Secret"
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Secret
+            name: "{{ item.resources[0].spec.secret }}"
+            namespace: "{{ cfg_ns }}"
+          loop: "{{ _cfg.results }}"
+          loop_control:
+            label: "{{ item.item.kind }}/{{ item.item.name }}"
+          register: _cfg_secrets
+          # The Secret bodies are never printed: only the key names are
+          # extracted below, and a failure here must not dump base64 payloads.
+          no_log: true
+
+        # Only the KEY NAMES are carried forward. The '+ [{}]' makes the
+        # lookup safe when a Secret is missing entirely, so the assertion
+        # below reports it instead of the task blowing up on an empty list.
+        - name: Reduce each Secret to its key names
+          ansible.builtin.set_fact:
+            _secret_keys: >-
+              {{ _secret_keys | default([])
+                 + [ (((item.resources | default([])) + [{}]) | first).data
+                     | default({}, true) | list ] }}
+          loop: "{{ _cfg_secrets.results }}"
+          loop_control:
+            label: "{{ item.item.item.kind }}/{{ item.item.item.name }}"
+          no_log: true
+
+        - name: Report which Secret backs which config
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.0.item.kind }}/{{ item.0.item.name }} ->
+              Secret {{ cfg_ns }}/{{ item.0.resources[0].spec.secret }}
+              keys={{ item.1 | sort }}
+          loop: "{{ _cfg.results | zip(_secret_keys) | list }}"
+          loop_control:
+            label: "{{ item.0.item.kind }}/{{ item.0.item.name }}"
+
+        - name: Assert each backing Secret exists and carries the expected keys
+          ansible.builtin.assert:
+            that:
+              - item.1 | length > 0
+              - item.0.item.secret_keys | difference(item.1) | length == 0
+            fail_msg: >-
+              Secret {{ cfg_ns }}/{{ item.0.resources[0].spec.secret }}, which
+              backs {{ item.0.item.kind }}/{{ item.0.item.name }}, is missing
+              or incomplete. Expected keys
+              {{ item.0.item.secret_keys | sort }}, found {{ item.1 | sort }}.
+              The operator cannot authenticate to the tool without them.
+            success_msg: >-
+              {{ item.0.item.kind }}/{{ item.0.item.name }} has a complete
+              backing Secret.
+            quiet: true
+          loop: "{{ _cfg.results | zip(_secret_keys) | list }}"
+          loop_control:
+            label: "{{ item.0.item.kind }}/{{ item.0.item.name }}"
+
+        # ---------------------------------------------------------------------
+        # RbacConfig — the Keycloak client every other config hangs off.
+        # ---------------------------------------------------------------------
+        - name: Report the RbacConfig status
+          ansible.builtin.debug:
+            msg:
+              name: "{{ cfg_ns }}/{{ hs_rbac_config }}"
+              type: "{{ _rbac_cfg.spec.type | default('unset') }}"
+              client_id: "{{ _rbac_cfg.status.clientId | default('unset') }}"
+              client_secret_name: "{{ _rbac_cfg.status.clientSecretName | default('unset') }}"
+              status: "{{ _rbac_cfg.status.status | default('unknown') }}"
+
+        - name: Assert the RbacConfig is a Keycloak backend with a published client
+          ansible.builtin.assert:
+            that:
+              - _rbac_cfg.spec.type | default('') == 'keycloak'
+              - _rbac_cfg.status.clientId | default('') | length > 0
+              - _rbac_cfg.status.clientSecretName | default('') | length > 0
+            fail_msg: >-
+              RbacConfig/{{ hs_rbac_config }} did not publish a Keycloak
+              client. spec.type={{ _rbac_cfg.spec.type | default('unset') }}
+              status.clientId={{ _rbac_cfg.status.clientId | default('unset') }}
+              status.clientSecretName=
+              {{ _rbac_cfg.status.clientSecretName | default('unset') }}.
+              Without a client, no tenant Rbac CR can resolve a group.
+            success_msg: >-
+              RbacConfig/{{ hs_rbac_config }} published Keycloak client
+              '{{ _rbac_cfg.status.clientId }}'.
+            quiet: true
+
+        - name: "RbacConfig — the published client Secret really exists"
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Secret
+            name: "{{ _rbac_cfg.status.clientSecretName }}"
+            namespace: "{{ cfg_ns }}"
+          register: _rbac_client_secret
+          no_log: true
+
+        - name: Assert the published client Secret was actually created
+          ansible.builtin.assert:
+            that: _rbac_client_secret.resources | length > 0
+            fail_msg: >-
+              RbacConfig/{{ hs_rbac_config }} reports clientSecretName
+              '{{ _rbac_cfg.status.clientSecretName }}' but no such Secret
+              exists in {{ cfg_ns }}. The status is lying: the OIDC client
+              credentials were never written.
+            success_msg: >-
+              The Keycloak client Secret
+              '{{ _rbac_cfg.status.clientSecretName }}' exists.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # AAPConfig and QuayConfig both federate to that same RbacConfig.
+        # ---------------------------------------------------------------------
+        - name: Assert AAPConfig and QuayConfig point at the live RbacConfig
+          ansible.builtin.assert:
+            that:
+              - _aap_cfg.spec.rbacConfig | default('') == hs_rbac_config
+              - _quay_cfg.spec.rbacConfig | default('') == hs_rbac_config
+            fail_msg: >-
+              The tool configs do not federate to the platform RbacConfig.
+              AAPConfig.spec.rbacConfig=
+              {{ _aap_cfg.spec.rbacConfig | default('unset') }},
+              QuayConfig.spec.rbacConfig=
+              {{ _quay_cfg.spec.rbacConfig | default('unset') }}, expected
+              '{{ hs_rbac_config }}'. AAP and Quay would authenticate against
+              a different realm than the tenants' groups live in.
+            success_msg: >-
+              AAPConfig and QuayConfig both federate to
+              RbacConfig/{{ hs_rbac_config }}.
+            quiet: true
+
+        - name: Report the AAPConfig status
+          ansible.builtin.debug:
+            msg:
+              name: "{{ cfg_ns }}/{{ hs_aap_config }}"
+              controller_url: "{{ _aap_cfg.status.aapControllerUrl | default('unset') }}"
+              auth_method_type: "{{ _aap_cfg.status.authMethodType | default('unset') }}"
+              auth_method_id: "{{ _aap_cfg.status.authMethodId | default('unset') }}"
+              keycloak_client_id: "{{ _aap_cfg.status.keycloakClientId | default('unset') }}"
+              realm: "{{ _aap_cfg.status.realm | default('unset') }}"
+
+        - name: Assert the AAPConfig installed an OIDC authenticator on the controller
+          ansible.builtin.assert:
+            that:
+              - _aap_cfg.status.aapControllerUrl | default('') is match('^https?://')
+              - _aap_cfg.status.authMethodType | default('') == 'oidc'
+              - _aap_cfg.status.authMethodId | default('') | length > 0
+              - _aap_cfg.status.keycloakClientId | default('') | length > 0
+            fail_msg: >-
+              AAPConfig/{{ hs_aap_config }} is Ready but did not publish a
+              usable OIDC authenticator.
+              controllerUrl={{ _aap_cfg.status.aapControllerUrl | default('unset') }}
+              authMethodType={{ _aap_cfg.status.authMethodType | default('unset') }}
+              authMethodId={{ _aap_cfg.status.authMethodId | default('unset') }}
+              keycloakClientId={{ _aap_cfg.status.keycloakClientId | default('unset') }}.
+              Every AAPOrg the suite creates would land on a controller nobody
+              can log in to.
+            success_msg: >-
+              AAPConfig/{{ hs_aap_config }} installed OIDC authenticator
+              {{ _aap_cfg.status.authMethodId }} for client
+              '{{ _aap_cfg.status.keycloakClientId }}'.
+            quiet: true
+
+        # The controller URL is discovered from the CR's own status, so no
+        # lab hostname is ever written down in this repo.
+        - name: "AAP — the controller the AAPConfig points at answers"
+          ansible.builtin.uri:
+            url: "{{ _aap_cfg.status.aapControllerUrl }}/api/controller/v2/ping/"
+            validate_certs: "{{ ocp_validate_certs }}"
+            follow_redirects: safe
+            status_code: [200, 301, 302, 401, 403]
+            timeout: 30
+          register: _aap_ping
+          failed_when: false
+
+        - name: Assert the AAP controller is reachable
+          ansible.builtin.assert:
+            that:
+              - _aap_ping.status is defined
+              - (_aap_ping.status | int) > 0
+              - (_aap_ping.status | int) < 500
+            fail_msg: >-
+              The AAP controller published by AAPConfig/{{ hs_aap_config }} is
+              unreachable (HTTP {{ _aap_ping.status | default('no response') }}).
+              The CR is Ready but the controller behind it is not serving.
+            success_msg: >-
+              The AAP controller answered with HTTP {{ _aap_ping.status | default('?') }}.
+            quiet: true
+
+        - name: Report the QuayConfig status
+          ansible.builtin.debug:
+            msg:
+              name: "{{ cfg_ns }}/{{ hs_quay_config }}"
+              quay_url: "{{ _quay_cfg.status.quayUrl | default('unset') }}"
+              oidc_configured: "{{ _quay_cfg.status.oidcConfigured | default('unset') }}"
+              keycloak_client_id: "{{ _quay_cfg.status.keycloakClientId | default('unset') }}"
+              realm: "{{ _quay_cfg.status.realm | default('unset') }}"
+
+        - name: Assert the QuayConfig configured OIDC on the registry
+          ansible.builtin.assert:
+            that:
+              - _quay_cfg.status.quayUrl | default('') is match('^https?://')
+              - _quay_cfg.status.oidcConfigured | default('false') | string | bool
+              - _quay_cfg.status.keycloakClientId | default('') | length > 0
+            fail_msg: >-
+              QuayConfig/{{ hs_quay_config }} is Ready but OIDC is not
+              configured on the registry.
+              quayUrl={{ _quay_cfg.status.quayUrl | default('unset') }}
+              oidcConfigured={{ _quay_cfg.status.oidcConfigured | default('unset') }}
+              keycloakClientId={{ _quay_cfg.status.keycloakClientId | default('unset') }}.
+              Tenants could not log in to any QuayOrg the suite creates.
+            success_msg: >-
+              QuayConfig/{{ hs_quay_config }} configured OIDC with client
+              '{{ _quay_cfg.status.keycloakClientId }}'.
+            quiet: true
+
+        - name: "Quay — the registry the QuayConfig points at answers"
+          ansible.builtin.uri:
+            url: "{{ _quay_cfg.status.quayUrl }}/api/v1/discovery"
+            validate_certs: "{{ ocp_validate_certs }}"
+            follow_redirects: safe
+            status_code: [200, 301, 302, 401, 403]
+            timeout: 30
+          register: _quay_ping
+          failed_when: false
+
+        - name: Assert the Quay registry is reachable
+          ansible.builtin.assert:
+            that:
+              - _quay_ping.status is defined
+              - (_quay_ping.status | int) > 0
+              - (_quay_ping.status | int) < 500
+            fail_msg: >-
+              The Quay registry published by QuayConfig/{{ hs_quay_config }}
+              is unreachable (HTTP {{ _quay_ping.status | default('no response') }}).
+              The CR is Ready but the registry behind it is not serving.
+            success_msg: >-
+              The Quay registry answered with HTTP {{ _quay_ping.status | default('?') }}.
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # The realms must agree, or tenants land in the wrong one.
+        # ---------------------------------------------------------------------
+        - name: Assert AAP and Quay were federated into the same realm
+          ansible.builtin.assert:
+            that:
+              - _aap_cfg.status.realm | default('') == _quay_cfg.status.realm | default('')
+              - _aap_cfg.status.realm | default('') | length > 0
+            fail_msg: >-
+              AAPConfig and QuayConfig federated into different Keycloak
+              realms ('{{ _aap_cfg.status.realm | default('unset') }}' vs
+              '{{ _quay_cfg.status.realm | default('unset') }}'). A tenant's
+              Rbac group would grant access to one tool and not the other.
+            success_msg: >-
+              AAP and Quay are both federated into realm
+              '{{ _aap_cfg.status.realm }}'.
+            quiet: true
+
+    # =========================================================================
+    # DESTROY — forbidden by design
+    # =========================================================================
+    - name: Destroy nothing
+      tags: [destroy]
+      block:
+        - name: "Lapras deletes no platform config CR"
+          ansible.builtin.debug:
+            msg: >-
+              Lapras never creates an RbacConfig, AAPConfig or QuayConfig —
+              the live singletons are tested in place, so there is nothing of
+              Lapras's to delete. Deleting any of them would tear the Keycloak
+              client out from under every tenant's Rbac, AAPOrg and QuayOrg,
+              and this suite is forbidden from touching them.

@@ -1,0 +1,511 @@
+---
+# =============================================================================
+# test-gengar-fabric-infra.yaml — the shared fabric infrastructure, in place
+#
+#   --tags create   NO-OP. Gengar never creates a fabric infrastructure CR.
+#   --tags test     verify the LIVE CloudInfrastructure sites, the HybridFabric
+#                   and every CloudGateway / TransportLink hanging off it,
+#                   read only
+#   --tags destroy  NO-OP. Gengar never deletes a fabric infrastructure CR.
+#
+# *** HARD CONSTRAINT: THESE RESOURCES ARE ONLY EVER TESTED. ***
+# *** THIS SUITE MUST NEVER CREATE, MODIFY OR DELETE THEM. ***
+#
+# CloudInfrastructure/{{ hs_hub_cloudinfra }} and /{{ hs_oso_cloudinfra }} are
+# the lab's two sites, and HybridFabric/{{ hs_fabric }} is the single EVPN
+# fabric every tenant VRF is carved out of. Every other suite places tenant
+# networks onto them. A second fabric would hand out VNIs from a colliding
+# pool; deleting a site would strand every CloudVirt and CloudOSO on it. So
+# the live CRs are inspected where they stand: every task below is a read.
+#
+# CloudGateway and TransportLink are not created here either. They are
+# reconciled by the platform from the fabric and the sites, one per site —
+# creating a test gateway would try to programme a real VTEP and a real
+# WireGuard tunnel on the lab underlay.
+#
+# SELF-SKIPPING: the hub does not necessarily have its EVPN prerequisites
+# rolled out. A site whose CloudGateway is absent or not Ready is reported in
+# full and then SKIPPED, not failed — a half-provisioned underlay is an
+# environment fact, not a product defect. The hub site is the exception: it is
+# the fabric's own landing zone, so if it is unhealthy the fabric genuinely is
+# broken and the suite fails.
+#
+# Self-contained: nothing here reads from samples/.
+# =============================================================================
+- name: "Gengar — shared fabric infrastructure, verified in place"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    # The two sites the lab is built from, and the spec.type each must report.
+    # 'required' marks the site the fabric cannot function without.
+    infra_sites:
+      - name: "{{ hs_hub_cloudinfra }}"
+        type: openshift
+        required: true
+      - name: "{{ hs_oso_cloudinfra }}"
+        type: openstack
+        required: false
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # =========================================================================
+    # CREATE — forbidden by design
+    # =========================================================================
+    - name: Create nothing
+      tags: [create]
+      block:
+        - name: "Gengar creates no fabric infrastructure CR"
+          ansible.builtin.debug:
+            msg: >-
+              Gengar never creates a CloudInfrastructure, HybridFabric,
+              CloudGateway or TransportLink — the live ones are tested in
+              place.
+
+    # =========================================================================
+    # TEST — the live fabric, where it stands
+    # =========================================================================
+    - name: Verify the live fabric infrastructure
+      tags: [test]
+      block:
+        # ---------------------------------------------------------------------
+        # The sites.
+        # ---------------------------------------------------------------------
+        - name: "CloudInfrastructure — read each live site (read only)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudInfrastructure
+            name: "{{ item.name }}"
+            namespace: "{{ hs_platform_ns }}"
+          loop: "{{ infra_sites }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.name }}"
+          register: _sites
+
+        # Existence is asserted before anything reports on the sites, so the
+        # tasks below can read spec/status directly instead of defending
+        # against a missing CR on every line.
+        - name: Assert every declared site exists
+          ansible.builtin.assert:
+            that: item.resources | length > 0
+            fail_msg: >-
+              No CloudInfrastructure named '{{ item.item.name }}' in
+              {{ hs_platform_ns }}. Gengar will NOT create it: this suite is
+              bound by a hard constraint that the fabric infrastructure is
+              only ever tested. Every tenant CloudVirt and CloudOSO in the lab
+              places onto this site, so provision it through the platform's
+              own GitOps path and re-run.
+            success_msg: "CloudInfrastructure/{{ item.item.name }} found."
+            quiet: true
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+
+        - name: Report every site
+          ansible.builtin.debug:
+            msg:
+              name: "{{ item.item.name }}"
+              type: "{{ item.resources[0].spec.type | default('unset') }}"
+              display_name: "{{ item.resources[0].spec.displayName | default('unset') }}"
+              ready: "{{ item.resources[0].status.ready | default('unknown') }}"
+              status: "{{ item.resources[0].status.status | default('unknown') }}"
+              entity_refs: >-
+                {{ item.resources[0].spec.entityRefs | default([])
+                   | map(attribute='name') | list }}
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+
+        - name: Assert each site is the type the lab expects
+          ansible.builtin.assert:
+            that: item.resources[0].spec.type | default('') == item.item.type
+            fail_msg: >-
+              CloudInfrastructure/{{ item.item.name }} is type
+              '{{ item.resources[0].spec.type | default('unset') }}', expected
+              '{{ item.item.type }}'. spec.type is immutable, so this site can
+              never become the kind of site the suites place onto — it was
+              created wrong.
+            success_msg: >-
+              CloudInfrastructure/{{ item.item.name }} is type
+              '{{ item.item.type }}'.
+            quiet: true
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+
+        - name: Assert each site carries the typed section its type requires
+          ansible.builtin.assert:
+            that:
+              - item.item.type in item.resources[0].spec
+              - item.resources[0].spec.credentialsRef | default({}) | length > 0
+            fail_msg: >-
+              CloudInfrastructure/{{ item.item.name }} is type
+              '{{ item.item.type }}' but has no spec.{{ item.item.type }}
+              section, or no spec.credentialsRef. The operator has nothing to
+              authenticate to the cloud API with.
+              spec keys present: {{ item.resources[0].spec | list | sort }}.
+            success_msg: >-
+              CloudInfrastructure/{{ item.item.name }} has its
+              spec.{{ item.item.type }} section and a credentialsRef.
+            quiet: true
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+
+        # entityRefs is the allow-list every tenant suite has to be added to.
+        # It must be a list; an absent list means "every Entity", which is a
+        # legitimate configuration, so its emptiness is reported, not failed.
+        - name: Assert each site's entityRefs allow-list is well formed
+          ansible.builtin.assert:
+            that: item.resources[0].spec.entityRefs | default([]) is sequence
+            fail_msg: >-
+              CloudInfrastructure/{{ item.item.name }} has a malformed
+              spec.entityRefs. Tenant entitlement is resolved from this list,
+              so no suite could be entitled onto the site.
+            success_msg: >-
+              CloudInfrastructure/{{ item.item.name }} entityRefs =
+              {{ item.resources[0].spec.entityRefs | default([])
+                 | map(attribute='name') | list }}
+            quiet: true
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+
+        - name: Assert the required site is Ready
+          ansible.builtin.assert:
+            that: >-
+              item.resources[0].status.conditions | default([])
+                | selectattr('type', 'equalto', 'Ready')
+                | selectattr('status', 'equalto', 'True') | list | length > 0
+              or (item.resources[0].status.ready | default(false) | bool)
+            fail_msg: >-
+              CloudInfrastructure/{{ item.item.name }} is not Ready, and it is
+              the site the fabric's own landing zone lives on. message=
+              {{ item.resources[0].status.message | default('<none>') }}
+              conditions=
+              {{ item.resources[0].status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+            success_msg: "CloudInfrastructure/{{ item.item.name }} is Ready."
+            quiet: true
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+          when: item.item.required | bool
+
+        - name: Report an optional site that is not Ready, without failing
+          ansible.builtin.debug:
+            msg: >-
+              ========== GENGAR: SITE NOT READY ==========
+              CloudInfrastructure/{{ item.item.name }} (type
+              {{ item.item.type }}) is not Ready. This site is optional for
+              the fabric itself, so the suite reports it rather than failing.
+              The suites that place tenant workloads onto it will self-skip.
+              message={{ item.resources[0].status.message | default('<none>') }}
+              conditions={{ item.resources[0].status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+          loop: "{{ _sites.results }}"
+          loop_control:
+            label: "CloudInfrastructure/{{ item.item.name }}"
+          when:
+            - not (item.item.required | bool)
+            - not (item.resources[0].status.ready | default(false) | bool)
+
+        # ---------------------------------------------------------------------
+        # The fabric itself.
+        # ---------------------------------------------------------------------
+        - name: "HybridFabric — read the live fabric (read only)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: HybridFabric
+            name: "{{ hs_fabric }}"
+            namespace: "{{ hs_platform_ns }}"
+          register: _fab
+
+        - name: Assert the live HybridFabric exists
+          ansible.builtin.assert:
+            that: _fab.resources | length > 0
+            fail_msg: >-
+              No HybridFabric named '{{ hs_fabric }}' in {{ hs_platform_ns }}.
+              Gengar will NOT create it: every tenant VRF in the lab draws its
+              VNI from this fabric's pool, and a second fabric would hand out
+              colliding VNIs.
+            success_msg: "HybridFabric/{{ hs_fabric }} found."
+            quiet: true
+
+        - name: Keep the fabric for the rest of the suite
+          ansible.builtin.set_fact:
+            _fabric: "{{ _fab.resources[0] }}"
+
+        - name: Report the fabric
+          ansible.builtin.debug:
+            msg:
+              name: "{{ hs_platform_ns }}/{{ hs_fabric }}"
+              enabled: "{{ _fabric.spec.enabled | default(false) }}"
+              ready: "{{ _fabric.status.ready | default('unknown') }}"
+              status: "{{ _fabric.status.status | default('unknown') }}"
+              entity_refs: >-
+                {{ _fabric.spec.entityRefs | default([]) | map(attribute='name') | list }}
+
+        - name: Assert the fabric is enabled, Ready and has a usable allow-list
+          ansible.builtin.assert:
+            that:
+              - _fabric.spec.enabled | default(false) | bool
+              - >-
+                _fabric.status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+              - _fabric.spec.entityRefs | default([]) is sequence
+            fail_msg: >-
+              HybridFabric/{{ hs_fabric }} is not usable.
+              spec.enabled={{ _fabric.spec.enabled | default('unset') }}
+              message={{ _fabric.status.message | default('<none>') }}
+              conditions={{ _fabric.status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+              No tenant HybridNetwork can allocate a VNI until it is.
+            success_msg: "HybridFabric/{{ hs_fabric }} is enabled and Ready."
+            quiet: true
+
+        # ---------------------------------------------------------------------
+        # Gateways and transport links, one set per site.
+        # ---------------------------------------------------------------------
+        - name: "CloudGateway — read every live gateway (read only)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudGateway
+            namespace: "{{ hs_platform_ns }}"
+          register: _gw_all
+
+        - name: "TransportLink — read every live link (read only)"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: TransportLink
+            namespace: "{{ hs_platform_ns }}"
+          register: _tl_all
+
+        - name: Report every gateway and link
+          ansible.builtin.debug:
+            msg:
+              gateways: >-
+                {{ _gw_all.resources | default([])
+                   | json_query('[].{name: metadata.name, site: spec.cloudRef.name,
+                        fabric: spec.fabricRef, enabled: spec.enabled,
+                        transport: spec.transport.type, ready: status.ready,
+                        transportReady: status.transportReady,
+                        landingZoneReady: status.landingZoneReady,
+                        peers: status.peerCount}') }}
+              links: >-
+                {{ _tl_all.resources | default([])
+                   | json_query('[].{name: metadata.name, gateway: spec.cloudGatewayRef,
+                        fabric: spec.fabricRef, enabled: spec.enabled,
+                        tunnelType: spec.tunnelType, ready: status.ready,
+                        tunnelUp: status.tunnelUp, message: status.message}') }}
+
+        - name: Assert every gateway belongs to the platform fabric
+          ansible.builtin.assert:
+            that: >-
+              _gw_all.resources | default([])
+                | rejectattr('spec.fabricRef', 'equalto', hs_fabric)
+                | list | length == 0
+            fail_msg: >-
+              A CloudGateway references a fabric other than
+              '{{ hs_fabric }}': {{ _gw_all.resources | default([])
+                | rejectattr('spec.fabricRef', 'equalto', hs_fabric)
+                | json_query('[].{name: metadata.name, fabric: spec.fabricRef}') }}.
+              A gateway on a foreign fabric carries no tenant VRF.
+            success_msg: >-
+              All {{ _gw_all.resources | default([]) | length }} CloudGateways
+              belong to fabric '{{ hs_fabric }}'.
+            quiet: true
+
+        - name: Assert every gateway attaches a site that really exists
+          ansible.builtin.assert:
+            that: >-
+              _gw_all.resources | default([])
+                | map(attribute='spec.cloudRef.name')
+                | reject('in', _sites.results | map(attribute='item.name') | list)
+                | list | length == 0
+            fail_msg: >-
+              A CloudGateway points at a CloudInfrastructure this lab does not
+              declare. Gateway sites:
+              {{ _gw_all.resources | default([]) | json_query('[].{gw: metadata.name, site: spec.cloudRef.name}') }};
+              known sites: {{ _sites.results | map(attribute='item.name') | list }}.
+              The gateway has nothing to land on.
+            success_msg: "Every CloudGateway attaches a declared site."
+            quiet: true
+
+        - name: Assert every TransportLink hangs off a gateway that exists
+          ansible.builtin.assert:
+            that: >-
+              _tl_all.resources | default([])
+                | map(attribute='spec.cloudGatewayRef')
+                | reject('in', _gw_all.resources | default([]) | map(attribute='metadata.name') | list)
+                | list | length == 0
+            fail_msg: >-
+              A TransportLink references a CloudGateway that does not exist.
+              Links: {{ _tl_all.resources | default([])
+                | json_query('[].{link: metadata.name, gw: spec.cloudGatewayRef}') }};
+              gateways: {{ _gw_all.resources | default([]) | map(attribute='metadata.name') | list }}.
+              The link can never come up.
+            success_msg: "Every TransportLink hangs off a real CloudGateway."
+            quiet: true
+
+        # The hub gateway is the fabric's own landing zone: tenant traffic on
+        # the hub never leaves the cluster without it, so it is a hard check.
+        - name: Find the gateway for the hub site
+          ansible.builtin.set_fact:
+            _hub_gw: >-
+              {{ _gw_all.resources | default([])
+                 | selectattr('spec.cloudRef.name', 'defined')
+                 | selectattr('spec.cloudRef.name', 'equalto', hs_hub_cloudinfra)
+                 | list }}
+
+        - name: Assert the hub site has a Ready gateway with a landing zone
+          ansible.builtin.assert:
+            that:
+              - _hub_gw | length > 0
+              - _hub_gw[0].spec.enabled | default(false) | bool
+              - >-
+                _hub_gw[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+              - _hub_gw[0].status.landingZoneReady | default(false) | bool
+            fail_msg: >-
+              The hub site '{{ hs_hub_cloudinfra }}' has no Ready CloudGateway.
+              gateways found: {{ _hub_gw | map(attribute='metadata.name') | list }}
+              enabled={{ _hub_gw[0].spec.enabled | default('n/a') if _hub_gw | length > 0 else 'n/a' }}
+              landingZoneReady={{ _hub_gw[0].status.landingZoneReady | default('n/a') if _hub_gw | length > 0 else 'n/a' }}
+              message={{ _hub_gw[0].status.message | default('<none>') if _hub_gw | length > 0 else '<no gateway>' }}
+              Without it the hub EVPN landing zone is absent and no tenant VRF
+              on the hub carries traffic.
+            success_msg: >-
+              Hub gateway '{{ _hub_gw[0].metadata.name | default('?') }}' is
+              Ready, landing zone up, VTEP
+              {{ _hub_gw[0].status.vtep | default('unpublished') }}.
+            quiet: true
+
+        # ---- Remote sites: report, then self-skip ---------------------------
+        # The EVPN prerequisites for the remote sites are rolled out
+        # separately. A remote gateway that is absent or not Ready is an
+        # environment state, so it is surfaced loudly and skipped.
+        - name: Separate the remote gateways from the hub's
+          ansible.builtin.set_fact:
+            _remote_gw: >-
+              {{ _gw_all.resources | default([])
+                 | selectattr('spec.cloudRef.name', 'defined')
+                 | rejectattr('spec.cloudRef.name', 'equalto', hs_hub_cloudinfra)
+                 | list }}
+
+        - name: Split the remote gateways into Ready and not-Ready
+          ansible.builtin.set_fact:
+            _remote_ready: >-
+              {{ _remote_gw | selectattr('status.ready', 'defined')
+                 | selectattr('status.ready', 'equalto', true) | list }}
+            _remote_unready: >-
+              {{ _remote_gw | rejectattr('status.ready', 'defined') | list
+                 + (_remote_gw | selectattr('status.ready', 'defined')
+                    | rejectattr('status.ready', 'equalto', true) | list) }}
+
+        - name: "Announce the remote-transport checks are skipped"
+          ansible.builtin.debug:
+            msg: >-
+              ========== GENGAR: REMOTE TRANSPORT SKIPPED ==========
+              {{ _remote_unready | length }} remote CloudGateway(s) are not
+              Ready, so their TransportLinks cannot come up and the
+              tunnel-health checks below are skipped rather than failed. The
+              hub has no EVPN prerequisites for these sites yet; a rollout
+              enabling them is separate work.
+              {{ _remote_unready | json_query('[].{name: metadata.name,
+                   site: spec.cloudRef.name, enabled: spec.enabled,
+                   transport: spec.transport.type, ready: status.ready,
+                   message: status.message}') }}
+          when: _remote_unready | length > 0
+
+        - name: Assert each Ready remote gateway published its transport
+          ansible.builtin.assert:
+            that:
+              - item.status.transportReady | default(false) | bool
+              - >-
+                (item.spec.transport.type | default('none')) != 'wireguard'
+                or (item.status.wireguardAddress | default('') | length > 0)
+            fail_msg: >-
+              CloudGateway/{{ item.metadata.name }} reports Ready but its
+              transport is not up.
+              transportReady={{ item.status.transportReady | default('unset') }}
+              transport.type={{ item.spec.transport.type | default('none') }}
+              wireguardAddress={{ item.status.wireguardAddress | default('<empty>') }}.
+              The site is advertised as reachable but carries no tenant
+              traffic.
+            success_msg: >-
+              CloudGateway/{{ item.metadata.name }} transport is up.
+            quiet: true
+          loop: "{{ _remote_ready }}"
+          loop_control:
+            label: "CloudGateway/{{ item.metadata.name }}"
+
+        # A TransportLink is only asserted when its own gateway is Ready;
+        # otherwise GatewayNotReady is the expected, correct state.
+        - name: Assert each link whose gateway is Ready has its tunnel up
+          ansible.builtin.assert:
+            that:
+              - item.status.tunnelUp | default(false) | bool
+              - >-
+                item.status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              TransportLink/{{ item.metadata.name }} has a Ready CloudGateway
+              '{{ item.spec.cloudGatewayRef }}' but its tunnel is down.
+              tunnelUp={{ item.status.tunnelUp | default('unset') }}
+              message={{ item.status.message | default('<none>') }}.
+            success_msg: "TransportLink/{{ item.metadata.name }} tunnel is up."
+            quiet: true
+          loop: >-
+            {{ _tl_all.resources | default([])
+               | selectattr('spec.cloudGatewayRef', 'defined')
+               | selectattr('spec.cloudGatewayRef', 'in',
+                   (_remote_ready + _hub_gw) | map(attribute='metadata.name') | list)
+               | list }}
+          loop_control:
+            label: "TransportLink/{{ item.metadata.name }}"
+
+        - name: "Announce the links whose gateway is down are skipped"
+          ansible.builtin.debug:
+            msg: >-
+              ========== GENGAR: TRANSPORTLINK SKIPPED ==========
+              TransportLink/{{ item.metadata.name }} is not asserted on: its
+              CloudGateway '{{ item.spec.cloudGatewayRef | default('unset') }}'
+              is not Ready, so a down tunnel is the correct state, not a
+              defect. status.message=
+              {{ item.status.message | default('<none>') }}
+          loop: >-
+            {{ _tl_all.resources | default([])
+               | selectattr('spec.cloudGatewayRef', 'defined')
+               | rejectattr('spec.cloudGatewayRef', 'in',
+                   (_remote_ready + _hub_gw) | map(attribute='metadata.name') | list)
+               | list }}
+          loop_control:
+            label: "TransportLink/{{ item.metadata.name }}"
+
+    # =========================================================================
+    # DESTROY — forbidden by design
+    # =========================================================================
+    - name: Destroy nothing
+      tags: [destroy]
+      block:
+        - name: "Gengar deletes no fabric infrastructure CR"
+          ansible.builtin.debug:
+            msg: >-
+              Gengar never creates a CloudInfrastructure, HybridFabric,
+              CloudGateway or TransportLink — the live ones are tested in
+              place, so there is nothing of Gengar's to delete. Deleting the
+              fabric or a site would strand every tenant network, CloudVirt
+              and CloudOSO in the lab, and this suite is forbidden from
+              touching them.

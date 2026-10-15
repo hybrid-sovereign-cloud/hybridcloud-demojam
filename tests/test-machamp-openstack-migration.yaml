@@ -1,0 +1,467 @@
+---
+# =============================================================================
+# test-machamp-openstack-migration.yaml — OpenstackMigration
+#
+#   --tags create   Entity -> Rbac -> CloudOSO -> OpenstackMigration, once the
+#                   MTV prerequisites are actually present
+#   --tags test     the migration CR reconciled against a real MTV Provider
+#                   and a real CloudOSO target, and leaked no secret into spec
+#   --tags destroy  tear down in reverse and prove nothing was left behind
+#
+# OpenstackMigration drives os-migrate through MTV (Forklift): it names a
+# source MTV Provider CR and a target CloudOSO project, and moves a named VM
+# between them. It therefore has three hard prerequisites — the Forklift
+# Provider CRD, a Provider CR to migrate from, and OpenStack credentials for
+# the target — and none of them can be conjured by a test suite.
+#
+# SELF-SKIPPING, AND THAT IS THE NORMAL OUTCOME TODAY. The hub currently
+# installs only the Forklift volume-populator CRDs, not the MTV Provider CRD,
+# so this suite ends with a loud SKIPPED banner after proving the CRD contract
+# still holds. That is an environment fact, not a product defect, and it is
+# reported rather than failed. When MTV is installed the same suite runs the
+# full lifecycle unchanged.
+#
+# IT NEVER MIGRATES A VM IT DID NOT NAME. The VM name comes from
+# HS_MIGRATION_VM; with that unset the suite skips rather than guessing at a
+# machine in somebody's lab and moving it.
+#
+# Self-contained: nothing here reads from samples/.
+# =============================================================================
+- name: "Machamp — OpenstackMigration lifecycle"
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ hs_kubeconfig }}"
+      validate_certs: "{{ ocp_validate_certs }}"
+
+  vars:
+    e: machamp
+    ns: entity-machamp
+    cloudoso_name: machamp-oso
+    oso_project: machamp-qa
+    migration_name: machamp-migration
+    rbac_groups:
+      - machamp-migration-admins
+      - machamp-migration-viewers
+
+    # Every one of these is environment-supplied. No VM, provider or
+    # namespace belonging to a real lab is written down in this file.
+    migration_vm: "{{ lookup('env', 'HS_MIGRATION_VM') }}"
+    migration_source: "{{ lookup('env', 'HS_MIGRATION_PROVIDER') }}"
+    migration_provider_ns: "{{ lookup('env', 'HS_MIGRATION_PROVIDER_NS') | default('openshift-mtv', true) }}"
+
+    mtv_provider_api: forklift.konveyor.io/v1beta1
+
+  environment:
+    OS_CLIENT_CONFIG_FILE: "{{ oso_clouds_file }}"
+
+  tasks:
+    - name: Resolve platform endpoints and credentials
+      ansible.builtin.import_role:
+        name: platform_auth
+      tags: [always]
+
+    # The same three prerequisites gate create, test and destroy, so they are
+    # evaluated once under [always] instead of being repeated in each block.
+    - name: Work out whether a migration can be tested at all
+      tags: [always]
+      block:
+        - name: "Preflight — is the MTV Provider CRD installed?"
+          kubernetes.core.k8s_info:
+            api_version: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+            name: providers.forklift.konveyor.io
+          register: _mtv_crd
+          failed_when: false
+
+        - name: "Preflight — list the MTV Providers, if the CRD is there"
+          kubernetes.core.k8s_info:
+            api_version: "{{ mtv_provider_api }}"
+            kind: Provider
+            namespace: "{{ migration_provider_ns }}"
+          register: _mtv_providers
+          failed_when: false
+          when: _mtv_crd.resources | default([]) | length > 0
+
+        - name: Decide whether the migration prerequisites are met
+          ansible.builtin.set_fact:
+            _mtv_present: "{{ _mtv_crd.resources | default([]) | length > 0 }}"
+            _mtv_found: >-
+              {{ (_mtv_providers.resources | default([]))
+                 | map(attribute='metadata.name') | list }}
+
+        - name: Resolve which Provider to migrate from
+          ansible.builtin.set_fact:
+            # An explicit HS_MIGRATION_PROVIDER wins; otherwise the single
+            # Provider in the namespace is used, but only if there is exactly
+            # one. Picking arbitrarily out of several would migrate from
+            # whichever one happened to sort first.
+            _provider: >-
+              {{ migration_source if migration_source | length > 0
+                 else (_mtv_found | first) if _mtv_found | length == 1
+                 else '' }}
+
+        - name: Decide whether the suite can run
+          ansible.builtin.set_fact:
+            _migration_ready: >-
+              {{ (_mtv_present | bool)
+                 and (oso_enabled | bool)
+                 and (migration_vm | length > 0)
+                 and (_provider | length > 0) }}
+
+        - name: Report the migration prerequisites
+          ansible.builtin.debug:
+            msg:
+              mtv_provider_crd: "{{ _mtv_present | ternary('installed', 'ABSENT') }}"
+              providers_in_ns: "{{ _mtv_found }}"
+              chosen_provider: "{{ _provider | default('none', true) }}"
+              openstack_configured: "{{ oso_enabled | bool }}"
+              vm_to_migrate: "{{ (migration_vm | length > 0) | ternary('set', 'UNSET') }}"
+              can_run: "{{ _migration_ready | bool }}"
+
+        # The CRD contract is checked even when the suite cannot run, so a
+        # skipped Machamp still proves the kind is installed and its required
+        # fields have not drifted.
+        - name: "Contract — read the OpenstackMigration CRD"
+          kubernetes.core.k8s_info:
+            api_version: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+            name: openstackmigrations.hybridsovereign.redhat
+          register: _om_crd
+
+        - name: Assert the OpenstackMigration kind is installed and intact
+          ansible.builtin.assert:
+            that:
+              - _om_crd.resources | length > 0
+              - >-
+                ['cloudoso', 'vmName'] | difference(
+                  _om_crd.resources[0].spec.versions[0].schema.openAPIV3Schema.properties.spec.required
+                  | default([])) | length == 0
+            fail_msg: >-
+              The OpenstackMigration CRD is missing or its required spec
+              fields have drifted. required=
+              {{ _om_crd.resources[0].spec.versions[0].schema.openAPIV3Schema.properties.spec.required
+                 | default('<CRD absent>') }}, expected at least
+              ['cloudoso', 'vmName']. A migration CR written against the old
+              contract would be rejected.
+            success_msg: >-
+              The OpenstackMigration CRD is installed and still requires
+              cloudoso and vmName.
+            quiet: true
+
+        - name: "Announce the suite is skipped"
+          ansible.builtin.debug:
+            msg: >-
+              ========== MACHAMP SKIPPED ==========
+              The OpenstackMigration kind is installed and its contract was
+              verified, but no migration can be run on this hub.
+              MTV Provider CRD: {{ _mtv_present | ternary('installed', 'NOT INSTALLED') }}.
+              Providers in {{ migration_provider_ns }}: {{ _mtv_found }}.
+              OpenStack configured (OSO_CLOUDS): {{ oso_enabled | bool }}.
+              VM to migrate (HS_MIGRATION_VM): {{ (migration_vm | length > 0) | ternary('set', 'unset') }}.
+              Chosen provider: {{ _provider | default('none', true) }}.
+              Install MTV, export OSO_CLOUDS, and set HS_MIGRATION_VM (and
+              HS_MIGRATION_PROVIDER when the namespace holds more than one
+              Provider) to exercise the full lifecycle.
+          when: not (_migration_ready | bool)
+
+        - name: End the play when a migration cannot be run
+          ansible.builtin.meta: end_play
+          when: not (_migration_ready | bool)
+
+    # =========================================================================
+    # CREATE
+    # =========================================================================
+    - name: Create the migration stack
+      tags: [create]
+      block:
+        - name: Create the Entity
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Entity
+                metadata: { name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+                spec:
+                  description: "Machamp — QA tenant for OpenStack migration testing"
+                  billingID: "MACHAMP-TEST-001"
+
+        - name: Wait for the Entity
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Entity
+            cr_wait_name: "{{ e }}"
+            cr_wait_namespace: "{{ hs_platform_ns }}"
+
+        # The OpenStack site's allow-list refuses a tenant it has never heard
+        # of, so the Entity is entitled onto it before the CloudOSO is made.
+        - name: Entitle the Entity on the OpenStack site
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ hs_oso_cloudinfra }}" }
+
+        - name: Create the Rbac groups the migration will bind
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: Rbac
+                metadata: { name: "{{ item }}", namespace: "{{ ns }}" }
+                spec:
+                  config: "{{ hs_rbac_config }}"
+                  description: "QA group {{ item }} for tenant {{ e }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Wait for every Rbac CR to be Ready
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: Rbac
+            cr_wait_name: "{{ item }}"
+            cr_wait_namespace: "{{ ns }}"
+          loop: "{{ rbac_groups }}"
+
+        - name: Create the CloudOSO the migration targets
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: CloudOSO
+                metadata: { name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+                spec:
+                  project: "{{ oso_project }}"
+                  cloudRef: { kind: CloudInfrastructure, name: "{{ hs_oso_cloudinfra }}" }
+                  baseDomain: oso.local
+                  externalNetwork: "{{ oso_external_network }}"
+                  # spec.toolRbac is deliberately NOT set: the CloudOSO CRD
+                  # does not define it, so the API server prunes it silently
+                  # and asserting on it would test nothing.
+
+        - name: Wait for the CloudOSO
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: CloudOSO
+            cr_wait_name: "{{ cloudoso_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+        - name: Create the OpenstackMigration
+          ansible.builtin.include_role:
+            name: cr_apply
+          vars:
+            cr_apply_defs:
+              - apiVersion: "{{ hs_api_version }}"
+                kind: OpenstackMigration
+                metadata: { name: "{{ migration_name }}", namespace: "{{ ns }}" }
+                spec:
+                  vmName: "{{ migration_vm }}"
+                  cloudoso: "{{ cloudoso_name }}"
+                  source: "{{ _provider }}"
+                  providerNamespace: "{{ migration_provider_ns }}"
+                  # spec.plan takes Vault references only — never a secret.
+                  # Nothing credential-bearing is ever put in this spec.
+
+        - name: Wait for the OpenstackMigration
+          ansible.builtin.include_role:
+            name: cr_wait_ready
+          vars:
+            cr_wait_kind: OpenstackMigration
+            cr_wait_name: "{{ migration_name }}"
+            cr_wait_namespace: "{{ ns }}"
+
+    # =========================================================================
+    # TEST
+    # =========================================================================
+    - name: Verify the migration wired up to real endpoints
+      tags: [test]
+      block:
+        - name: "OpenstackMigration — read the live CR"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: OpenstackMigration
+            name: "{{ migration_name }}"
+            namespace: "{{ ns }}"
+          register: _om
+
+        - name: Assert the migration CR exists
+          ansible.builtin.assert:
+            that: _om.resources | length > 0
+            fail_msg: >-
+              No OpenstackMigration/{{ migration_name }} in {{ ns }}. Run this
+              suite with --tags create first.
+            success_msg: "OpenstackMigration/{{ migration_name }} found."
+            quiet: true
+
+        - name: Keep the CR for the rest of the suite
+          ansible.builtin.set_fact:
+            _mig: "{{ _om.resources[0] }}"
+
+        - name: Report the migration
+          ansible.builtin.debug:
+            msg:
+              name: "{{ ns }}/{{ migration_name }}"
+              vm: "{{ _mig.spec.vmName | default('unset') }}"
+              target_cloudoso: "{{ _mig.spec.cloudoso | default('unset') }}"
+              source_provider: "{{ _mig.spec.source | default('unset') }}"
+              provider_namespace: "{{ _mig.spec.providerNamespace | default('unset') }}"
+              ready: "{{ _mig.status.ready | default('unknown') }}"
+              status: "{{ _mig.status.status | default('unknown') }}"
+              message: "{{ _mig.status.message | default('<none>') }}"
+
+        - name: Assert the migration is Ready
+          ansible.builtin.assert:
+            that: >-
+              (_mig.status.conditions | default([])
+                | selectattr('type', 'equalto', 'Ready')
+                | selectattr('status', 'equalto', 'True') | list | length > 0)
+              or (_mig.status.ready | default(false) | bool)
+            fail_msg: >-
+              OpenstackMigration/{{ migration_name }} is not Ready.
+              message={{ _mig.status.message | default('<none>') }}
+              conditions={{ _mig.status.conditions | default([])
+                 | json_query('[].{type: type, status: status, reason: reason}') }}
+            success_msg: "OpenstackMigration/{{ migration_name }} is Ready."
+            quiet: true
+
+        # ---- The target really exists ---------------------------------------
+        - name: "Target — the CloudOSO the migration names"
+          kubernetes.core.k8s_info:
+            api_version: "{{ hs_api_version }}"
+            kind: CloudOSO
+            name: "{{ _mig.spec.cloudoso }}"
+            namespace: "{{ ns }}"
+          register: _target
+
+        - name: Assert the migration targets a real, Ready CloudOSO
+          ansible.builtin.assert:
+            that:
+              - _target.resources | length > 0
+              - >-
+                _target.resources[0].status.conditions | default([])
+                  | selectattr('type', 'equalto', 'Ready')
+                  | selectattr('status', 'equalto', 'True') | list | length > 0
+            fail_msg: >-
+              OpenstackMigration/{{ migration_name }} targets
+              CloudOSO/{{ _mig.spec.cloudoso }} in {{ ns }}, which is missing
+              or not Ready. The VM would have nowhere to land.
+            success_msg: >-
+              The migration targets a Ready CloudOSO/{{ _mig.spec.cloudoso }}.
+            quiet: true
+
+        - name: "Keystone — the target project really exists"
+          openstack.cloud.project_info:
+            name: "{{ oso_project }}"
+          register: _ks
+
+        - name: Assert the target Keystone project exists and is enabled
+          ansible.builtin.assert:
+            that:
+              - _ks.projects | default([]) | length > 0
+              - _ks.projects[0].is_enabled | default(true) | bool
+            fail_msg: >-
+              The migration target reports Ready but Keystone has no enabled
+              project '{{ oso_project }}' on cloud '{{ oso_cloud }}'.
+            success_msg: "Keystone project '{{ oso_project }}' exists and is enabled."
+            quiet: true
+
+        # ---- The source really exists ---------------------------------------
+        - name: "Source — the MTV Provider the migration names"
+          kubernetes.core.k8s_info:
+            api_version: "{{ mtv_provider_api }}"
+            kind: Provider
+            name: "{{ _mig.spec.source }}"
+            namespace: "{{ _mig.spec.providerNamespace }}"
+          register: _prov
+
+        - name: Assert the migration sources from a real MTV Provider
+          ansible.builtin.assert:
+            that: _prov.resources | length > 0
+            fail_msg: >-
+              OpenstackMigration/{{ migration_name }} sources from Provider
+              '{{ _mig.spec.source }}' in
+              '{{ _mig.spec.providerNamespace }}', which does not exist. MTV
+              has nothing to pull the VM from.
+            success_msg: >-
+              The migration sources from a real MTV Provider
+              '{{ _mig.spec.source }}'.
+            quiet: true
+
+        # ---- The spec must not carry a secret -------------------------------
+        # spec.plan is documented as taking Vault references only. This is the
+        # assertion that keeps it honest.
+        - name: Assert no credential leaked into the migration spec
+          ansible.builtin.assert:
+            that:
+              - >-
+                _mig.spec | to_json | regex_search(
+                  '(?i)"(password|token|secret|accessKey|secretKey|privateKey)"\\s*:') is none
+            fail_msg: >-
+              OpenstackMigration/{{ migration_name }} has a credential-looking
+              key in its spec. spec.plan is specified to hold Vault references
+              only — an inline secret here is readable by anyone with get on
+              the CR.
+            success_msg: "The migration spec carries no inline credential."
+            quiet: true
+
+    # =========================================================================
+    # DESTROY
+    # =========================================================================
+    - name: Tear the migration stack down
+      tags: [destroy]
+      block:
+        - name: Delete the migration, then its target, in order
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: OpenstackMigration, name: "{{ migration_name }}", namespace: "{{ ns }}" }
+              - { kind: CloudOSO, name: "{{ cloudoso_name }}", namespace: "{{ ns }}" }
+
+        - name: Delete the Rbac groups
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Rbac, name: "{{ item }}", namespace: "{{ ns }}" }
+          loop: "{{ rbac_groups }}"
+
+        # The entitlement is withdrawn before the Entity goes, or the site's
+        # allow-list keeps a stale entry for every run of this suite.
+        - name: Withdraw the Entity's entitlement from the OpenStack site
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ hs_oso_cloudinfra }}" }
+
+        - name: Delete the Entity last
+          ansible.builtin.include_role:
+            name: cr_destroy
+          vars:
+            cr_destroy_defs:
+              - { kind: Entity, name: "{{ e }}", namespace: "{{ hs_platform_ns }}" }
+
+        - name: "Keystone — the tenant project is gone from OpenStack"
+          openstack.cloud.project_info:
+            name: "{{ oso_project }}"
+          register: _ks_post
+
+        - name: Assert the Keystone project was reclaimed
+          ansible.builtin.assert:
+            that: _ks_post.projects | default([]) | length == 0
+            fail_msg: >-
+              Keystone project '{{ oso_project }}' still exists after the
+              CloudOSO was deleted — the destroy flow leaks tenant projects.
+            success_msg: "Keystone project '{{ oso_project }}' was reclaimed."
+            quiet: true

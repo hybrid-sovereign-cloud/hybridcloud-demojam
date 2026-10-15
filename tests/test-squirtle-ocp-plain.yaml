@@ -63,6 +63,23 @@
             name: cr_wait_ready
           vars: { cr_wait_kind: Entity, cr_wait_name: "{{ e }}", cr_wait_namespace: "{{ hs_platform_ns }}" }
 
+        # CloudInfrastructure/hub-virt carries an entityRefs allow-list; a
+        # tenant that is not on it is refused with "Require the entity to be
+        # allowed on this infrastructure", so the CloudVirt below cannot
+        # reconcile without this. Unlike the other suites, squirtle entitles
+        # on the CloudInfrastructure ONLY and deliberately not on the
+        # HybridFabric — it is the control case proving fabric membership is
+        # optional, so putting it on the fabric allow-list would weaken the
+        # very thing this suite exists to demonstrate.
+        - name: Entitle the tenant on the hub CloudInfrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: present
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ hs_hub_cloudinfra }}" }
+
         - name: Create the Rbac groups
           kubernetes.core.k8s:
             state: present
@@ -202,6 +219,15 @@
                     | map('combine', {'kind': 'Rbac', 'namespace': ns}) | list)
                  + [{'kind': 'CloudVirt', 'name': cloudvirt_name, 'namespace': ns},
                     {'kind': 'Entity', 'name': e, 'namespace': hs_platform_ns}] }}
+
+        - name: Withdraw the tenant's entitlement on the hub CloudInfrastructure
+          ansible.builtin.include_role:
+            name: entity_entitlement
+          vars:
+            ee_entity: "{{ e }}"
+            ee_state: absent
+            ee_targets:
+              - { kind: CloudInfrastructure, name: "{{ hs_hub_cloudinfra }}" }
 
         - name: Assert the ManagedCluster was deregistered from ACM
           kubernetes.core.k8s_info:

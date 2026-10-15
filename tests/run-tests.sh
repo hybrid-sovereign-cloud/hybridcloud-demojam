@@ -21,25 +21,33 @@ cd "$SCRIPT_DIR"
 # -----------------------------------------------------------------------------
 SUITE_NAMES=(
   mewtwo
+  lapras
+  gengar
   ditto
+  porygon
   pikachu
   bulbasaur
   squirtle
   charmander
   eevee
   snorlax
+  machamp
 )
 
 suite_playbook() {
   case "$1" in
     mewtwo)    echo "test-mewtwo-platform-health.yaml" ;;
+    lapras)    echo "test-lapras-platform-config.yaml" ;;
+    gengar)    echo "test-gengar-fabric-infra.yaml" ;;
     ditto)     echo "test-ditto-iaac.yaml" ;;
+    porygon)   echo "test-porygon-uihealth.yaml" ;;
     pikachu)   echo "test-pikachu-tenancy.yaml" ;;
     bulbasaur) echo "test-bulbasaur-hybridnetwork.yaml" ;;
     squirtle)  echo "test-squirtle-ocp-plain.yaml" ;;
     charmander) echo "test-charmander-ocp-hybrid.yaml" ;;
     eevee)     echo "test-eevee-openstack-network.yaml" ;;
     snorlax)   echo "test-snorlax-openstack-vm.yaml" ;;
+    machamp)   echo "test-machamp-openstack-migration.yaml" ;;
     *)         return 1 ;;
   esac
 }
@@ -47,13 +55,17 @@ suite_playbook() {
 suite_summary() {
   case "$1" in
     mewtwo)    echo "read-only platform / pod / ArgoCD health" ;;
+    lapras)    echo "RbacConfig, AAPConfig, QuayConfig singletons, tested in place" ;;
+    gengar)    echo "CloudInfrastructure, HybridFabric, CloudGateway, TransportLink, tested in place" ;;
     ditto)     echo "IaaC resource, tested in place (never created or deleted)" ;;
+    porygon)   echo "UIHealthChecker lifecycle on a probe target discovered from the cluster" ;;
     pikachu)   echo "full tenancy stack: Entity, Rbac, Team, Project, Persona, AAPOrg, QuayOrg, Vault, VaultKV" ;;
     bulbasaur) echo "hybrid fabric + hybrid network on the hub (CloudVirt backend)" ;;
     squirtle)  echo "OCP cluster with NO hybrid network (control case)" ;;
     charmander) echo "OCP cluster joined to a hybrid network" ;;
     eevee)     echo "OpenStack tenant network only, no OCP" ;;
     snorlax)   echo "small OpenStack VM proving the hybrid network carries traffic" ;;
+    machamp)   echo "OpenstackMigration via MTV; self-skips until MTV is installed" ;;
     *)         echo "" ;;
   esac
 }
@@ -83,6 +95,13 @@ TAGS — what each tag does:
 
   destroy   MUTATES THE LIVE PLATFORM. Deletes the test custom resources and
             asserts the remote objects were reclaimed.
+
+Three suites ignore 'create' and 'destroy' entirely and are always read-only:
+lapras, gengar and ditto. The resources they cover (the RbacConfig/AAPConfig/
+QuayConfig singletons, the CloudInfrastructure sites, the HybridFabric and its
+gateways, and the IaaC export) are shared platform config that the whole lab
+depends on, so those suites assert against the live objects in place and their
+create/destroy tags are explicit no-ops.
 
 Because 'create' and 'destroy' change the live platform, this script asks for
 a typed confirmation when either appears in TAGS and stdin is a terminal. Set
