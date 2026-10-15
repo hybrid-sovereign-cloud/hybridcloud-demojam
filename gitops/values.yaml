@@ -5,7 +5,7 @@
 global:
   partOf: hybridsovereign-gitops
   # Derived per-cluster; override via Argo helm values when needed
-  repoURL: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
+  repoURL: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud
   targetRevision: main
   # In-cluster destination for mirror replicas
   destinationServer: https://kubernetes.default.svc

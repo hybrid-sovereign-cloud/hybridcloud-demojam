@@ -21,7 +21,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
+    repoURL: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud
     targetRevision: main
     path: gitops
   destination:

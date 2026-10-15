@@ -12,8 +12,8 @@ keywords:
   - mce
   - acm
   - cluster-provisioning
-home: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
+home: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud
 sources:
-  - https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam
+  - https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud
 maintainers:
   - name: hybrid-sovereign-cloud

@@ -54,7 +54,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      uri: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud.git
       ref: main
     contextDir: src/custom-operators/base
   strategy:
@@ -82,7 +82,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      uri: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud.git
       ref: main
     contextDir: ui
   strategy:
@@ -115,7 +115,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      uri: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud.git
       ref: main
     contextDir: ui
   strategy:
@@ -148,7 +148,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      uri: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud.git
       ref: main
     contextDir: ui
   strategy:
@@ -181,7 +181,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/hybrid-sovereign-cloud/hybridcloud-demojam.git
+      uri: https://github.com/hybrid-sovereign-cloud/sovereignhybridcloud.git
       ref: main
     contextDir: ui
   strategy:
