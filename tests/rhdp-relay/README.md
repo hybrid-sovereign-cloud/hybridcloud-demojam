@@ -37,7 +37,7 @@ environment variables, like the rest of `tests/`.
 
 | File | Purpose |
 |---|---|
-| `discover-source-ips.sh` | prints the public NAT address of every node of a cluster (each RHDP node has its own 1:1 NAT address; pods use their node's) |
+| `discover-source-ips.sh` | prints the public NAT address of every node of a cluster, to confirm which /24 each side is in |
 | `cloud-init.yaml.tpl` | HAProxy + dnsmasq configuration rendered into the relay VM's user-data |
 | `build-relay.sh` | creates network, subnet, router, security group, floating IP and the VM |
 | `cluster-dns.sh` | `apply` / `remove` the DNS operator forwarders on both clusters |
@@ -52,9 +52,12 @@ export OCP_CENTRAL_USERNAME=admin OCP_CENTRAL_PASSWORD=...
 export OCP_OSO_SERVER=https://api.cluster-BBBBB.dyn.redhatworkshops.io:6443
 export OCP_OSO_USERNAME=admin OCP_OSO_PASSWORD=...
 
-# 2. source addresses of both clusters (space-separated lists)
-export HUB_SOURCE_IPS="$(./discover-source-ips.sh central)"
-export OSO_SOURCE_IPS="$(./discover-source-ips.sh oso)"
+# 2. (optional) source gates. Default: 148.62.110.0/24 for the hub side and
+#    148.62.111.0/24 for the OpenStack side, the per-host-cluster NAT ranges
+#    seen at RHDP dfw3. Check with discover-source-ips.sh and override if the
+#    sandboxes landed elsewhere (IPs or CIDRs, space-separated).
+./discover-source-ips.sh central; ./discover-source-ips.sh oso
+# export HUB_SOURCES="148.62.110.0/24" OSO_SOURCES="148.62.111.0/24"
 
 # 3. the relay cloud (clouds.yaml entry) and placement
 export OS_CLOUD=lab-infra
@@ -75,9 +78,18 @@ Remove with `./cluster-dns.sh remove` and `./destroy-relay.sh`.
 
 - Hub and OpenStack cluster names are derived from `OCP_CENTRAL_SERVER` and
   `OCP_OSO_SERVER`; the VIPs are resolved from the `api.` names.
-- The RHDP NAT addresses change whenever a sandbox is rebuilt: rerun
-  `discover-source-ips.sh`, then `build-relay.sh` with the new lists (or edit
-  `/etc/haproxy/haproxy.cfg` on the VM and reload).
+- Each RHDP node has its own 1:1 NAT address, drawn from a /24 per host
+  cluster (all hub nodes were in `148.62.110.0/24`, all OpenStack nodes in
+  `148.62.111.0/24`). The gates default to those /24s so node rebuilds and
+  migrations inside the host cluster keep working. A sandbox rebuilt onto a
+  different host cluster shows up in another /24: rerun
+  `discover-source-ips.sh` and rebuild (or edit `/etc/haproxy/haproxy.cfg`
+  and the security group on the VM).
+- The gate is deliberately per direction: only hub sources may reach the
+  OpenStack API and routes, only OpenStack sources may reach the hub's
+  `fabric-bgw` route. Do not merge the two lists. Widening within RHDP is
+  low risk: the relay only ever forwards to the two public VIPs, which the
+  internet reaches directly anyway.
 - The WireGuard session is a long-lived websocket, so the HAProxy client and
   server timeouts are set to one day.
 - RHDP sandboxes do pass UDP 53 to the internet, so plain DNS forwarding works;
