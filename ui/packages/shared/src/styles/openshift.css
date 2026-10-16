@@ -239,15 +239,70 @@ select.sc-entity-select,
   display: block;
 }
 
+/* Layer banding — alternating lanes so rows separate without extra rules. */
+.sc-topology-band {
+  fill: transparent;
+}
+
+.sc-topology-band--alt {
+  fill: var(--sc-surface-alt, rgba(109, 113, 117, 0.045));
+}
+
 .sc-topology-edge {
   fill: none;
   stroke: #6a6e73;
   stroke-width: 1.25;
+  /* Slightly translucent: in a dense n:n graph, crossings then read as
+     texture rather than as a solid mat of lines. */
+  stroke-opacity: 0.55;
+  transition: stroke-opacity 0.12s ease-out, stroke-width 0.12s ease-out;
 }
 
 .sc-topology-edge--failed {
   stroke: #c9190b;
   stroke-dasharray: 4 3;
+  stroke-opacity: 0.85;
+}
+
+/* Focus mode: the hovered node's edges come forward, the rest recede. */
+.sc-topology-edge.is-focused {
+  stroke-opacity: 1;
+  stroke-width: 2;
+}
+
+.sc-topology-edge.is-muted {
+  stroke-opacity: 0.08;
+}
+
+.sc-topology-node {
+  transition: opacity 0.12s ease-out;
+  cursor: pointer;
+}
+
+.sc-topology-node.is-muted {
+  opacity: 0.25;
+}
+
+.sc-topology-node.is-focused rect {
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.22));
+}
+
+.sc-topology-node:focus {
+  outline: none;
+}
+
+.sc-topology-node:focus-visible rect {
+  stroke: var(--sc-link, #06c);
+  stroke-width: 2;
+}
+
+/* Honour reduced-motion: keep the state change, drop the transition. */
+@media (prefers-reduced-motion: reduce) {
+  .sc-topology-edge,
+  .sc-topology-node {
+    transition: none;
+  }
 }
 
 .sc-topology-node rect {

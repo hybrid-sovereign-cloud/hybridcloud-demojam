@@ -120,7 +120,7 @@ ui:
     # Pinned to the tags ui/Makefile builds (ADMIN_PLUGIN_TAG etc.). Bump these
     # and the Makefile together; ArgoCD app hs-ui then rolls the new image out
     # on its own. Set back to "" to fall through to the :latest defaults.
-    adminPlugin: "quay.io/gauravshankar/sovereign-admin-plugin:1.2.41"
+    adminPlugin: "quay.io/gauravshankar/sovereign-admin-plugin:1.2.42"
     tenantPlugin: "quay.io/gauravshankar/sovereign-tenant-plugin:1.3.35"
     adminDashboard: "quay.io/gauravshankar/sovereign-cloud-dashboard:2.0.30"
     tenantDashboard: "quay.io/gauravshankar/tenancy-dashboard:5.0.31"

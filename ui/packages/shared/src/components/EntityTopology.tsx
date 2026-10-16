@@ -20,6 +20,14 @@ export interface TopologyNode {
   namespace?: string;
   x?: number;
   y?: number;
+  /**
+   * Routing placeholder for an edge that spans more than one layer. Never
+   * rendered: it reserves a narrow lane in the layer it passes through so the
+   * edge is routed around the nodes there instead of straight over them.
+   */
+  virtual?: boolean;
+  /** Laid-out width — NODE_W for real nodes, VIRTUAL_W for routing lanes. */
+  w?: number;
 }
 
 export interface TopologyEdge {
@@ -80,10 +88,18 @@ function entityOf(item: K8sResource): string {
 const NODE_W = 150;
 const NODE_H = 46;
 const COL_GAP = 22; // horizontal gap between sibling nodes in a layer
-const LAYER_GAP = 62; // vertical gap between layers
-const PAD_X = 20;
+const LAYER_GAP = 76; // vertical gap between layers — room for n:n edge fan-out
+// Layer captions live in their own left gutter instead of floating over the
+// first node of the row, which is what made the caption collide with the row.
+const LABEL_GUTTER = 96;
+const PAD_X = 16;
 const PAD_Y = 16;
-const LAYER_LABEL_H = 16;
+const LAYER_LABEL_H = 10;
+// Edges leave/enter spread across the node edge rather than all stacking on the
+// midpoint, so parallel n:n edges stay individually traceable.
+const PORT_INSET = 16;
+// Width of a routing lane reserved for a long edge passing through a layer.
+const VIRTUAL_W = 14;
 
 function statusFromReady(ready?: boolean, status?: string): TopologyNode['status'] {
   return normalizeHealth(ready, status);
@@ -99,12 +115,209 @@ function statusColor(status: TopologyNode['status']): string {
 export interface TopologyLayer {
   title: string;
   y: number;
+  /** Banding rect behind the row, so layers read apart at a glance. */
+  bandY: number;
+  bandH: number;
+}
+
+/**
+ * Number of edge crossings between two adjacent, ordered layers.
+ *
+ * Two edges (u1→v1) and (u2→v2) cross when their endpoints are in opposite
+ * order on the two layers. Counted directly: the layers here are tens of nodes,
+ * not thousands, so the simple pairwise count is cheaper than the accumulator
+ * tree it would take to do it in O(E log V).
+ */
+export function countCrossings(
+  upper: string[],
+  lower: string[],
+  childrenOf: Map<string, string[]>,
+): number {
+  const upperIdx = new Map(upper.map((id, i) => [id, i]));
+  const lowerIdx = new Map(lower.map((id, i) => [id, i]));
+  const pairs: Array<[number, number]> = [];
+  for (const u of upper) {
+    const ui = upperIdx.get(u);
+    if (ui === undefined) continue;
+    for (const v of childrenOf.get(u) ?? []) {
+      const vi = lowerIdx.get(v);
+      if (vi !== undefined) pairs.push([ui, vi]);
+    }
+  }
+  let crossings = 0;
+  for (let i = 0; i < pairs.length; i += 1) {
+    for (let j = i + 1; j < pairs.length; j += 1) {
+      const [a1, b1] = pairs[i];
+      const [a2, b2] = pairs[j];
+      if ((a1 - a2) * (b1 - b2) < 0) crossings += 1;
+    }
+  }
+  return crossings;
+}
+
+/**
+ * Crossing reduction over the layered graph (the ordering phase of Sugiyama).
+ *
+ * A static per-layer sort — by owning entity, then kind, then name — cannot
+ * lay out n:n relationships: once a child has several parents, and a parent
+ * several children, no property of the node itself says where it belongs. The
+ * position has to come from the graph. So: repeatedly reorder each layer by the
+ * mean position of its neighbours in the adjacent layer (the barycentre),
+ * sweeping down then up, and keep whichever ordering crossed least.
+ *
+ * The incoming order seeds the first pass and breaks ties thereafter, so the
+ * result stays deterministic and still groups a tenant's resources together
+ * wherever the graph leaves that free.
+ */
+export function reduceCrossings(
+  layers: Array<{ title: string; nodes: TopologyNode[] }>,
+  edges: Array<{ from: string; to: string }>,
+  passes = 8,
+): Array<{ title: string; nodes: TopologyNode[] }> {
+  if (layers.length < 2) return layers;
+
+  const childrenOf = new Map<string, string[]>();
+  const parentsOf = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!childrenOf.has(e.from)) childrenOf.set(e.from, []);
+    childrenOf.get(e.from)!.push(e.to);
+    if (!parentsOf.has(e.to)) parentsOf.set(e.to, []);
+    parentsOf.get(e.to)!.push(e.from);
+  }
+
+  const nodeById = new Map<string, TopologyNode>();
+  for (const l of layers) for (const n of l.nodes) nodeById.set(n.id, n);
+
+  let order = layers.map((l) => l.nodes.map((n) => n.id));
+  // Seed rank: the incoming sort. Used as the tie-break so nodes with no
+  // neighbours in the adjacent layer hold their place instead of drifting.
+  const seedRank = new Map<string, number>();
+  order.forEach((ids) => ids.forEach((id, i) => seedRank.set(id, i)));
+
+  const totalCrossings = (ord: string[][]): number => {
+    let total = 0;
+    for (let i = 0; i < ord.length - 1; i += 1) {
+      total += countCrossings(ord[i], ord[i + 1], childrenOf);
+    }
+    return total;
+  };
+
+  const sweep = (ord: string[][], dir: 'down' | 'up'): string[][] => {
+    const next = ord.map((ids) => ids.slice());
+    const range =
+      dir === 'down'
+        ? Array.from({ length: next.length - 1 }, (_, k) => k + 1)
+        : Array.from({ length: next.length - 1 }, (_, k) => next.length - 2 - k);
+    for (const i of range) {
+      const adjacent = dir === 'down' ? next[i - 1] : next[i + 1];
+      const adjIdx = new Map(adjacent.map((id, k) => [id, k]));
+      const neighbours = dir === 'down' ? parentsOf : childrenOf;
+      const bary = new Map<string, number>();
+      next[i].forEach((id, selfIdx) => {
+        const ns = (neighbours.get(id) ?? [])
+          .map((n) => adjIdx.get(n))
+          .filter((v): v is number => v !== undefined);
+        // No neighbour in that direction: stay put rather than collapse to 0.
+        bary.set(id, ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : selfIdx);
+      });
+      next[i] = next[i]
+        .map((id, k) => ({ id, k }))
+        .sort(
+          (a, b) =>
+            (bary.get(a.id) ?? 0) - (bary.get(b.id) ?? 0) ||
+            (seedRank.get(a.id) ?? 0) - (seedRank.get(b.id) ?? 0) ||
+            a.k - b.k,
+        )
+        .map((e) => e.id);
+    }
+    return next;
+  };
+
+  let best = order;
+  let bestScore = totalCrossings(order);
+  for (let p = 0; p < passes && bestScore > 0; p += 1) {
+    order = sweep(order, p % 2 === 0 ? 'down' : 'up');
+    const score = totalCrossings(order);
+    if (score < bestScore) {
+      bestScore = score;
+      best = order;
+    }
+  }
+
+  return layers.map((l, i) => ({
+    title: l.title,
+    nodes: best[i].map((id) => nodeById.get(id)!).filter(Boolean),
+  }));
+}
+
+/**
+ * Split every edge that spans more than one layer into a chain of
+ * single-layer hops joined by virtual nodes.
+ *
+ * This is the part a plain layered sort cannot do. A CloudInfrastructure links
+ * straight to a tenant's cloud project, two layers below, so the edge is drawn
+ * straight through the Entities row — over the top of entity nodes and across
+ * every other long edge doing the same thing. On this cluster 9 of 24 edges
+ * (37%) span more than one layer, and that fraction only grows with tenant
+ * count, which is why large deployments turn into a hairball.
+ *
+ * Giving each long edge a reserved lane in the layers it crosses means it gets
+ * ordered alongside everything else by the barycentre sweep, so it routes
+ * *around* the nodes in between instead of over them.
+ */
+export function insertVirtualNodes(
+  layers: Array<{ title: string; nodes: TopologyNode[] }>,
+  edges: Array<{ from: string; to: string; failed?: boolean }>,
+): {
+  layers: Array<{ title: string; nodes: TopologyNode[] }>;
+  segments: Array<{ from: string; to: string }>;
+  routes: Map<string, string[]>;
+} {
+  const layerOf = new Map<string, number>();
+  layers.forEach((l, i) => l.nodes.forEach((n) => layerOf.set(n.id, i)));
+
+  const out = layers.map((l) => ({ title: l.title, nodes: l.nodes.slice() }));
+  const segments: Array<{ from: string; to: string }> = [];
+  const routes = new Map<string, string[]>();
+
+  for (const e of edges) {
+    const a = layerOf.get(e.from);
+    const b = layerOf.get(e.to);
+    if (a === undefined || b === undefined) continue;
+    const edgeId = `${e.from}->${e.to}`;
+    if (b - a <= 1) {
+      segments.push({ from: e.from, to: e.to });
+      routes.set(edgeId, []);
+      continue;
+    }
+    const chain: string[] = [];
+    let prev = e.from;
+    for (let l = a + 1; l < b; l += 1) {
+      const vid = `__virtual|${edgeId}|${l}`;
+      out[l].nodes.push({
+        id: vid,
+        label: '',
+        kind: 'Group',
+        status: 'unknown',
+        virtual: true,
+      });
+      segments.push({ from: prev, to: vid });
+      chain.push(vid);
+      prev = vid;
+    }
+    segments.push({ from: prev, to: e.to });
+    routes.set(edgeId, chain);
+  }
+
+  return { layers: out, segments, routes };
 }
 
 /**
  * Top-down layered layout: one layer per row, flowing downward, matching the
  * layered look of the hybrid network topology diagram. Each layer is centred on
  * a common content width so parents sit above their children.
+ *
+ * Node widths vary: a virtual routing lane is a sliver, not a full box.
  */
 function layoutLayers(layers: Array<{ title: string; nodes: TopologyNode[] }>): {
   nodes: TopologyNode[];
@@ -112,41 +325,130 @@ function layoutLayers(layers: Array<{ title: string; nodes: TopologyNode[] }>): 
   width: number;
   height: number;
 } {
-  const widest = Math.max(1, ...layers.map((l) => l.nodes.length));
-  const contentW = widest * NODE_W + (widest - 1) * COL_GAP;
+  const widthOf = (n: TopologyNode) => (n.virtual ? VIRTUAL_W : NODE_W);
+  const rowWidth = (ns: TopologyNode[]) =>
+    ns.reduce((sum, n) => sum + widthOf(n), 0) + Math.max(ns.length - 1, 0) * COL_GAP;
+
+  const contentW = Math.max(NODE_W, ...layers.map((l) => rowWidth(l.nodes)));
+  const originX = PAD_X + LABEL_GUTTER;
 
   const placed: TopologyNode[] = [];
   const rows: TopologyLayer[] = [];
   let y = PAD_Y;
 
   for (const layer of layers) {
-    const n = layer.nodes.length;
-    const rowW = n * NODE_W + Math.max(n - 1, 0) * COL_GAP;
-    const startX = PAD_X + (contentW - rowW) / 2;
-    rows.push({ title: layer.title, y });
+    const startX = originX + (contentW - rowWidth(layer.nodes)) / 2;
     const nodeY = y + LAYER_LABEL_H;
-    layer.nodes.forEach((node, i) => {
-      placed.push({ ...node, x: startX + i * (NODE_W + COL_GAP), y: nodeY });
-    });
+    rows.push({ title: layer.title, y, bandY: nodeY - 8, bandH: NODE_H + 16 });
+    let x = startX;
+    for (const node of layer.nodes) {
+      placed.push({ ...node, x, y: nodeY, w: widthOf(node) });
+      x += widthOf(node) + COL_GAP;
+    }
     y = nodeY + NODE_H + LAYER_GAP;
   }
 
   return {
     nodes: placed,
     rows,
-    width: PAD_X * 2 + contentW,
+    width: originX + contentW + PAD_X,
     height: y - LAYER_GAP + PAD_Y,
   };
 }
 
-/** Vertical cubic connector: leaves the bottom of `from`, enters the top of `to`. */
-function edgePath(from: TopologyNode, to: TopologyNode): string {
-  const x1 = (from.x ?? 0) + NODE_W / 2;
+/**
+ * Vertical cubic connector: leaves the bottom of `from`, enters the top of
+ * `to`. `x1`/`x2` are port positions rather than node midpoints — with n:n
+ * edges a shared midpoint turns every hub node into an unreadable starburst.
+ */
+function edgePath(
+  from: TopologyNode,
+  to: TopologyNode,
+  x1: number,
+  x2: number,
+  waypoints: TopologyNode[] = [],
+): string {
   const y1 = (from.y ?? 0) + NODE_H;
-  const x2 = (to.x ?? 0) + NODE_W / 2;
   const y2 = to.y ?? 0;
-  const my = (y1 + y2) / 2;
-  return `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
+  if (!waypoints.length) {
+    const my = (y1 + y2) / 2;
+    return `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
+  }
+  // Long edge. All sideways movement happens in the gap *between* layers; the
+  // edge then drops straight down its reserved lane. Curving across the band
+  // instead would sweep the line over the very nodes the lane exists to avoid.
+  type Pt = { x: number; y: number; straight?: boolean };
+  const pts: Pt[] = [{ x: x1, y: y1 }];
+  for (const w of waypoints) {
+    const wx = (w.x ?? 0) + (w.w ?? VIRTUAL_W) / 2;
+    pts.push({ x: wx, y: w.y ?? 0 });
+    // Vertical pass-through of the band, drawn as a line, not a curve.
+    pts.push({ x: wx, y: (w.y ?? 0) + NODE_H, straight: true });
+  }
+  pts.push({ x: x2, y: y2 });
+
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length; i += 1) {
+    const prev = pts[i - 1];
+    const cur = pts[i];
+    if (cur.straight) {
+      d += ` L ${cur.x} ${cur.y}`;
+    } else {
+      const my = (prev.y + cur.y) / 2;
+      d += ` C ${prev.x} ${my}, ${cur.x} ${my}, ${cur.x} ${cur.y}`;
+    }
+  }
+  return d;
+}
+
+/**
+ * Spread each node's edges across its width instead of stacking them on the
+ * midpoint. Outgoing ports are ordered by where the edge is heading and
+ * incoming ports by where it came from, so ports and edges run in the same
+ * left-to-right order and sibling edges stay parallel instead of braiding.
+ */
+function assignPorts(
+  edges: TopologyEdge[],
+  nodeById: Map<string, TopologyNode>,
+): { out: Map<string, number>; in: Map<string, number> } {
+  const out = new Map<string, number>();
+  const inc = new Map<string, number>();
+  const group = (key: (e: TopologyEdge) => string, other: (e: TopologyEdge) => string) => {
+    const buckets = new Map<string, TopologyEdge[]>();
+    for (const e of edges) {
+      const k = key(e);
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k)!.push(e);
+    }
+    return { buckets, other };
+  };
+  const place = (
+    buckets: Map<string, TopologyEdge[]>,
+    other: (e: TopologyEdge) => string,
+    target: Map<string, number>,
+  ) => {
+    for (const [nodeId, group_] of buckets) {
+      const self = nodeById.get(nodeId);
+      if (!self) continue;
+      const sorted = group_
+        .slice()
+        .sort(
+          (a, b) =>
+            ((nodeById.get(other(a))?.x ?? 0) - (nodeById.get(other(b))?.x ?? 0)) ||
+            a.id.localeCompare(b.id),
+        );
+      const usable = (self.w ?? NODE_W) - PORT_INSET * 2;
+      sorted.forEach((e, i) => {
+        const t = sorted.length === 1 ? 0.5 : (i + 0.5) / sorted.length;
+        target.set(e.id, (self.x ?? 0) + PORT_INSET + usable * t);
+      });
+    }
+  };
+  const o = group((e) => e.from, (e) => e.to);
+  place(o.buckets, o.other, out);
+  const i = group((e) => e.to, (e) => e.from);
+  place(i.buckets, i.other, inc);
+  return { out, in: inc };
 }
 
 /**
@@ -255,6 +557,9 @@ export function EntityTopology({
   const cloudVirtPerm = useCanListKind(permNs, 'CloudVirt', { enabled: filterByPermissions });
 
   const [zoom, setZoom] = useState(1);
+  // Hovered/focused node. Dense n:n graphs are only readable one neighbourhood
+  // at a time, so pointing at a node mutes everything it does not touch.
+  const [focusId, setFocusId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const graph = useMemo(() => {
@@ -533,22 +838,69 @@ export function EntityTopology({
           ]
     ).filter((l) => l.nodes.length > 0);
 
-    const { nodes, rows, width, height } = layoutLayers(layers);
-    const placedByKey = new Map(nodes.map((n) => [n.id, n]));
+    // Only edges between nodes that survived pruning can inform the ordering.
+    const live = new Set(layers.flatMap((l) => l.nodes.map((n) => n.id)));
+    const liveEdges = edgePairs.filter((ep) => live.has(ep.from) && live.has(ep.to));
+
+    // Dedupe before routing so a repeated pair does not reserve two lanes.
+    const uniquePairs: Array<{ from: string; to: string; failed?: boolean }> = [];
+    const pairSeen = new Set<string>();
+    for (const ep of liveEdges) {
+      const id = `${ep.from}->${ep.to}`;
+      if (pairSeen.has(id)) continue;
+      pairSeen.add(id);
+      uniquePairs.push(ep);
+    }
+
+    // Long edges get routing lanes first, then the whole augmented graph —
+    // real nodes and lanes together — goes through crossing reduction.
+    const withLanes = insertVirtualNodes(layers, uniquePairs);
+    const ordered = reduceCrossings(withLanes.layers, withLanes.segments);
+    const { nodes: allPlaced, rows, width, height } = layoutLayers(ordered);
+    const placedByKey = new Map(allPlaced.map((n) => [n.id, n]));
+    // Virtual lanes exist only to steer the routing; they are never drawn.
+    const nodes = allPlaced.filter((n) => !n.virtual);
 
     const edges: TopologyEdge[] = [];
-    const seen = new Set<string>();
-    for (const ep of edgePairs) {
+    for (const ep of uniquePairs) {
       const from = placedByKey.get(ep.from);
       const to = placedByKey.get(ep.to);
       if (!from || !to) continue;
-      const id = `${from.id}->${to.id}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      edges.push({ id, from: from.id, to: to.id, failed: ep.failed });
+      edges.push({ id: `${from.id}->${to.id}`, from: from.id, to: to.id, failed: ep.failed });
     }
 
-    return { nodes, edges, rows, width: Math.max(width, 480), height: Math.max(height, 200) };
+    const ports = assignPorts(edges, placedByKey);
+    const waypoints = new Map<string, TopologyNode[]>(
+      edges.map((e) => [
+        e.id,
+        (withLanes.routes.get(e.id) ?? [])
+          .map((vid) => placedByKey.get(vid))
+          .filter((n): n is TopologyNode => !!n),
+      ]),
+    );
+
+    // Adjacency drives the hover focus: in a dense n:n graph the only reliable
+    // way to read one resource's relationships is to mute everything else.
+    const neighbours = new Map<string, Set<string>>();
+    const touch = (a: string, b: string) => {
+      if (!neighbours.has(a)) neighbours.set(a, new Set());
+      neighbours.get(a)!.add(b);
+    };
+    for (const e of edges) {
+      touch(e.from, e.to);
+      touch(e.to, e.from);
+    }
+
+    return {
+      nodes,
+      edges,
+      rows,
+      ports,
+      waypoints,
+      neighbours,
+      width: Math.max(width, 480),
+      height: Math.max(height, 200),
+    };
   }, [
     entityNamespace,
     entityItems,
@@ -704,9 +1056,26 @@ export function EntityTopology({
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#c9190b" />
             </marker>
           </defs>
-          {/* Layer captions — the row labels of the top-down flow. */}
+          {/* Alternating bands: give each layer a readable horizontal lane. */}
+          {graph.rows.map((r, i) => (
+            <rect
+              key={`band-${r.title}`}
+              x={0}
+              y={r.bandY}
+              width={graph.width}
+              height={r.bandH}
+              className={i % 2 === 0 ? 'sc-topology-band' : 'sc-topology-band sc-topology-band--alt'}
+            />
+          ))}
+          {/* Layer captions, in their own gutter so they never sit over a node. */}
           {graph.rows.map((r) => (
-            <text key={r.title} x={PAD_X} y={r.y + 10} className="sc-topology-layer__title">
+            <text
+              key={r.title}
+              x={PAD_X}
+              y={r.bandY + r.bandH / 2}
+              dominantBaseline="middle"
+              className="sc-topology-layer__title"
+            >
               {r.title}
             </text>
           ))}
@@ -714,28 +1083,60 @@ export function EntityTopology({
             const from = nodeById.get(e.from);
             const to = nodeById.get(e.to);
             if (!from || !to) return null;
+            const x1 = graph.ports.out.get(e.id) ?? (from.x ?? 0) + NODE_W / 2;
+            const x2 = graph.ports.in.get(e.id) ?? (to.x ?? 0) + NODE_W / 2;
+            const related = !focusId || e.from === focusId || e.to === focusId;
             return (
               <path
                 key={e.id}
-                d={edgePath(from, to)}
-                className={e.failed ? 'sc-topology-edge sc-topology-edge--failed' : 'sc-topology-edge'}
+                d={edgePath(from, to, x1, x2, graph.waypoints.get(e.id) ?? [])}
+                className={[
+                  'sc-topology-edge',
+                  e.failed ? 'sc-topology-edge--failed' : '',
+                  focusId && related ? 'is-focused' : '',
+                  focusId && !related ? 'is-muted' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 markerEnd={e.failed ? 'url(#sc-arrow-failed)' : 'url(#sc-arrow)'}
               />
             );
           })}
-          {graph.nodes.map((n) => (
-            <g key={n.id} transform={`translate(${n.x}, ${n.y})`} className={`sc-topology-node sc-topology-node--${n.status}`}>
-              <title>{`${n.kind} ${n.label}${n.namespace ? ` (${n.namespace})` : ''} — ${n.status}`}</title>
-              <rect width={NODE_W} height={NODE_H} rx={3} ry={3} />
-              <StatusGlyph status={n.status} x={14} y={NODE_H / 2} />
-              <text x={26} y={19} className="sc-topology-node__kind">
-                {n.kind}
-              </text>
-              <text x={26} y={35} className="sc-topology-node__name">
-                {n.label.length > 16 ? `${n.label.slice(0, 15)}…` : n.label}
-              </text>
-            </g>
-          ))}
+          {graph.nodes.map((n) => {
+            const related =
+              !focusId || n.id === focusId || !!graph.neighbours.get(focusId)?.has(n.id);
+            return (
+              <g
+                key={n.id}
+                transform={`translate(${n.x}, ${n.y})`}
+                className={[
+                  'sc-topology-node',
+                  `sc-topology-node--${n.status}`,
+                  focusId === n.id ? 'is-focused' : '',
+                  focusId && !related ? 'is-muted' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                tabIndex={0}
+                role="button"
+                aria-label={`${n.kind} ${n.label}${n.namespace ? ` in ${n.namespace}` : ''}, ${n.status}`}
+                onMouseEnter={() => setFocusId(n.id)}
+                onMouseLeave={() => setFocusId(null)}
+                onFocus={() => setFocusId(n.id)}
+                onBlur={() => setFocusId(null)}
+              >
+                <title>{`${n.kind} ${n.label}${n.namespace ? ` (${n.namespace})` : ''} — ${n.status}`}</title>
+                <rect width={NODE_W} height={NODE_H} rx={3} ry={3} />
+                <StatusGlyph status={n.status} x={14} y={NODE_H / 2} />
+                <text x={26} y={19} className="sc-topology-node__kind">
+                  {n.kind}
+                </text>
+                <text x={26} y={35} className="sc-topology-node__name">
+                  {n.label.length > 16 ? `${n.label.slice(0, 15)}…` : n.label}
+                </text>
+              </g>
+            );
+          })}
         </svg>
       </div>
     </div>
